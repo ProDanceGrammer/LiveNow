@@ -29,14 +29,22 @@ class ActionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final runningSince = ref.watch(runningOccurrencesProvider).value?[action.id];
+
     final subtitleParts = <String>[
       if (action.priority != null) action.priority!,
       if (action.startAt != null) _formatWhen(action),
       if (action.estimatedMinutes != null) '${action.estimatedMinutes}m',
+      if (runningSince != null) 'Started ${_formatTime(runningSince)}',
     ];
 
     return ListTile(
-      leading: Icon(_iconFor(action.kind)),
+      leading: Icon(
+        runningSince != null ? Icons.play_circle_fill : _iconFor(action.kind),
+        color: runningSince != null
+            ? Theme.of(context).colorScheme.primary
+            : null,
+      ),
       title: Text(action.name),
       subtitle: subtitleParts.isEmpty ? null : Text(subtitleParts.join(' · ')),
       onTap: onTap,
@@ -91,6 +99,11 @@ class ActionTile extends ConsumerWidget {
     final date = '${start.year}-${_two(start.month)}-${_two(start.day)}';
     if (a.isAllDay) return date;
     return '$date ${_two(start.hour)}:${_two(start.minute)}';
+  }
+
+  String _formatTime(DateTime utc) {
+    final local = utc.toLocal();
+    return '${_two(local.hour)}:${_two(local.minute)}';
   }
 
   String _two(int n) => n.toString().padLeft(2, '0');

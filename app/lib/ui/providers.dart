@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../core/settings.dart';
+import '../core/time_codec.dart';
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
@@ -121,6 +122,24 @@ final successorsOfProvider = StreamProvider.autoDispose
         (rows) => rows.map((r) => r.readTable(db.actionsTable)).toList(),
       );
     });
+
+/// Actual start time (`action_occurrences.started_at`) of every action
+/// that's currently running (started but not yet finished), keyed by
+/// action id — lets a tile show "Started HH:mm" without opening the
+/// action, since Start doesn't touch the action's own scheduled time.
+final runningOccurrencesProvider = StreamProvider.autoDispose<Map<String, DateTime>>((
+  ref,
+) {
+  final db = ref.watch(databaseProvider);
+  final query = db.select(db.actionOccurrencesTable)
+    ..where((t) => t.finishedAt.isNull());
+  return query.watch().map((rows) {
+    return {
+      for (final r in rows)
+        if (dateTimeFromDb(r.startedAt) case final started?) r.actionId: started,
+    };
+  });
+});
 
 /// The metric ids currently linked to [actionId].
 final metricIdsOfProvider = StreamProvider.autoDispose
