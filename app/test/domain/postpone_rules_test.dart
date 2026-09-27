@@ -31,15 +31,17 @@ void main() {
       expect(next.endAt, istanbul(2024, 1, 5, 12, 30));
     });
 
-    test('an overdue action shifts from now instead of its old start', () {
+    test('shifts from the exact existing start even if it is overdue', () {
+      // e.g. started at 18:43 and never finished; +1 hour must become
+      // 19:43, not "now + 1 hour".
       final now = istanbul(2024, 1, 1, 11);
-      final current = ActionSchedule(startAt: istanbul(2023, 12, 31, 9));
+      final current = ActionSchedule(startAt: istanbul(2023, 12, 31, 18, 43));
       final next = applyPostponeRule(
         PostponeRule.plusOneHour,
         current,
         nowUtc: now,
       );
-      expect(next.startAt, istanbul(2024, 1, 1, 12));
+      expect(next.startAt, istanbul(2023, 12, 31, 19, 43));
       expect(next.endAt, isNull);
     });
 
@@ -167,7 +169,7 @@ void main() {
       expect(next.startAt, istanbul(2024, 1, 17, 9));
     });
 
-    test('an overdue habit moves 7 days from now', () {
+    test('an overdue habit still moves 7 days from its own last start', () {
       final now = istanbul(2024, 1, 8, 9);
       final current = ActionSchedule(startAt: istanbul(2023, 12, 1, 9));
       final next = applyPostponeRule(
@@ -175,7 +177,7 @@ void main() {
         current,
         nowUtc: now,
       );
-      expect(next.startAt, istanbul(2024, 1, 15, 9));
+      expect(next.startAt, istanbul(2023, 12, 8, 9));
     });
   });
 }

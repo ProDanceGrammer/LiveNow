@@ -118,11 +118,16 @@ class ActionService {
   }
 
   /// Starts (or resumes) timing an action: opens a new occurrence unless one
-  /// is already running. Always reopens a done/cancelled action first —
-  /// starting it means it's in progress, not finished — including when it's
-  /// a no-op because an occurrence is already running (an action can end up
-  /// "done" while still running if it was finished and then started again
-  /// from an old build; this self-heals that instead of getting stuck).
+  /// is already running, and sets `start_at` to now — that field is the one
+  /// place the UI shows/lets you postpone "the current time of this task",
+  /// so it needs to track reality once you've actually started, not just
+  /// whatever was scheduled beforehand. Any existing start/end duration is
+  /// preserved onto the new start. Always reopens a done/cancelled action
+  /// first — starting it means it's in progress, not finished — including
+  /// when it's a no-op because an occurrence is already running (an action
+  /// can end up "done" while still running if it was finished and then
+  /// started again from an old build; this self-heals that instead of
+  /// getting stuck).
   Future<void> start(String actionId) async {
     final nowText = dateTimeToDb(DateTime.now())!;
 
@@ -144,6 +149,26 @@ class ActionService {
               .getSingleOrNull();
       if (alreadyRunning != null) return;
 
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final oldStart = dateTimeFromDb(action.startAt);
+      final oldEnd = dateTimeFromDb(action.endAt);
+      final duration = (oldStart != null && oldEnd != null)
+          ? oldEnd.difference(oldStart)
+          : null;
+      final newStart = DateTime.now().toUtc();
+      final newEnd = duration == null ? null : newStart.add(duration);
+
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(
+          startAt: Value(dateTimeToDb(newStart)),
+          endAt: Value(dateTimeToDb(newEnd)),
+        ),
+      );
+
       await db
           .into(db.actionOccurrencesTable)
           .insert(
@@ -156,8 +181,9 @@ class ActionService {
     });
   }
 
-  /// Finishes the action's running occurrence, if any, and marks tasks (but
-  /// not habits/bad habits) done.
+  /// Finishes the action's running occurrence, if any, sets `end_at` to now
+  /// (same reasoning as `start_at` in [start]), and marks tasks (but not
+  /// habits/bad habits) done.
   Future<void> finish(String actionId) async {
     final nowText = dateTimeToDb(DateTime.now())!;
 
@@ -182,6 +208,7 @@ class ActionService {
         ActionsTableCompanion(
           status: action.kind == 'task' ? const Value('done') : const Value.absent(),
           completedAt: action.kind == 'task' ? Value(nowText) : const Value.absent(),
+          endAt: Value(nowText),
           updatedAt: Value(nowText),
         ),
       );

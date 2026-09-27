@@ -3,69 +3,92 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/queries.dart';
 import '../edit_action.dart';
-import 'action_menu_button.dart';
-import 'action_tile.dart' show formatScheduledWhen, iconForAction, twoDigits;
+import '../providers.dart';
+import 'action_tile.dart' show iconForAction, twoDigits;
+import 'quick_action_bar.dart';
 
-/// One card on the Current Actions board. A done card shows the actual
-/// started → finished time (from `action_occurrences`); a not-done card
-/// shows "Started HH:mm" while running, otherwise the scheduled time, if
-/// any is set.
+/// One card on the Current Actions board: name, its current time range
+/// (`start_at` -> `end_at` — kept in sync with the real started/finished
+/// time by Start/Finish, so there's a single time to show and to postpone,
+/// not a separate "scheduled" one), and the quick-action buttons inline —
+/// no menu to open first.
 class ActionCard extends ConsumerWidget {
-  final CurrentActionCard card;
+  final ActionListItem action;
 
-  const ActionCard({super.key, required this.card});
+  const ActionCard({super.key, required this.action});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final action = card.action;
-    final isRunning =
-        card.occurrenceStartedAt != null && card.occurrenceFinishedAt == null;
-    final timeLine = _timeLine();
+    final isRunning = ref.watch(runningOccurrencesProvider).value?.containsKey(action.id) ?? false;
+    final timeLine = _formatTimeRange(action);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: ListTile(
-        leading: Icon(
-          iconForAction(action, isRunning),
-          color: isRunning ? Theme.of(context).colorScheme.primary : null,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InkWell(
+              onTap: () => openActionEditor(context, ref, action.id),
+              child: Row(
+                children: [
+                  Icon(
+                    iconForAction(action, isRunning),
+                    size: 20,
+                    color: isRunning
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      action.name,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (timeLine != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 28, top: 2),
+                child: Text(
+                  timeLine,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.secondary,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 6),
+            QuickActionBar(actionId: action.id),
+          ],
         ),
-        title: Text(action.name),
-        subtitle: timeLine == null ? null : Text(timeLine),
-        onTap: () => openActionEditor(context, ref, action.id),
-        trailing: ActionMenuButton(actionId: action.id),
       ),
     );
   }
 
-  String? _timeLine() {
-    final started = card.occurrenceStartedAt;
-    if (started != null) {
-      return _formatRange(started, card.occurrenceFinishedAt);
-    }
-    if (card.action.startAt != null) {
-      return formatScheduledWhen(card.action);
-    }
-    return null;
-  }
-
-  String _formatRange(DateTime startUtc, DateTime? finishedUtc) {
-    final start = startUtc.toLocal();
+  String? _formatTimeRange(ActionListItem a) {
+    if (a.startAt == null) return null;
+    final start = a.startAt!.toLocal();
     final now = DateTime.now();
     final startStr = _sameDay(start, now)
         ? _time(start)
         : '${_date(start)} ${_time(start)}';
-    if (finishedUtc == null) return '$startStr → running';
+    if (a.endAt == null) return startStr;
 
-    final finished = finishedUtc.toLocal();
-    final finishedStr = _sameDay(finished, start)
-        ? _time(finished)
-        : '${_date(finished)} ${_time(finished)}';
-    return '$startStr → $finishedStr';
+    final end = a.endAt!.toLocal();
+    final endStr = _sameDay(end, start)
+        ? _time(end)
+        : '${_date(end)} ${_time(end)}';
+    return '$startStr → $endStr';
   }
 
   bool _sameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  String _date(DateTime d) => '${d.year}-${twoDigits(d.month)}-${twoDigits(d.day)}';
+  String _date(DateTime d) =>
+      '${d.year}-${twoDigits(d.month)}-${twoDigits(d.day)}';
   String _time(DateTime d) => '${twoDigits(d.hour)}:${twoDigits(d.minute)}';
 }

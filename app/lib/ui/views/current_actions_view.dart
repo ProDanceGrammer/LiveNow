@@ -41,7 +41,7 @@ class CurrentActionsView extends ConsumerWidget {
 
 class _BoardColumn extends StatelessWidget {
   final String title;
-  final AsyncValue<List<CurrentActionCard>> asyncCards;
+  final AsyncValue<List<ActionListItem>> asyncCards;
   final String emptyMessage;
 
   const _BoardColumn({
@@ -78,7 +78,8 @@ class _BoardColumn extends StatelessWidget {
                 ? Center(child: Text(emptyMessage))
                 : ListView.builder(
                     itemCount: cards.length,
-                    itemBuilder: (context, i) => ActionCard(card: cards[i]),
+                    itemBuilder: (context, i) =>
+                        ActionCard(action: cards[i]),
                   ),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (e, _) => Center(child: Text('Error: $e')),

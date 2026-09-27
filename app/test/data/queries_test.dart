@@ -152,14 +152,14 @@ void main() {
       await actions.finish(done);
 
       final result = await queries.watchCurrentNotDone().first;
-      final ids = result.map((c) => c.action.id).toList();
+      final ids = result.map((a) => a.id).toList();
 
       expect(ids, isNot(contains(done)));
       expect(ids, [sooner, later, noDeadline]);
     });
 
     test(
-      'watchCurrentDone lists done actions with their actual start/finish time, most recent first',
+      'watchCurrentDone lists done actions with their real start/finish time, most recent finish first',
       () async {
         final open = await actions.createAction(name: 'Still open');
 
@@ -172,15 +172,15 @@ void main() {
         await actions.finish(secondDone);
 
         final result = await queries.watchCurrentDone().first;
-        final ids = result.map((c) => c.action.id).toList();
+        final ids = result.map((a) => a.id).toList();
 
         expect(ids, isNot(contains(open)));
         // Whichever finished last (secondDone) sorts first.
         expect(ids.first, secondDone);
 
-        final card = result.firstWhere((c) => c.action.id == firstDone);
-        expect(card.occurrenceStartedAt, isNotNull);
-        expect(card.occurrenceFinishedAt, isNotNull);
+        final item = result.firstWhere((a) => a.id == firstDone);
+        expect(item.startAt, isNotNull);
+        expect(item.endAt, isNotNull);
       },
     );
 
@@ -189,10 +189,10 @@ void main() {
       await actions.start(running);
 
       final result = await queries.watchCurrentNotDone().first;
-      final card = result.firstWhere((c) => c.action.id == running);
+      final item = result.firstWhere((a) => a.id == running);
 
-      expect(card.occurrenceStartedAt, isNotNull);
-      expect(card.occurrenceFinishedAt, isNull);
+      expect(item.startAt, isNotNull);
+      expect(item.endAt, isNull);
     });
   });
 }

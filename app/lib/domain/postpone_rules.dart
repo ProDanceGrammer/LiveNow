@@ -89,17 +89,17 @@ ActionSchedule applyPostponeRule(
   return ActionSchedule(startAt: newStart, endAt: newEnd);
 }
 
-/// For the plain relative shifts (+1h, +5h, next week): if the action's
-/// current start is still in the future, shift it further out; if it's
-/// overdue (in the past), shift starts counting from now instead.
+/// For the plain relative shifts (+1h, +5h, next week): always shift from
+/// the action's existing start time, whatever it is — e.g. started at
+/// 18:43, +1 hour becomes 19:43, full stop. Only an action with no start
+/// at all falls back to "now" (there's nothing else to shift from).
 tz.TZDateTime _relativeBase(
   DateTime? startAtUtc,
   tz.TZDateTime now,
   tz.Location location,
 ) {
   if (startAtUtc == null) return now;
-  final startLocal = tz.TZDateTime.from(startAtUtc, location);
-  return startLocal.isAfter(now) ? startLocal : now;
+  return tz.TZDateTime.from(startAtUtc, location);
 }
 
 tz.TZDateTime _atHourOnDate(tz.TZDateTime date, int hour) {

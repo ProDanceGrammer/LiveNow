@@ -4,6 +4,7 @@ import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
+import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
@@ -50,6 +51,79 @@ void main() {
     )..where((t) => t.actionId.equals(actionId))).get();
     expect(running, hasLength(1));
   });
+
+  test('start sets start_at to the real start time, not just the occurrence', () async {
+    final actionId = await service.createAction(name: 'Unscheduled task');
+    final before = DateTime.now().toUtc();
+    await service.start(actionId);
+    final after = DateTime.now().toUtc();
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final startAt = DateTime.parse(action.startAt!);
+    expect(startAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
+    expect(startAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
+  });
+
+  test('start carries an existing duration onto the new start', () async {
+    final actionId = await service.createAction(
+      name: 'Scheduled meeting',
+      startAt: DateTime.utc(2024, 1, 1, 9),
+      endAt: DateTime.utc(2024, 1, 1, 10, 30),
+    );
+    await service.start(actionId);
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final startAt = DateTime.parse(action.startAt!);
+    final endAt = DateTime.parse(action.endAt!);
+    expect(endAt.difference(startAt), const Duration(hours: 1, minutes: 30));
+  });
+
+  test('finish sets end_at to the real finish time', () async {
+    final actionId = await service.createAction(name: 'Quick task');
+    await service.start(actionId);
+    final before = DateTime.now().toUtc();
+    await service.finish(actionId);
+    final after = DateTime.now().toUtc();
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final endAt = DateTime.parse(action.endAt!);
+    expect(endAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
+    expect(endAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
+  });
+
+  test(
+    'postponing a started action shifts from its real start, e.g. 18:43 + 1h = 19:43',
+    () async {
+      final actionId = await service.createAction(name: 'Deep work');
+      await service.start(actionId);
+
+      // Force start_at to a known value, as if it had actually been
+      // started at 18:43 (independent of whatever time the test runs at).
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(
+          startAt: Value(dateTimeToDb(DateTime.utc(2024, 1, 1, 15, 43))!), // 18:43 Istanbul
+        ),
+      );
+
+      await service.postpone(actionId, PostponeRule.plusOneHour);
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      expect(
+        dateTimeFromDb(action.startAt),
+        DateTime.utc(2024, 1, 1, 16, 43),
+      );
+    },
+  );
 
   test('finish on a task marks it done and closes the occurrence', () async {
     final actionId = await service.createAction(name: 'Pay electricity bill');

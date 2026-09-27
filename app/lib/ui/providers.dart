@@ -44,11 +44,11 @@ final habitsProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchHabits(),
 );
 
-final currentNotDoneProvider = StreamProvider.autoDispose<List<CurrentActionCard>>(
+final currentNotDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchCurrentNotDone(),
 );
 
-final currentDoneProvider = StreamProvider.autoDispose<List<CurrentActionCard>>(
+final currentDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchCurrentDone(),
 );
 
