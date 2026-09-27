@@ -44,6 +44,14 @@ final habitsProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchHabits(),
 );
 
+final currentNotDoneProvider = StreamProvider.autoDispose<List<CurrentActionCard>>(
+  (ref) => ref.watch(viewQueriesProvider).watchCurrentNotDone(),
+);
+
+final currentDoneProvider = StreamProvider.autoDispose<List<CurrentActionCard>>(
+  (ref) => ref.watch(viewQueriesProvider).watchCurrentDone(),
+);
+
 /// The Monday (UTC instant of Istanbul midnight) that starts the currently
 /// viewed calendar week.
 final calendarWeekStartProvider = StateProvider<DateTime>((ref) {

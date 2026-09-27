@@ -10,7 +10,7 @@ import 'package:livenow/ui/providers.dart';
 void main() {
   setUpAll(initPostponeTimeZoneData);
 
-  testWidgets('home shell shows all five views and opens the new-action dialog', (
+  testWidgets('home shell shows all destinations and opens the new-action dialog', (
     tester,
   ) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -24,11 +24,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Operational'), findsWidgets);
+    // Current Actions is the default view.
+    expect(find.text('Current Actions'), findsOneWidget);
+    expect(find.text('Current'), findsOneWidget);
+    expect(find.text('Operational'), findsOneWidget);
     expect(find.text('TODO'), findsOneWidget);
     expect(find.text('Most Important'), findsOneWidget);
     expect(find.text('Calendar'), findsOneWidget);
     expect(find.text('Habits'), findsOneWidget);
+    expect(find.text('All'), findsOneWidget);
+    expect(find.text('Metrics'), findsOneWidget);
+    expect(find.text('Templates'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();

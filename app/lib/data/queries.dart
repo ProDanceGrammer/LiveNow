@@ -57,6 +57,38 @@ class ActionListItem {
   );
 }
 
+/// A card on the Current Actions board: an action plus its most recent
+/// occurrence's actual start/finish time (as opposed to
+/// [ActionListItem.startAt]/`endAt`, which is only the *scheduled* time).
+class CurrentActionCard {
+  final ActionListItem action;
+  final DateTime? occurrenceStartedAt;
+  final DateTime? occurrenceFinishedAt;
+
+  const CurrentActionCard({
+    required this.action,
+    this.occurrenceStartedAt,
+    this.occurrenceFinishedAt,
+  });
+
+  factory CurrentActionCard.fromQueryRow(QueryRow row) => CurrentActionCard(
+    action: ActionListItem.fromQueryRow(row),
+    occurrenceStartedAt: dateTimeFromDb(
+      row.readNullable<String>('occ_started_at'),
+    ),
+    occurrenceFinishedAt: dateTimeFromDb(
+      row.readNullable<String>('occ_finished_at'),
+    ),
+  );
+}
+
+const _latestOccurrenceColumns = '''
+  (SELECT started_at FROM action_occurrences o
+   WHERE o.action_id = a.id ORDER BY started_at DESC LIMIT 1) AS occ_started_at,
+  (SELECT finished_at FROM action_occurrences o
+   WHERE o.action_id = a.id ORDER BY started_at DESC LIMIT 1) AS occ_finished_at
+''';
+
 /// Live (auto-refreshing) queries backing the five MVP views. Assumes
 /// [initPostponeTimeZoneData] (see `domain/postpone_rules.dart`) has already
 /// run at app startup.
@@ -190,5 +222,39 @@ class ViewQueries {
     return query.watch().map(
       (rows) => rows.map(ActionListItem.fromRow).toList(),
     );
+  }
+
+  /// Current Actions board, right column: everything not finished yet
+  /// (open, any kind), nearest deadline first (unscheduled last).
+  Stream<List<CurrentActionCard>> watchCurrentNotDone() {
+    return db
+        .customSelect(
+          '''
+          SELECT a.*, $_latestOccurrenceColumns
+          FROM actions a
+          WHERE a.status = 'open'
+          ORDER BY (a.start_at IS NULL) ASC, a.start_at ASC
+          ''',
+          readsFrom: {db.actionsTable, db.actionOccurrencesTable},
+        )
+        .watch()
+        .map((rows) => rows.map(CurrentActionCard.fromQueryRow).toList());
+  }
+
+  /// Current Actions board, left column: done actions, most recently
+  /// finished first.
+  Stream<List<CurrentActionCard>> watchCurrentDone() {
+    return db
+        .customSelect(
+          '''
+          SELECT a.*, $_latestOccurrenceColumns
+          FROM actions a
+          WHERE a.status = 'done'
+          ORDER BY (occ_finished_at IS NULL) ASC, occ_finished_at DESC
+          ''',
+          readsFrom: {db.actionsTable, db.actionOccurrencesTable},
+        )
+        .watch()
+        .map((rows) => rows.map(CurrentActionCard.fromQueryRow).toList());
   }
 }

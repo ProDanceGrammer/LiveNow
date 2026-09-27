@@ -5,6 +5,8 @@ import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/dependency_service.dart';
 import '../providers.dart';
+import 'action_menu_button.dart';
+import 'action_tile.dart' show statusLabel;
 
 const _priorities = [
   'A1',
@@ -111,160 +113,197 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                 ),
                 if (_isEditing) ...[
                   const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Text(
+                        statusLabel(widget.existing!.status),
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const Spacer(),
+                      ActionMenuButton(actionId: widget.existing!.id),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
                   _TimeTrackingSection(actionId: widget.existing!.id),
                 ],
                 const SizedBox(height: 12),
-                Row(
+                ExpansionTile(
+                  title: const Text('Manual parameters'),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
                   children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _kind,
-                        decoration: const InputDecoration(labelText: 'Kind'),
-                        items: const [
-                          DropdownMenuItem(value: 'task', child: Text('Task')),
-                          DropdownMenuItem(
-                            value: 'habit',
-                            child: Text('Habit'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'bad_habit',
-                            child: Text('Bad habit'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _kind = v!),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        initialValue: _priority,
-                        decoration: const InputDecoration(
-                          labelText: 'Priority',
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: null,
-                            child: Text('None'),
-                          ),
-                          for (final p in _priorities)
-                            DropdownMenuItem(value: p, child: Text(p)),
-                        ],
-                        onChanged: (v) => setState(() => _priority = v),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _postponeFlex,
-                        decoration: const InputDecoration(
-                          labelText: 'Postpone flexibility',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'flexible',
-                            child: Text('Flexible'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'hard',
-                            child: Text('Hard'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'impossible',
-                            child: Text('Impossible'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _postponeFlex = v!),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        initialValue: _depthLevel,
-                        decoration: const InputDecoration(
-                          labelText: 'Depth (learning)',
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: null, child: Text('N/A')),
-                          DropdownMenuItem(
-                            value: 'easy',
-                            child: Text('Easy'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'medium',
-                            child: Text('Medium'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'deep',
-                            child: Text('Deep'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _depthLevel = v),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('All day'),
-                  value: _isAllDay,
-                  onChanged: (v) => setState(() => _isAllDay = v),
-                ),
-                _DateTimeField(
-                  label: 'Scheduled start',
-                  value: _startAt,
-                  includeTime: !_isAllDay,
-                  onChanged: (v) => setState(() => _startAt = v),
-                ),
-                const SizedBox(height: 4),
-                _DateTimeField(
-                  label: 'Scheduled end',
-                  value: _endAt,
-                  includeTime: !_isAllDay,
-                  onChanged: (v) => setState(() => _endAt = v),
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _estimatedMinutesController,
-                  decoration: const InputDecoration(
-                    labelText: 'Estimated minutes',
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 16),
-                Text('Metrics', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                metricsAsync.when(
-                  data: (metrics) => metrics.isEmpty
-                      ? const Text('No metrics yet.')
-                      : Wrap(
-                          spacing: 8,
-                          children: [
-                            for (final m in metrics)
-                              FilterChip(
-                                label: Text(m.name),
-                                selected: _selectedMetricIds.contains(m.id),
-                                onSelected: (selected) => setState(() {
-                                  if (selected) {
-                                    _selectedMetricIds.add(m.id);
-                                  } else {
-                                    _selectedMetricIds.remove(m.id);
-                                  }
-                                }),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _kind,
+                            decoration: const InputDecoration(
+                              labelText: 'Kind',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'task',
+                                child: Text('Task'),
                               ),
-                          ],
+                              DropdownMenuItem(
+                                value: 'habit',
+                                child: Text('Habit'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'bad_habit',
+                                child: Text('Bad habit'),
+                              ),
+                            ],
+                            onChanged: (v) => setState(() => _kind = v!),
+                          ),
                         ),
-                  loading: () => const LinearProgressIndicator(),
-                  error: (e, _) => Text('Error: $e'),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DropdownButtonFormField<String?>(
+                            initialValue: _priority,
+                            decoration: const InputDecoration(
+                              labelText: 'Priority',
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: null,
+                                child: Text('None'),
+                              ),
+                              for (final p in _priorities)
+                                DropdownMenuItem(value: p, child: Text(p)),
+                            ],
+                            onChanged: (v) => setState(() => _priority = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _postponeFlex,
+                            decoration: const InputDecoration(
+                              labelText: 'Postpone flexibility',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'flexible',
+                                child: Text('Flexible'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'hard',
+                                child: Text('Hard'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'impossible',
+                                child: Text('Impossible'),
+                              ),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => _postponeFlex = v!),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: DropdownButtonFormField<String?>(
+                            initialValue: _depthLevel,
+                            decoration: const InputDecoration(
+                              labelText: 'Depth (learning)',
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: null,
+                                child: Text('N/A'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'easy',
+                                child: Text('Easy'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'medium',
+                                child: Text('Medium'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'deep',
+                                child: Text('Deep'),
+                              ),
+                            ],
+                            onChanged: (v) => setState(() => _depthLevel = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('All day'),
+                      value: _isAllDay,
+                      onChanged: (v) => setState(() => _isAllDay = v),
+                    ),
+                    _DateTimeField(
+                      label: 'Scheduled start',
+                      value: _startAt,
+                      includeTime: !_isAllDay,
+                      onChanged: (v) => setState(() => _startAt = v),
+                    ),
+                    const SizedBox(height: 4),
+                    _DateTimeField(
+                      label: 'Scheduled end',
+                      value: _endAt,
+                      includeTime: !_isAllDay,
+                      onChanged: (v) => setState(() => _endAt = v),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _estimatedMinutesController,
+                      decoration: const InputDecoration(
+                        labelText: 'Estimated minutes',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Metrics',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    metricsAsync.when(
+                      data: (metrics) => metrics.isEmpty
+                          ? const Text('No metrics yet.')
+                          : Wrap(
+                              spacing: 8,
+                              children: [
+                                for (final m in metrics)
+                                  FilterChip(
+                                    label: Text(m.name),
+                                    selected: _selectedMetricIds.contains(
+                                      m.id,
+                                    ),
+                                    onSelected: (selected) => setState(() {
+                                      if (selected) {
+                                        _selectedMetricIds.add(m.id);
+                                      } else {
+                                        _selectedMetricIds.remove(m.id);
+                                      }
+                                    }),
+                                  ),
+                              ],
+                            ),
+                      loading: () => const LinearProgressIndicator(),
+                      error: (e, _) => Text('Error: $e'),
+                    ),
+                  ],
                 ),
-                if (_isEditing) ...[
-                  const SizedBox(height: 16),
-                  _DependencySection(actionId: widget.existing!.id),
-                ],
+                if (_isEditing)
+                  ExpansionTile(
+                    title: const Text('Connected actions'),
+                    tilePadding: EdgeInsets.zero,
+                    initiallyExpanded: true,
+                    children: [
+                      _DependencySection(actionId: widget.existing!.id),
+                    ],
+                  ),
               ],
             ),
           ),

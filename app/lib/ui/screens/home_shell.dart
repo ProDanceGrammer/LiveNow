@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../views/all_actions_view.dart';
 import '../views/calendar_week_view.dart';
+import '../views/current_actions_view.dart';
 import '../views/habits_view.dart';
 import '../views/most_important_view.dart';
 import '../views/operational_view.dart';
@@ -21,6 +22,10 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   static const _destinations = [
+    NavigationRailDestination(
+      icon: Icon(Icons.view_column),
+      label: Text('Current'),
+    ),
     NavigationRailDestination(
       icon: Icon(Icons.bolt),
       label: Text('Operational'),
@@ -53,6 +58,7 @@ class _HomeShellState extends State<HomeShell> {
   ];
 
   static const _titles = [
+    'Current Actions',
     'Operational',
     'TODO',
     'Most Important to Schedule',
@@ -64,6 +70,7 @@ class _HomeShellState extends State<HomeShell> {
   ];
 
   static const _views = [
+    CurrentActionsView(),
     OperationalView(),
     TodoView(),
     MostImportantView(),
@@ -80,20 +87,34 @@ class _HomeShellState extends State<HomeShell> {
       appBar: AppBar(title: Text(_titles[_index])),
       body: Row(
         children: [
-          NavigationRail(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => setState(() => _index = i),
-            labelType: NavigationRailLabelType.all,
-            destinations: _destinations,
+          // Scrollable so the rail never overflows if there isn't enough
+          // vertical space for every destination (e.g. a short window).
+          SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight:
+                    MediaQuery.sizeOf(context).height -
+                    MediaQuery.paddingOf(context).vertical -
+                    kToolbarHeight,
+              ),
+              child: IntrinsicHeight(
+                child: NavigationRail(
+                  selectedIndex: _index,
+                  onDestinationSelected: (i) => setState(() => _index = i),
+                  labelType: NavigationRailLabelType.all,
+                  destinations: _destinations,
+                ),
+              ),
+            ),
           ),
           const VerticalDivider(width: 1),
           Expanded(child: _views[_index]),
         ],
       ),
-      // Metrics and Templates (index 6, 7) are their own Scaffolds with
-      // their own FAB for adding a metric/template; only the six action
-      // views (including All) share this one.
-      floatingActionButton: _index < 6
+      // Metrics and Templates (index 7, 8) are their own Scaffolds with
+      // their own FAB for adding a metric/template; only the seven action
+      // views (including Current and All) share this one.
+      floatingActionButton: _index < 7
           ? FloatingActionButton(
               onPressed: () => ActionEditorDialog.show(context),
               tooltip: 'New action',

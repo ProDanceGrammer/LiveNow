@@ -136,4 +136,63 @@ void main() {
     expect(ids, isNot(contains(task)));
     expect(ids, isNot(contains(doneHabit)));
   });
+
+  group('Current Actions board', () {
+    test('watchCurrentNotDone lists open actions, nearest deadline first', () async {
+      final noDeadline = await actions.createAction(name: 'Someday');
+      final later = await actions.createAction(
+        name: 'Later',
+        startAt: DateTime.utc(2024, 1, 10),
+      );
+      final sooner = await actions.createAction(
+        name: 'Sooner',
+        startAt: DateTime.utc(2024, 1, 2),
+      );
+      final done = await actions.createAction(name: 'Already done');
+      await actions.finish(done);
+
+      final result = await queries.watchCurrentNotDone().first;
+      final ids = result.map((c) => c.action.id).toList();
+
+      expect(ids, isNot(contains(done)));
+      expect(ids, [sooner, later, noDeadline]);
+    });
+
+    test(
+      'watchCurrentDone lists done actions with their actual start/finish time, most recent first',
+      () async {
+        final open = await actions.createAction(name: 'Still open');
+
+        final firstDone = await actions.createAction(name: 'First done');
+        await actions.start(firstDone);
+        await actions.finish(firstDone);
+
+        final secondDone = await actions.createAction(name: 'Second done');
+        await actions.start(secondDone);
+        await actions.finish(secondDone);
+
+        final result = await queries.watchCurrentDone().first;
+        final ids = result.map((c) => c.action.id).toList();
+
+        expect(ids, isNot(contains(open)));
+        // Whichever finished last (secondDone) sorts first.
+        expect(ids.first, secondDone);
+
+        final card = result.firstWhere((c) => c.action.id == firstDone);
+        expect(card.occurrenceStartedAt, isNotNull);
+        expect(card.occurrenceFinishedAt, isNotNull);
+      },
+    );
+
+    test('watchCurrentNotDone shows a running action as started, not finished', () async {
+      final running = await actions.createAction(name: 'In progress');
+      await actions.start(running);
+
+      final result = await queries.watchCurrentNotDone().first;
+      final card = result.firstWhere((c) => c.action.id == running);
+
+      expect(card.occurrenceStartedAt, isNotNull);
+      expect(card.occurrenceFinishedAt, isNull);
+    });
+  });
 }
