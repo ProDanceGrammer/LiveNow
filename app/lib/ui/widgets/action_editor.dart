@@ -109,6 +109,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
+                if (_isEditing) ...[
+                  const SizedBox(height: 12),
+                  _TimeTrackingSection(actionId: widget.existing!.id),
+                ],
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -211,14 +215,14 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   onChanged: (v) => setState(() => _isAllDay = v),
                 ),
                 _DateTimeField(
-                  label: 'Start',
+                  label: 'Scheduled start',
                   value: _startAt,
                   includeTime: !_isAllDay,
                   onChanged: (v) => setState(() => _startAt = v),
                 ),
                 const SizedBox(height: 4),
                 _DateTimeField(
-                  label: 'End',
+                  label: 'Scheduled end',
                   value: _endAt,
                   includeTime: !_isAllDay,
                   onChanged: (v) => setState(() => _endAt = v),
@@ -231,10 +235,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   ),
                   keyboardType: TextInputType.number,
                 ),
-                if (_isEditing) ...[
-                  const SizedBox(height: 16),
-                  _TimeTrackingSection(actionId: widget.existing!.id),
-                ],
                 const SizedBox(height: 16),
                 Text('Metrics', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 4),

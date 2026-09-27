@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
@@ -78,6 +79,64 @@ void main() {
     )..where((t) => t.id.equals(actionId))).getSingle();
     expect(action.status, 'open');
     expect(action.completedAt, isNull);
+  });
+
+  test('starting a done action reopens it', () async {
+    final actionId = await service.createAction(name: 'Redo this');
+    await service.start(actionId);
+    await service.finish(actionId);
+
+    var action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    expect(action.status, 'done');
+
+    await service.start(actionId);
+
+    action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    expect(action.status, 'open');
+    expect(action.completedAt, isNull);
+  });
+
+  test(
+    'starting an action stuck as done-while-running self-heals to open',
+    () async {
+      // Simulates the state a pre-fix build could leave behind: an open
+      // occurrence (still running) but status wrongly stuck at 'done'.
+      final actionId = await service.createAction(name: 'Weird state');
+      await service.start(actionId);
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        const ActionsTableCompanion(status: Value('done')),
+      );
+
+      await service.start(actionId);
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      expect(action.status, 'open');
+
+      final occurrences = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).get();
+      expect(occurrences, hasLength(1)); // no duplicate occurrence created
+    },
+  );
+
+  test('starting a cancelled action reopens it', () async {
+    final actionId = await service.createAction(name: 'Reconsidering');
+    await service.cancel(actionId);
+
+    await service.start(actionId);
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    expect(action.status, 'open');
   });
 
   test('cancel marks the action cancelled', () async {

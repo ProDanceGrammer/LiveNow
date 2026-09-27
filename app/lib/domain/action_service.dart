@@ -118,24 +118,42 @@ class ActionService {
   }
 
   /// Starts (or resumes) timing an action: opens a new occurrence unless one
-  /// is already running.
+  /// is already running. Always reopens a done/cancelled action first —
+  /// starting it means it's in progress, not finished — including when it's
+  /// a no-op because an occurrence is already running (an action can end up
+  /// "done" while still running if it was finished and then started again
+  /// from an old build; this self-heals that instead of getting stuck).
   Future<void> start(String actionId) async {
-    final alreadyRunning =
-        await (db.select(db.actionOccurrencesTable)..where(
-              (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
-            ))
-            .getSingleOrNull();
-    if (alreadyRunning != null) return;
+    final nowText = dateTimeToDb(DateTime.now())!;
 
-    await db
-        .into(db.actionOccurrencesTable)
-        .insert(
-          ActionOccurrencesTableCompanion.insert(
-            id: newId(),
-            actionId: actionId,
-            startedAt: Value(dateTimeToDb(DateTime.now())),
-          ),
-        );
+    await db.transaction(() async {
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(
+          status: const Value('open'),
+          completedAt: const Value(null),
+          updatedAt: Value(nowText),
+        ),
+      );
+
+      final alreadyRunning =
+          await (db.select(db.actionOccurrencesTable)..where(
+                (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
+              ))
+              .getSingleOrNull();
+      if (alreadyRunning != null) return;
+
+      await db
+          .into(db.actionOccurrencesTable)
+          .insert(
+            ActionOccurrencesTableCompanion.insert(
+              id: newId(),
+              actionId: actionId,
+              startedAt: Value(nowText),
+            ),
+          );
+    });
   }
 
   /// Finishes the action's running occurrence, if any, and marks tasks (but
