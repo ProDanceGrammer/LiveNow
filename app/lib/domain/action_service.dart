@@ -139,6 +139,7 @@ class ActionService {
         estimatedMinutes: action.estimatedMinutes,
         currentStart: dateTimeFromDb(action.startAt),
         currentEnd: dateTimeFromDb(action.endAt),
+        kind: action.kind,
       );
       final newEnd = nowUtc.add(duration);
 
@@ -212,6 +213,7 @@ class ActionService {
                 estimatedMinutes: action.estimatedMinutes,
                 currentStart: oldStart,
                 currentEnd: dateTimeFromDb(action.endAt),
+                kind: action.kind,
               ),
             );
 
@@ -258,16 +260,18 @@ class ActionService {
     });
   }
 
-  /// Approximates the original "Predicted Time Consumption" formula, which
-  /// our schema has no direct equivalent for (no Countable Activities or
-  /// same-name-previous-action matching): prefer an explicit estimate, else
-  /// the action's own existing start/end gap — even if that gap is zero, by
-  /// design, since a deliberately point-in-time action should stay that way
-  /// rather than being padded out — else zero.
+  /// Approximates the original "Predicted Time Consumption"/"Minutes
+  /// Consuming" formulas, which our schema has no direct equivalent for (no
+  /// Countable Activities or same-name-previous-action matching): prefer an
+  /// explicit estimate, else the action's own existing start/end gap (even
+  /// if that gap is zero — a deliberately point-in-time action stays that
+  /// way rather than being padded out), else a default of 60 minutes (10
+  /// for habits), matching the original formula's fallback exactly.
   Duration _predictedDuration({
     required int? estimatedMinutes,
     required DateTime? currentStart,
     required DateTime? currentEnd,
+    required String kind,
   }) {
     if (estimatedMinutes != null && estimatedMinutes > 0) {
       return Duration(minutes: estimatedMinutes);
@@ -275,7 +279,9 @@ class ActionService {
     if (currentStart != null && currentEnd != null) {
       return currentEnd.difference(currentStart);
     }
-    return Duration.zero;
+    return kind == 'habit'
+        ? const Duration(minutes: 10)
+        : const Duration(minutes: 60);
   }
 
   /// Directly sets `start_at`/`end_at` without touching anything else — used
@@ -313,6 +319,12 @@ class ActionService {
   /// habits — logs a `postponed` occurrence so the balance history isn't
   /// lost (postponing just moves the same row's time, it doesn't create a
   /// new one).
+  ///
+  /// If the action is currently running (an occurrence is open), that
+  /// occurrence's `started_at` is moved to match the new start too. Without
+  /// this, postponing a running action left `actions.start_at` (what the
+  /// card shows) and the open occurrence's `started_at` (what the editor's
+  /// "Currently running" line shows) pointing at two different times.
   Future<void> postpone(String actionId, PostponeRule rule) async {
     final action = await (db.select(
       db.actionsTable,
@@ -339,6 +351,21 @@ class ActionService {
           updatedAt: Value(nowText),
         ),
       );
+
+      final runningOccurrence =
+          await (db.select(db.actionOccurrencesTable)..where(
+                (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
+              ))
+              .getSingleOrNull();
+      if (runningOccurrence != null) {
+        await (db.update(
+          db.actionOccurrencesTable,
+        )..where((t) => t.id.equals(runningOccurrence.id))).write(
+          ActionOccurrencesTableCompanion(
+            startedAt: Value(dateTimeToDb(next.startAt)),
+          ),
+        );
+      }
 
       if (action.kind == 'habit' || action.kind == 'bad_habit') {
         await db

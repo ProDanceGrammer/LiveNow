@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
@@ -80,6 +80,33 @@ void main() {
     final startAt = dateTimeFromDb(action.startAt)!;
     expect(startAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
     expect(startAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
+  });
+
+  test('start defaults to a 60-minute duration for a task with no time set at all', () async {
+    final actionId = await service.createAction(name: 'Totally unscheduled');
+    await service.start(actionId);
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final startAt = dateTimeFromDb(action.startAt)!;
+    final endAt = dateTimeFromDb(action.endAt)!;
+    expect(endAt.difference(startAt), const Duration(minutes: 60));
+  });
+
+  test('start defaults to a 10-minute duration for a habit with no time set at all', () async {
+    final actionId = await service.createAction(
+      name: 'Totally unscheduled habit',
+      kind: 'habit',
+    );
+    await service.start(actionId);
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final startAt = dateTimeFromDb(action.startAt)!;
+    final endAt = dateTimeFromDb(action.endAt)!;
+    expect(endAt.difference(startAt), const Duration(minutes: 10));
   });
 
   test('start sets start_at to the real start time, not just the occurrence', () async {
@@ -295,6 +322,32 @@ void main() {
       )..where((t) => t.id.equals(actionId))).getSingle();
       expect(
         dateTimeFromDb(action.startAt),
+        DateTime.utc(2024, 1, 1, 16, 43),
+      );
+    },
+  );
+
+  test(
+    'postponing a running action also moves its open occurrence, so the editor stays in sync with the card',
+    () async {
+      final actionId = await service.createAction(name: 'Deep work');
+      await service.start(actionId);
+
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(
+          startAt: Value(dateTimeToDb(DateTime.utc(2024, 1, 1, 15, 43))!), // 18:43 Istanbul
+        ),
+      );
+
+      await service.postpone(actionId, PostponeRule.plusOneHour);
+
+      final occurrence = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId) & t.finishedAt.isNull())).getSingle();
+      expect(
+        dateTimeFromDb(occurrence.startedAt),
         DateTime.utc(2024, 1, 1, 16, 43),
       );
     },
