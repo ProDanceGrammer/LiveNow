@@ -1,0 +1,132 @@
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
+
+import '../core/settings.dart';
+
+/// Must be called once at app startup, before any postpone rule runs.
+void initPostponeTimeZoneData() => tz_data.initializeTimeZones();
+
+enum PostponeRule {
+  plusOneHour,
+  plusFiveHours,
+  prolongThirtyMinutes,
+  afterWork,
+  morning,
+  workingMorning,
+  nextWeek,
+  nextMondayMorning,
+}
+
+/// An action's schedule, always UTC (as stored in `actions.start_at` /
+/// `actions.end_at`).
+class ActionSchedule {
+  final DateTime? startAt;
+  final DateTime? endAt;
+
+  const ActionSchedule({this.startAt, this.endAt});
+}
+
+/// Computes the action's next schedule for a postpone button press.
+///
+/// All rules but [PostponeRule.prolongThirtyMinutes] preserve the action's
+/// existing duration (`endAt - startAt`) and are evaluated in
+/// [AppSettings.timeZoneName] wall-clock time, then converted back to UTC.
+ActionSchedule applyPostponeRule(
+  PostponeRule rule,
+  ActionSchedule current, {
+  required DateTime nowUtc,
+}) {
+  final location = tz.getLocation(AppSettings.timeZoneName);
+  final now = tz.TZDateTime.from(nowUtc, location);
+
+  if (rule == PostponeRule.prolongThirtyMinutes) {
+    final newEnd = (current.endAt ?? nowUtc).add(const Duration(minutes: 30));
+    return ActionSchedule(startAt: current.startAt, endAt: newEnd);
+  }
+
+  final duration = (current.startAt != null && current.endAt != null)
+      ? current.endAt!.difference(current.startAt!)
+      : null;
+
+  final newStartLocal = switch (rule) {
+    PostponeRule.plusOneHour => _relativeBase(
+      current.startAt,
+      now,
+      location,
+    ).add(const Duration(hours: 1)),
+    PostponeRule.plusFiveHours => _relativeBase(
+      current.startAt,
+      now,
+      location,
+    ).add(const Duration(hours: 5)),
+    PostponeRule.nextWeek => _relativeBase(
+      current.startAt,
+      now,
+      location,
+    ).add(const Duration(days: 7)),
+    PostponeRule.afterWork => _todayOrTomorrowAt(
+      now,
+      AppSettings.afterWorkHour,
+    ),
+    PostponeRule.morning => _atHourOnDate(
+      now.add(const Duration(days: 1)),
+      AppSettings.morningHour,
+    ),
+    PostponeRule.workingMorning => _nextWorkingDayAt(
+      now,
+      AppSettings.morningHour,
+    ),
+    PostponeRule.nextMondayMorning => _nextWeekdayAt(
+      now,
+      DateTime.monday,
+      AppSettings.morningHour,
+    ),
+    PostponeRule.prolongThirtyMinutes => throw StateError('handled above'),
+  };
+
+  final newStart = newStartLocal.toUtc();
+  final newEnd = duration == null ? null : newStart.add(duration);
+  return ActionSchedule(startAt: newStart, endAt: newEnd);
+}
+
+/// For the plain relative shifts (+1h, +5h, next week): if the action's
+/// current start is still in the future, shift it further out; if it's
+/// overdue (in the past), shift starts counting from now instead.
+tz.TZDateTime _relativeBase(
+  DateTime? startAtUtc,
+  tz.TZDateTime now,
+  tz.Location location,
+) {
+  if (startAtUtc == null) return now;
+  final startLocal = tz.TZDateTime.from(startAtUtc, location);
+  return startLocal.isAfter(now) ? startLocal : now;
+}
+
+tz.TZDateTime _atHourOnDate(tz.TZDateTime date, int hour) {
+  return tz.TZDateTime(date.location, date.year, date.month, date.day, hour);
+}
+
+tz.TZDateTime _todayOrTomorrowAt(tz.TZDateTime now, int hour) {
+  final today = _atHourOnDate(now, hour);
+  return today.isAfter(now)
+      ? today
+      : _atHourOnDate(now.add(const Duration(days: 1)), hour);
+}
+
+tz.TZDateTime _nextWorkingDayAt(tz.TZDateTime now, int hour) {
+  var date = now.add(const Duration(days: 1));
+  while (!AppSettings.workingWeekdays.contains(date.weekday)) {
+    date = date.add(const Duration(days: 1));
+  }
+  return _atHourOnDate(date, hour);
+}
+
+/// The next occurrence of [weekday] strictly after today (never today, even
+/// if today already matches — postponing must always move forward).
+tz.TZDateTime _nextWeekdayAt(tz.TZDateTime now, int weekday, int hour) {
+  var date = now.add(const Duration(days: 1));
+  while (date.weekday != weekday) {
+    date = date.add(const Duration(days: 1));
+  }
+  return _atHourOnDate(date, hour);
+}
