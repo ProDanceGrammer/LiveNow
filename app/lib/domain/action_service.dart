@@ -117,57 +117,59 @@ class ActionService {
     });
   }
 
-  /// Starts (or resumes) timing an action: opens a new occurrence unless one
-  /// is already running, and sets `start_at` to now — that field is the one
-  /// place the UI shows/lets you postpone "the current time of this task",
-  /// so it needs to track reality once you've actually started, not just
-  /// whatever was scheduled beforehand. Any existing start/end duration is
-  /// preserved onto the new start. Always reopens a done/cancelled action
-  /// first — starting it means it's in progress, not finished — including
-  /// when it's a no-op because an occurrence is already running (an action
-  /// can end up "done" while still running if it was finished and then
-  /// started again from an old build; this self-heals that instead of
-  /// getting stuck).
+  /// Starts (or restarts) timing an action, and sets `start_at` to now every
+  /// time — that field is the one place the UI shows/lets you postpone "the
+  /// current time of this task", so every press of Start must move it,
+  /// whether or not an occurrence was already running. Any existing
+  /// duration (see [_predictedDuration]) is preserved onto the new start.
+  /// Always reopens a done/cancelled action first — starting it means it's
+  /// in progress, not finished — including when an occurrence is already
+  /// running (an action can end up "done" while still running if it was
+  /// finished and then started again from an old build; this self-heals
+  /// that instead of getting stuck).
   Future<void> start(String actionId) async {
-    final nowText = dateTimeToDb(DateTime.now())!;
+    final nowUtc = DateTime.now().toUtc();
+    final nowText = dateTimeToDb(nowUtc)!;
 
     await db.transaction(() async {
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final duration = _predictedDuration(
+        estimatedMinutes: action.estimatedMinutes,
+        currentStart: dateTimeFromDb(action.startAt),
+        currentEnd: dateTimeFromDb(action.endAt),
+      );
+      final newEnd = nowUtc.add(duration);
+
       await (db.update(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).write(
         ActionsTableCompanion(
           status: const Value('open'),
           completedAt: const Value(null),
+          startAt: Value(nowText),
+          endAt: Value(dateTimeToDb(newEnd)),
           updatedAt: Value(nowText),
         ),
       );
 
-      final alreadyRunning =
+      final runningOccurrence =
           await (db.select(db.actionOccurrencesTable)..where(
                 (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
               ))
               .getSingleOrNull();
-      if (alreadyRunning != null) return;
 
-      final action = await (db.select(
-        db.actionsTable,
-      )..where((t) => t.id.equals(actionId))).getSingle();
-      final oldStart = dateTimeFromDb(action.startAt);
-      final oldEnd = dateTimeFromDb(action.endAt);
-      final duration = (oldStart != null && oldEnd != null)
-          ? oldEnd.difference(oldStart)
-          : null;
-      final newStart = DateTime.now().toUtc();
-      final newEnd = duration == null ? null : newStart.add(duration);
-
-      await (db.update(
-        db.actionsTable,
-      )..where((t) => t.id.equals(actionId))).write(
-        ActionsTableCompanion(
-          startAt: Value(dateTimeToDb(newStart)),
-          endAt: Value(dateTimeToDb(newEnd)),
-        ),
-      );
+      if (runningOccurrence != null) {
+        // Re-pressing Start while already running resets when it "started"
+        // too, rather than leaving the button looking like it did nothing.
+        await (db.update(
+          db.actionOccurrencesTable,
+        )..where((t) => t.id.equals(runningOccurrence.id))).write(
+          ActionOccurrencesTableCompanion(startedAt: Value(nowText)),
+        );
+        return;
+      }
 
       await db
           .into(db.actionOccurrencesTable)
@@ -181,26 +183,66 @@ class ActionService {
     });
   }
 
-  /// Finishes the action's running occurrence, if any, sets `end_at` to now
-  /// (same reasoning as `start_at` in [start]), and marks tasks (but not
+  /// Finishes the action, sets `end_at` to now, and marks tasks (but not
   /// habits/bad habits) done.
+  ///
+  /// `start_at` is kept as-is if it's already set and at/before now — the
+  /// scheduled start already happened, so the elapsed time is genuine.
+  /// Otherwise (empty, or still in the future — i.e. it was never actually
+  /// started) finishing "now" means the whole thing just happened right
+  /// now: `start_at` is set to `now - duration` (see [_predictedDuration]),
+  /// so e.g. a 90-minute action finished cold ends up as
+  /// "90 minutes ago -> now", not "some stale future time -> now". This
+  /// mirrors the original Notion "Finished Now" button formula exactly.
   Future<void> finish(String actionId) async {
-    final nowText = dateTimeToDb(DateTime.now())!;
+    final nowUtc = DateTime.now().toUtc();
+    final nowText = dateTimeToDb(nowUtc)!;
 
     await db.transaction(() async {
-      await (db.update(db.actionOccurrencesTable)..where(
-            (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
-          ))
-          .write(
-            ActionOccurrencesTableCompanion(
-              finishedAt: Value(nowText),
-              outcome: const Value('done'),
-            ),
-          );
-
       final action = await (db.select(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).getSingle();
+
+      final oldStart = dateTimeFromDb(action.startAt);
+      final keepExistingStart = oldStart != null && !oldStart.isAfter(nowUtc);
+      final DateTime newStart = keepExistingStart
+          ? oldStart
+          : nowUtc.subtract(
+              _predictedDuration(
+                estimatedMinutes: action.estimatedMinutes,
+                currentStart: oldStart,
+                currentEnd: dateTimeFromDb(action.endAt),
+              ),
+            );
+
+      final runningOccurrence =
+          await (db.select(db.actionOccurrencesTable)..where(
+                (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
+              ))
+              .getSingleOrNull();
+
+      if (runningOccurrence != null) {
+        await (db.update(
+          db.actionOccurrencesTable,
+        )..where((t) => t.id.equals(runningOccurrence.id))).write(
+          ActionOccurrencesTableCompanion(
+            finishedAt: Value(nowText),
+            outcome: const Value('done'),
+          ),
+        );
+      } else {
+        await db
+            .into(db.actionOccurrencesTable)
+            .insert(
+              ActionOccurrencesTableCompanion.insert(
+                id: newId(),
+                actionId: actionId,
+                startedAt: Value(dateTimeToDb(newStart)),
+                finishedAt: Value(nowText),
+                outcome: const Value('done'),
+              ),
+            );
+      }
 
       await (db.update(
         db.actionsTable,
@@ -208,11 +250,51 @@ class ActionService {
         ActionsTableCompanion(
           status: action.kind == 'task' ? const Value('done') : const Value.absent(),
           completedAt: action.kind == 'task' ? Value(nowText) : const Value.absent(),
+          startAt: Value(dateTimeToDb(newStart)),
           endAt: Value(nowText),
           updatedAt: Value(nowText),
         ),
       );
     });
+  }
+
+  /// Approximates the original "Predicted Time Consumption" formula, which
+  /// our schema has no direct equivalent for (no Countable Activities or
+  /// same-name-previous-action matching): prefer an explicit estimate, else
+  /// the action's own existing start/end gap — even if that gap is zero, by
+  /// design, since a deliberately point-in-time action should stay that way
+  /// rather than being padded out — else zero.
+  Duration _predictedDuration({
+    required int? estimatedMinutes,
+    required DateTime? currentStart,
+    required DateTime? currentEnd,
+  }) {
+    if (estimatedMinutes != null && estimatedMinutes > 0) {
+      return Duration(minutes: estimatedMinutes);
+    }
+    if (currentStart != null && currentEnd != null) {
+      return currentEnd.difference(currentStart);
+    }
+    return Duration.zero;
+  }
+
+  /// Directly sets `start_at`/`end_at` without touching anything else — used
+  /// by the quick "tap the time" editor on a Current Actions board card.
+  Future<void> updateSchedule(
+    String actionId, {
+    required DateTime? startAt,
+    required DateTime? endAt,
+  }) {
+    final nowText = dateTimeToDb(DateTime.now())!;
+    return (db.update(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).write(
+      ActionsTableCompanion(
+        startAt: Value(dateTimeToDb(startAt)),
+        endAt: Value(dateTimeToDb(endAt)),
+        updatedAt: Value(nowText),
+      ),
+    );
   }
 
   Future<void> cancel(String actionId) {

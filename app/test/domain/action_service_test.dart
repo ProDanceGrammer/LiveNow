@@ -41,15 +41,45 @@ void main() {
     expect(links.single.metricId, metricId);
   });
 
-  test('start is idempotent while an occurrence is already running', () async {
+  test(
+    'starting again while already running updates the same occurrence, not a duplicate',
+    () async {
+      final actionId = await service.createAction(name: 'Write my book');
+      await service.start(actionId);
+      await service.start(actionId);
+
+      final running = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).get();
+      expect(running, hasLength(1));
+      expect(running.single.finishedAt, isNull);
+    },
+  );
+
+  test('starting again while already running still moves start_at to now', () async {
     final actionId = await service.createAction(name: 'Write my book');
     await service.start(actionId);
-    await service.start(actionId);
 
-    final running = await (db.select(
-      db.actionOccurrencesTable,
-    )..where((t) => t.actionId.equals(actionId))).get();
-    expect(running, hasLength(1));
+    // Force start_at into the past, as if Start had been pressed a while
+    // ago and never touched since.
+    await (db.update(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).write(
+      ActionsTableCompanion(
+        startAt: Value(dateTimeToDb(DateTime.utc(2020, 1, 1))!),
+      ),
+    );
+
+    final before = DateTime.now().toUtc();
+    await service.start(actionId);
+    final after = DateTime.now().toUtc();
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final startAt = dateTimeFromDb(action.startAt)!;
+    expect(startAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
+    expect(startAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
   });
 
   test('start sets start_at to the real start time, not just the occurrence', () async {
@@ -95,6 +125,151 @@ void main() {
     final endAt = DateTime.parse(action.endAt!);
     expect(endAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
     expect(endAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
+  });
+
+  test(
+    'finishing a never-started, 0-duration action scheduled for the future sets both times to now',
+    () async {
+      // A point action (start == end already), scheduled ahead of "now";
+      // finishing it without ever pressing Start means "this just
+      // happened, right now" — 0 minutes, not the stale scheduled time.
+      final futureStart = DateTime.now().toUtc().add(const Duration(hours: 2));
+      final actionId = await service.createAction(
+        name: 'Instant thing',
+        startAt: futureStart,
+        endAt: futureStart,
+      );
+
+      final before = DateTime.now().toUtc();
+      await service.finish(actionId);
+      final after = DateTime.now().toUtc();
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final startAt = dateTimeFromDb(action.startAt)!;
+      final endAt = dateTimeFromDb(action.endAt)!;
+      expect(startAt, endAt);
+      expect(startAt.isAfter(before.subtract(const Duration(seconds: 1))), isTrue);
+      expect(startAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
+    },
+  );
+
+  test(
+    'finishing a never-started, 90-minute action scheduled for the future projects the start backward from now',
+    () async {
+      // Scheduled +3h -> +4h30m (90 min) from now, never actually started;
+      // finishing it "now" should read as "90 minutes ago -> now", not
+      // "some still-future time -> now".
+      final futureStart = DateTime.now().toUtc().add(const Duration(hours: 3));
+      final actionId = await service.createAction(
+        name: 'Ninety minute task',
+        startAt: futureStart,
+        endAt: futureStart.add(const Duration(minutes: 90)),
+      );
+
+      final beforeFinish = DateTime.now().toUtc();
+      await service.finish(actionId);
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final startAt = dateTimeFromDb(action.startAt)!;
+      final endAt = dateTimeFromDb(action.endAt)!;
+      expect(endAt.difference(startAt), const Duration(hours: 1, minutes: 30));
+      // end_at is "now", so it must be at/after whatever "now" was just
+      // before we called finish.
+      expect(
+        endAt.isAfter(beforeFinish.subtract(const Duration(seconds: 1))),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'finishing an action whose start is already in the past keeps it, even without ever pressing Start',
+    () async {
+      // Mirrors the original "Finished Now" formula exactly: a start that's
+      // already at/before now is trusted as real, whether it got there via
+      // the Start button or a manual edit (e.g. the board's tap-to-edit
+      // time dialog).
+      final pastStart = DateTime.now().toUtc().subtract(
+        const Duration(hours: 1),
+      );
+      final actionId = await service.createAction(
+        name: 'Manually backdated',
+        startAt: pastStart,
+      );
+
+      await service.finish(actionId);
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      expect(dateTimeFromDb(action.startAt), pastStart);
+    },
+  );
+
+  test(
+    'finishing an action that was actually started leaves its real start_at alone',
+    () async {
+      final futureStart = DateTime.now().toUtc().add(const Duration(hours: 1));
+      final actionId = await service.createAction(
+        name: 'Actually worked on',
+        startAt: futureStart,
+        endAt: futureStart.add(const Duration(minutes: 90)),
+      );
+      await service.start(actionId); // real start_at is now "now"
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final realStart = action.startAt;
+
+      await service.finish(actionId);
+
+      final finished = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      expect(finished.startAt, realStart); // untouched by finish
+    },
+  );
+
+  test(
+    'start prefers Estimated minutes over the existing start/end gap',
+    () async {
+      final actionId = await service.createAction(
+        name: 'Has both an estimate and a stale gap',
+        startAt: DateTime.utc(2024, 1, 1, 9),
+        endAt: DateTime.utc(2024, 1, 1, 9, 15), // a stale 15-minute gap
+        estimatedMinutes: 45,
+      );
+
+      await service.start(actionId);
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final startAt = dateTimeFromDb(action.startAt)!;
+      final endAt = dateTimeFromDb(action.endAt)!;
+      expect(endAt.difference(startAt), const Duration(minutes: 45));
+    },
+  );
+
+  test('updateSchedule sets exactly start_at/end_at and nothing else', () async {
+    final actionId = await service.createAction(name: 'Reschedule me');
+    await service.updateSchedule(
+      actionId,
+      startAt: DateTime.utc(2025, 3, 4, 8),
+      endAt: DateTime.utc(2025, 3, 4, 9),
+    );
+
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    expect(dateTimeFromDb(action.startAt), DateTime.utc(2025, 3, 4, 8));
+    expect(dateTimeFromDb(action.endAt), DateTime.utc(2025, 3, 4, 9));
+    expect(action.status, 'open');
   });
 
   test(

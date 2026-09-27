@@ -78,8 +78,10 @@ class _BoardColumn extends StatelessWidget {
                 ? Center(child: Text(emptyMessage))
                 : ListView.builder(
                     itemCount: cards.length,
-                    itemBuilder: (context, i) =>
-                        ActionCard(action: cards[i]),
+                    itemBuilder: (context, i) => ActionCard(
+                      key: ValueKey(cards[i].id),
+                      action: cards[i],
+                    ),
                   ),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (e, _) => Center(child: Text('Error: $e')),

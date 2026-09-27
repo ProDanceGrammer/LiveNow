@@ -29,6 +29,7 @@ class ActionListView extends ConsumerWidget {
           : ListView.builder(
               itemCount: items.length,
               itemBuilder: (context, i) => ActionTile(
+                key: ValueKey(items[i].id),
                 action: items[i],
                 onTap: () => openActionEditor(context, ref, items[i].id),
               ),

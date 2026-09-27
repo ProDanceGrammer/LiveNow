@@ -184,15 +184,17 @@ void main() {
       },
     );
 
-    test('watchCurrentNotDone shows a running action as started, not finished', () async {
+    test('watchCurrentNotDone shows a running action as started', () async {
       final running = await actions.createAction(name: 'In progress');
       await actions.start(running);
 
       final result = await queries.watchCurrentNotDone().first;
       final item = result.firstWhere((a) => a.id == running);
 
+      // start() always resolves some duration (falling back to zero), so
+      // end_at is never left null — just possibly equal to start_at.
       expect(item.startAt, isNotNull);
-      expect(item.endAt, isNull);
+      expect(item.endAt, isNotNull);
     });
   });
 }

@@ -28,6 +28,7 @@ class HabitsView extends ConsumerWidget {
               const _SectionHeader('Timed'),
               for (final item in timed)
                 ActionTile(
+                  key: ValueKey(item.id),
                   action: item,
                   onTap: () => openActionEditor(context, ref, item.id),
                 ),
@@ -36,6 +37,7 @@ class HabitsView extends ConsumerWidget {
               const _SectionHeader('All day'),
               for (final item in allDay)
                 ActionTile(
+                  key: ValueKey(item.id),
                   action: item,
                   onTap: () => openActionEditor(context, ref, item.id),
                 ),

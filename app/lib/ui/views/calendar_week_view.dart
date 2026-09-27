@@ -138,6 +138,7 @@ class _DaySection extends ConsumerWidget {
         else
           for (final item in items)
             ActionTile(
+              key: ValueKey(item.id),
               action: item,
               onTap: () => openActionEditor(context, ref, item.id),
             ),

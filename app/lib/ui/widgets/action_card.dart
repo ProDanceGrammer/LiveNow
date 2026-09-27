@@ -6,12 +6,15 @@ import '../edit_action.dart';
 import '../providers.dart';
 import 'action_tile.dart' show iconForAction, twoDigits;
 import 'quick_action_bar.dart';
+import 'quick_time_edit_dialog.dart';
 
 /// One card on the Current Actions board: name, its current time range
 /// (`start_at` -> `end_at` — kept in sync with the real started/finished
 /// time by Start/Finish, so there's a single time to show and to postpone,
 /// not a separate "scheduled" one), and the quick-action buttons inline —
-/// no menu to open first.
+/// no menu to open first. Tapping anywhere on the card opens the full
+/// editor; tapping the time specifically opens a quick date/time picker
+/// instead.
 class ActionCard extends ConsumerWidget {
   final ActionListItem action;
 
@@ -19,20 +22,23 @@ class ActionCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isRunning = ref.watch(runningOccurrencesProvider).value?.containsKey(action.id) ?? false;
+    final isRunning = ref
+        .watch(runningOccurrencesProvider)
+        .value
+        ?.containsKey(action.id) ?? false;
     final timeLine = _formatTimeRange(action);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            InkWell(
-              onTap: () => openActionEditor(context, ref, action.id),
-              child: Row(
+      child: InkWell(
+        onTap: () => openActionEditor(context, ref, action.id),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
                 children: [
                   Icon(
                     iconForAction(action, isRunning),
@@ -50,36 +56,52 @@ class ActionCard extends ConsumerWidget {
                   ),
                 ],
               ),
-            ),
-            if (timeLine != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 28, top: 2),
-                child: Text(
-                  timeLine,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.secondary,
+              if (timeLine != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 2),
+                  child: InkWell(
+                    onTap: () => QuickTimeEditDialog.show(
+                      context,
+                      actionId: action.id,
+                      initialStart: action.startAt,
+                      initialEnd: action.endAt,
+                    ),
+                    child: Text(
+                      timeLine,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.secondary,
+                        decoration: TextDecoration.underline,
+                        decorationColor: Theme.of(
+                          context,
+                        ).colorScheme.secondary.withValues(alpha: 0.4),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            const SizedBox(height: 6),
-            QuickActionBar(actionId: action.id),
-          ],
+              const SizedBox(height: 6),
+              QuickActionBar(actionId: action.id),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  /// Independently shows a date on the start and/or the end whenever that
+  /// side isn't today — showing it only when start/end differ *from each
+  /// other* (the old behaviour) meant a range entirely in the past could
+  /// render with no date at all, which is exactly the confusing case.
   String? _formatTimeRange(ActionListItem a) {
     if (a.startAt == null) return null;
     final start = a.startAt!.toLocal();
-    final now = DateTime.now();
-    final startStr = _sameDay(start, now)
+    final today = DateTime.now();
+    final startStr = _sameDay(start, today)
         ? _time(start)
         : '${_date(start)} ${_time(start)}';
     if (a.endAt == null) return startStr;
 
     final end = a.endAt!.toLocal();
-    final endStr = _sameDay(end, start)
+    final endStr = _sameDay(end, today)
         ? _time(end)
         : '${_date(end)} ${_time(end)}';
     return '$startStr → $endStr';
