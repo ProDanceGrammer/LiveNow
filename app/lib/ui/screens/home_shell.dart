@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../views/all_actions_view.dart';
 import '../views/calendar_week_view.dart';
 import '../views/habits_view.dart';
 import '../views/most_important_view.dart';
@@ -38,6 +39,10 @@ class _HomeShellState extends State<HomeShell> {
     ),
     NavigationRailDestination(icon: Icon(Icons.repeat), label: Text('Habits')),
     NavigationRailDestination(
+      icon: Icon(Icons.list_alt),
+      label: Text('All'),
+    ),
+    NavigationRailDestination(
       icon: Icon(Icons.insights),
       label: Text('Metrics'),
     ),
@@ -53,6 +58,7 @@ class _HomeShellState extends State<HomeShell> {
     'Most Important to Schedule',
     'Calendar',
     'Habits',
+    'All Actions',
     'Metrics',
     'Templates',
   ];
@@ -63,6 +69,7 @@ class _HomeShellState extends State<HomeShell> {
     MostImportantView(),
     CalendarWeekView(),
     HabitsView(),
+    AllActionsView(),
     MetricsScreen(),
     TemplatesScreen(),
   ];
@@ -83,10 +90,10 @@ class _HomeShellState extends State<HomeShell> {
           Expanded(child: _views[_index]),
         ],
       ),
-      // Metrics and Templates (index 5, 6) are their own Scaffolds with
-      // their own FAB for adding a metric/template; only the five action
-      // views share this one.
-      floatingActionButton: _index < 5
+      // Metrics and Templates (index 6, 7) are their own Scaffolds with
+      // their own FAB for adding a metric/template; only the six action
+      // views (including All) share this one.
+      floatingActionButton: _index < 6
           ? FloatingActionButton(
               onPressed: () => ActionEditorDialog.show(context),
               tooltip: 'New action',

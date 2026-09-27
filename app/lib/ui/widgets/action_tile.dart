@@ -32,6 +32,7 @@ class ActionTile extends ConsumerWidget {
     final runningSince = ref.watch(runningOccurrencesProvider).value?[action.id];
 
     final subtitleParts = <String>[
+      if (action.status != 'open') _statusLabel(action.status),
       if (action.priority != null) action.priority!,
       if (action.startAt != null) _formatWhen(action),
       if (action.estimatedMinutes != null) '${action.estimatedMinutes}m',
@@ -40,7 +41,7 @@ class ActionTile extends ConsumerWidget {
 
     return ListTile(
       leading: Icon(
-        runningSince != null ? Icons.play_circle_fill : _iconFor(action.kind),
+        _iconFor(action, runningSince != null),
         color: runningSince != null
             ? Theme.of(context).colorScheme.primary
             : null,
@@ -108,11 +109,24 @@ class ActionTile extends ConsumerWidget {
 
   String _two(int n) => n.toString().padLeft(2, '0');
 
-  IconData _iconFor(String kind) => switch (kind) {
-    'habit' => Icons.repeat,
-    'bad_habit' => Icons.warning_amber,
-    _ => Icons.check_circle_outline,
+  String _statusLabel(String status) => switch (status) {
+    'done' => 'Done',
+    'cancelled' => 'Cancelled',
+    _ => status,
   };
+
+  IconData _iconFor(ActionListItem a, bool isRunning) {
+    if (isRunning) return Icons.play_circle_fill;
+    return switch (a.status) {
+      'done' => Icons.check_circle,
+      'cancelled' => Icons.block,
+      _ => switch (a.kind) {
+        'habit' => Icons.repeat,
+        'bad_habit' => Icons.warning_amber,
+        _ => Icons.check_circle_outline,
+      },
+    };
+  }
 
   Future<void> _handle(WidgetRef ref, _TileAction value) {
     final service = ref.read(actionServiceProvider);

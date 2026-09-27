@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show innerJoin;
+import 'package:drift/drift.dart' show OrderingTerm, innerJoin;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:timezone/timezone.dart' as tz;
@@ -139,6 +139,32 @@ final runningOccurrencesProvider = StreamProvider.autoDispose<Map<String, DateTi
         if (dateTimeFromDb(r.startedAt) case final started?) r.actionId: started,
     };
   });
+});
+
+/// [actionId]'s start/finish/postpone history, most recent first — lets
+/// the editor show when an action was actually started/finished, as
+/// opposed to `actions.start_at`/`end_at`, which is only the *scheduled*
+/// time.
+final occurrencesOfProvider = StreamProvider.autoDispose
+    .family<List<ActionOccurrence>, String>((ref, actionId) {
+      final db = ref.watch(databaseProvider);
+      final query = db.select(db.actionOccurrencesTable)
+        ..where((t) => t.actionId.equals(actionId))
+        ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]);
+      return query.watch();
+    });
+
+/// All actions regardless of status, most recently updated first — the
+/// "see everything, including finished" view.
+final allActionsProvider = StreamProvider.autoDispose<List<ActionListItem>>((
+  ref,
+) {
+  final db = ref.watch(databaseProvider);
+  final query = db.select(db.actionsTable)
+    ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
+  return query.watch().map(
+    (rows) => rows.map(ActionListItem.fromRow).toList(),
+  );
 });
 
 /// The metric ids currently linked to [actionId].

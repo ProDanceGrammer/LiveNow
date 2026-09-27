@@ -231,6 +231,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   ),
                   keyboardType: TextInputType.number,
                 ),
+                if (_isEditing) ...[
+                  const SizedBox(height: 16),
+                  _TimeTrackingSection(actionId: widget.existing!.id),
+                ],
                 const SizedBox(height: 16),
                 Text('Metrics', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 4),
@@ -397,6 +401,52 @@ class _DateTimeField extends StatelessWidget {
       '${d.year}-${_two(d.month)}-${_two(d.day)}';
   String _fmtTime(DateTime d) => '${_two(d.hour)}:${_two(d.minute)}';
   String _two(int n) => n.toString().padLeft(2, '0');
+}
+
+/// Shows the action's actual start/finish history (`action_occurrences`) —
+/// distinct from `startAt`/`endAt` above, which is only the *scheduled*
+/// time and never changes just because Start/Finish was pressed.
+class _TimeTrackingSection extends ConsumerWidget {
+  final String actionId;
+
+  const _TimeTrackingSection({required this.actionId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final occurrencesAsync = ref.watch(occurrencesOfProvider(actionId));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Time tracking', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        occurrencesAsync.when(
+          data: (occurrences) {
+            if (occurrences.isEmpty) {
+              return const Text('Not started yet.');
+            }
+            final latest = occurrences.first;
+            final started = dateTimeFromDb(latest.startedAt);
+            final finished = dateTimeFromDb(latest.finishedAt);
+            final text = (started != null && finished == null)
+                ? 'Currently running — started ${_fmt(started)}'
+                : (started != null && finished != null)
+                ? 'Last: ${_fmt(started)} → ${_fmt(finished)}'
+                : 'Not started yet.';
+            return Text(text);
+          },
+          loading: () => const LinearProgressIndicator(),
+          error: (e, _) => Text('Error: $e'),
+        ),
+      ],
+    );
+  }
+
+  String _fmt(DateTime utc) {
+    final d = utc.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+  }
 }
 
 /// Shows and manages an existing action's previous/next action links.
