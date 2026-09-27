@@ -113,3 +113,40 @@ tree must be followed by a pump with a **non-zero** duration (e.g.
 `tester.pump(const Duration(milliseconds: 1))`). Drift schedules a zero-duration timer when a
 stream subscription is cancelled, and a duration-less pump doesn't advance fake time far enough
 for that timer to fire before `flutter_test`'s pending-timer check runs.
+
+## Manual verification (2026-09-27)
+
+Beyond `flutter analyze`/`flutter test`, the built `app/build/windows/x64/runner/Debug/livenow.exe`
+was launched directly and driven with real window/mouse events (not just inspected) to confirm the
+MVP actually works end to end, not only that it compiles:
+
+- **Shell** — window launches; the `NavigationRail` shows all 7 destinations (Operational, TODO,
+  Most Important, Calendar, Habits, Metrics, Templates); Operational correctly shows the
+  "Nothing scheduled for today." empty state on a fresh database.
+- **Create** — the FAB opens the "New action" dialog; every field renders (Kind, Priority,
+  Postpone flexibility, Depth, All day, Start/End pickers, Estimated minutes, Metrics), Name is
+  autofocused, and Save persists the row.
+- **Live queries** — a task created with no schedule and no predecessors immediately appears in
+  **TODO** (via its live Drift stream — no manual refresh), confirming the recursive-CTE
+  "predecessors scheduled/done" queries in `data/queries.dart` and the Riverpod wiring in
+  `ui/providers.dart` work against a real on-disk database, not just the in-memory one the
+  automated tests use.
+- **Action menu** — the tile's menu lists Start, Finish, all 8 postpone options (+1 hour, +5
+  hours, prolong 30 min, after work (18:00), tomorrow morning, next working morning, next week,
+  next Monday morning), and Cancel.
+
+**How this was driven, for next time:** the app is a plain Win32 window, not something
+`SetForegroundWindow` can reliably raise from a script (Windows blocks focus-stealing from
+background processes) and not something `Graphics.CopyFromScreen` can screenshot reliably either
+(it captures whatever's topmost on screen, so an occluding window ends up in the picture instead).
+Two Win32 calls from PowerShell sidestep both problems:
+- **`user32.dll!PrintWindow(hwnd, hdc, 2)`** (`PW_RENDERFULLCONTENT`) renders a window's content
+  straight into a bitmap regardless of z-order or occlusion — use this to screenshot, not
+  `CopyFromScreen`.
+- **`user32.dll!SetWindowPos(hwnd, HWND_TOPMOST, ...)`** actually brings the window above others
+  (unlike `SetForegroundWindow`, it isn't subject to the focus-stealing restriction), which is
+  needed before a simulated `mouse_event` click will land on the right window instead of whatever
+  else is on screen at those coordinates.
+- If the window was ever minimized, its `GetWindowRect` reports the Windows placeholder
+  `-32000,-32000` / `160x28` — call `ShowWindow(hwnd, 9)` (`SW_RESTORE`) first and re-read the
+  rect.
