@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/postpone_rules.dart';
 import '../providers.dart';
+import '../undo.dart';
 
 /// The Start/Finish/Postpone/Cancel actions as a row of small emoji buttons,
 /// shown directly on a Current Actions board card — no menu to open first.
@@ -15,13 +16,16 @@ class QuickActionBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final service = ref.read(actionServiceProvider);
 
+    Future<void> run(String description, Future<void> Function() operation) =>
+        runUndoable(context, ref, actionId, description, operation);
+
     return Wrap(
       spacing: 6,
       runSpacing: 6,
       children: [
-        _EmojiButton('▶️', 'Start', () => service.start(actionId)),
-        _EmojiButton('🏁', 'Finish', () => service.finish(actionId)),
-        _EmojiButton('❌', 'Cancel', () => service.cancel(actionId)),
+        _EmojiButton('▶️', 'Start', () => run('Started', () => service.start(actionId))),
+        _EmojiButton('🏁', 'Finish', () => run('Finished', () => service.finish(actionId))),
+        _EmojiButton('❌', 'Cancel', () => run('Cancelled', () => service.cancel(actionId))),
         // A visible gap here separates "act on it now" (above) from
         // "postpone" (below) — those two groups being right next to each
         // other, in small tightly-packed buttons, was the likely cause of
@@ -30,42 +34,66 @@ class QuickActionBar extends ConsumerWidget {
         _EmojiButton(
           '⏳',
           'Prolong 30 min',
-          () => service.postpone(actionId, PostponeRule.prolongThirtyMinutes),
+          () => run(
+            'Prolonged 30 min',
+            () => service.postpone(actionId, PostponeRule.prolongThirtyMinutes),
+          ),
         ),
         _EmojiButton(
           '🕐➕',
           'Postpone +1 hour',
-          () => service.postpone(actionId, PostponeRule.plusOneHour),
+          () => run(
+            'Postponed +1 hour',
+            () => service.postpone(actionId, PostponeRule.plusOneHour),
+          ),
         ),
         _EmojiButton(
           '🕔➕',
           'Postpone +5 hours',
-          () => service.postpone(actionId, PostponeRule.plusFiveHours),
+          () => run(
+            'Postponed +5 hours',
+            () => service.postpone(actionId, PostponeRule.plusFiveHours),
+          ),
         ),
         _EmojiButton(
           '💼🌇',
           'Postpone: after work (18:00)',
-          () => service.postpone(actionId, PostponeRule.afterWork),
+          () => run(
+            'Postponed to after work',
+            () => service.postpone(actionId, PostponeRule.afterWork),
+          ),
         ),
         _EmojiButton(
           '🌅',
           'Postpone: tomorrow morning',
-          () => service.postpone(actionId, PostponeRule.morning),
+          () => run(
+            'Postponed to tomorrow morning',
+            () => service.postpone(actionId, PostponeRule.morning),
+          ),
         ),
         _EmojiButton(
           '💼🌅',
           'Postpone: next working morning',
-          () => service.postpone(actionId, PostponeRule.workingMorning),
+          () => run(
+            'Postponed to next working morning',
+            () => service.postpone(actionId, PostponeRule.workingMorning),
+          ),
         ),
         _EmojiButton(
           '7⃣📅',
           'Postpone: next week',
-          () => service.postpone(actionId, PostponeRule.nextWeek),
+          () => run(
+            'Postponed to next week',
+            () => service.postpone(actionId, PostponeRule.nextWeek),
+          ),
         ),
         _EmojiButton(
           '🗓️🌅',
           'Postpone: next Monday morning',
-          () => service.postpone(actionId, PostponeRule.nextMondayMorning),
+          () => run(
+            'Postponed to next Monday morning',
+            () => service.postpone(actionId, PostponeRule.nextMondayMorning),
+          ),
         ),
       ],
     );

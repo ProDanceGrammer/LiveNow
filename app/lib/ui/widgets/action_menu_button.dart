@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/postpone_rules.dart';
 import '../providers.dart';
+import '../undo.dart';
 
 enum _MenuAction {
   start,
@@ -30,7 +31,7 @@ class ActionMenuButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return PopupMenuButton<_MenuAction>(
       tooltip: 'Actions',
-      onSelected: (value) => _handle(ref, value),
+      onSelected: (value) => _handle(context, ref, value),
       itemBuilder: (context) => const [
         PopupMenuItem(value: _MenuAction.start, child: Text('Start')),
         PopupMenuItem(value: _MenuAction.finish, child: Text('Finish')),
@@ -73,40 +74,46 @@ class ActionMenuButton extends ConsumerWidget {
     );
   }
 
-  Future<void> _handle(WidgetRef ref, _MenuAction value) {
+  Future<void> _handle(BuildContext context, WidgetRef ref, _MenuAction value) {
     final service = ref.read(actionServiceProvider);
+    Future<void> run(String description, Future<void> Function() operation) =>
+        runUndoable(context, ref, actionId, description, operation);
+
     return switch (value) {
-      _MenuAction.start => service.start(actionId),
-      _MenuAction.finish => service.finish(actionId),
-      _MenuAction.cancel => service.cancel(actionId),
-      _MenuAction.plusOneHour => service.postpone(
-        actionId,
-        PostponeRule.plusOneHour,
+      _MenuAction.start => run('Started', () => service.start(actionId)),
+      _MenuAction.finish => run('Finished', () => service.finish(actionId)),
+      _MenuAction.cancel => run('Cancelled', () => service.cancel(actionId)),
+      _MenuAction.plusOneHour => run(
+        'Postponed +1 hour',
+        () => service.postpone(actionId, PostponeRule.plusOneHour),
       ),
-      _MenuAction.plusFiveHours => service.postpone(
-        actionId,
-        PostponeRule.plusFiveHours,
+      _MenuAction.plusFiveHours => run(
+        'Postponed +5 hours',
+        () => service.postpone(actionId, PostponeRule.plusFiveHours),
       ),
-      _MenuAction.prolong => service.postpone(
-        actionId,
-        PostponeRule.prolongThirtyMinutes,
+      _MenuAction.prolong => run(
+        'Prolonged 30 min',
+        () => service.postpone(actionId, PostponeRule.prolongThirtyMinutes),
       ),
-      _MenuAction.afterWork => service.postpone(
-        actionId,
-        PostponeRule.afterWork,
+      _MenuAction.afterWork => run(
+        'Postponed to after work',
+        () => service.postpone(actionId, PostponeRule.afterWork),
       ),
-      _MenuAction.morning => service.postpone(actionId, PostponeRule.morning),
-      _MenuAction.workingMorning => service.postpone(
-        actionId,
-        PostponeRule.workingMorning,
+      _MenuAction.morning => run(
+        'Postponed to tomorrow morning',
+        () => service.postpone(actionId, PostponeRule.morning),
       ),
-      _MenuAction.nextWeek => service.postpone(
-        actionId,
-        PostponeRule.nextWeek,
+      _MenuAction.workingMorning => run(
+        'Postponed to next working morning',
+        () => service.postpone(actionId, PostponeRule.workingMorning),
       ),
-      _MenuAction.nextMondayMorning => service.postpone(
-        actionId,
-        PostponeRule.nextMondayMorning,
+      _MenuAction.nextWeek => run(
+        'Postponed to next week',
+        () => service.postpone(actionId, PostponeRule.nextWeek),
+      ),
+      _MenuAction.nextMondayMorning => run(
+        'Postponed to next Monday morning',
+        () => service.postpone(actionId, PostponeRule.nextMondayMorning),
       ),
     };
   }

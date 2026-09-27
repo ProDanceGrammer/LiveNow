@@ -7,6 +7,16 @@ import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'postpone_rules.dart';
 
+/// A full copy of one action's row and its entire occurrence history, taken
+/// just before a quick-action button changes it — lets [ActionService.restore]
+/// put everything back exactly as it was (the Undo feature).
+class ActionSnapshot {
+  final ActionRow action;
+  final List<ActionOccurrence> occurrences;
+
+  const ActionSnapshot({required this.action, required this.occurrences});
+}
+
 /// Create/edit/start/finish/postpone/cancel an action, and instantiate one
 /// from a saved template.
 class ActionService {
@@ -224,10 +234,15 @@ class ActionService {
               .getSingleOrNull();
 
       if (runningOccurrence != null) {
+        // Also re-sync startedAt to newStart: if it was back-projected above
+        // (oldStart was empty or still in the future — e.g. a postpone had
+        // pushed it ahead of "now"), the occurrence's own startedAt would
+        // otherwise be left stale, pointing at a time after finishedAt.
         await (db.update(
           db.actionOccurrencesTable,
         )..where((t) => t.id.equals(runningOccurrence.id))).write(
           ActionOccurrencesTableCompanion(
+            startedAt: Value(dateTimeToDb(newStart)),
             finishedAt: Value(nowText),
             outcome: const Value('done'),
           ),
@@ -384,6 +399,45 @@ class ActionService {
   /// Instantiates a new action from a saved template's JSON payload, in one
   /// transaction. Payload shape: `{name, kind?, priority?, postponeFlex?,
   /// depthLevel?, estimatedMinutes?, isAllDay?, metricIds?}`.
+  /// Snapshots [actionId]'s full row and occurrence history — see
+  /// [ActionSnapshot] and [restore].
+  Future<ActionSnapshot> snapshot(String actionId) async {
+    final action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    final occurrences = await (db.select(
+      db.actionOccurrencesTable,
+    )..where((t) => t.actionId.equals(actionId))).get();
+    return ActionSnapshot(action: action, occurrences: occurrences);
+  }
+
+  /// Restores an action to exactly the state captured by [snapshot]: its
+  /// occurrence history is replaced wholesale (Start/Finish/Postpone can
+  /// each touch or add an occurrence, so a partial restore could leave a
+  /// stray or half-reverted row) and its own row is overwritten
+  /// field-for-field, including its original `updated_at`.
+  Future<void> restore(ActionSnapshot snapshot) {
+    return db.transaction(() async {
+      await (db.delete(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(snapshot.action.id))).go();
+      for (final occurrence in snapshot.occurrences) {
+        await db
+            .into(db.actionOccurrencesTable)
+            .insert(
+              occurrence.toCompanion(false),
+              mode: InsertMode.insertOrReplace,
+            );
+      }
+      await db
+          .into(db.actionsTable)
+          .insert(
+            snapshot.action.toCompanion(false),
+            mode: InsertMode.insertOrReplace,
+          );
+    });
+  }
+
   Future<String> createFromTemplate(String templateId) async {
     final template = await (db.select(
       db.actionTemplatesTable,

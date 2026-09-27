@@ -353,6 +353,88 @@ void main() {
     },
   );
 
+  test(
+    'finishing a running occurrence whose start was postponed into the '
+    'future re-syncs the occurrence\'s started_at, so it never ends up '
+    'finished before it started',
+    () async {
+      final actionId = await service.createAction(name: 'Fresh 60min test');
+      await service.start(actionId);
+
+      // Simulate a postpone that pushed start_at (and end_at, by the same
+      // delta, preserving duration) ahead of "now" while the occurrence was
+      // still running — postpone() already keeps the occurrence's
+      // started_at in sync with this, per the test above — then Finish is
+      // pressed before "now" catches up to that pushed time, so finish()
+      // must back-project a fresh start rather than trusting the
+      // still-future one.
+      final before = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final originalStart = dateTimeFromDb(before.startAt)!;
+      final originalEnd = dateTimeFromDb(before.endAt)!;
+      const delta = Duration(hours: 5);
+      final newStart = originalStart.add(delta);
+      final newEnd = originalEnd.add(delta);
+
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(
+          startAt: Value(dateTimeToDb(newStart)!),
+          endAt: Value(dateTimeToDb(newEnd)!),
+        ),
+      );
+      await (db.update(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).write(
+        ActionOccurrencesTableCompanion(startedAt: Value(dateTimeToDb(newStart)!)),
+      );
+
+      await service.finish(actionId);
+
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final occurrence = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).getSingle();
+
+      // The card's actions.start_at and the editor's occurrence.started_at
+      // must always agree, and neither may show a start after the finish.
+      expect(occurrence.startedAt, action.startAt);
+      final startAt = dateTimeFromDb(action.startAt)!;
+      final endAt = dateTimeFromDb(action.endAt)!;
+      expect(startAt.isAfter(endAt), isFalse);
+    },
+  );
+
+  test('snapshot/restore round-trips an action and its occurrence history', () async {
+    final actionId = await service.createAction(name: 'Undo me');
+    await service.start(actionId);
+
+    final before = await service.snapshot(actionId);
+
+    await service.finish(actionId);
+    var action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    expect(action.status, 'done');
+
+    await service.restore(before);
+
+    action = await (db.select(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).getSingle();
+    expect(action.status, 'open');
+
+    final occurrences = await (db.select(
+      db.actionOccurrencesTable,
+    )..where((t) => t.actionId.equals(actionId))).get();
+    expect(occurrences, hasLength(1));
+    expect(occurrences.single.finishedAt, isNull); // running again, not done
+  });
+
   test('finish on a task marks it done and closes the occurrence', () async {
     final actionId = await service.createAction(name: 'Pay electricity bill');
     await service.start(actionId);
