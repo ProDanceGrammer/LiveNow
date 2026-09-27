@@ -16,11 +16,17 @@ class QuickActionBar extends ConsumerWidget {
     final service = ref.read(actionServiceProvider);
 
     return Wrap(
-      spacing: 2,
-      runSpacing: 2,
+      spacing: 6,
+      runSpacing: 6,
       children: [
         _EmojiButton('▶️', 'Start', () => service.start(actionId)),
         _EmojiButton('🏁', 'Finish', () => service.finish(actionId)),
+        _EmojiButton('❌', 'Cancel', () => service.cancel(actionId)),
+        // A visible gap here separates "act on it now" (above) from
+        // "postpone" (below) — those two groups being right next to each
+        // other, in small tightly-packed buttons, was the likely cause of
+        // mis-clicking Finish/Cancel while aiming for a postpone option.
+        const SizedBox(width: 10),
         _EmojiButton(
           '⏳',
           'Prolong 30 min',
@@ -61,7 +67,6 @@ class QuickActionBar extends ConsumerWidget {
           'Postpone: next Monday morning',
           () => service.postpone(actionId, PostponeRule.nextMondayMorning),
         ),
-        _EmojiButton('❌', 'Cancel', () => service.cancel(actionId)),
       ],
     );
   }
@@ -79,11 +84,19 @@ class _EmojiButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Text(emoji, style: const TextStyle(fontSize: 15)),
+        // A fixed, generous size (not just padding around the glyph) so
+        // every button — whether a single emoji or a wider composite one —
+        // gets the same large, predictable hit target. The previous
+        // padding-only sizing gave narrower glyphs a noticeably smaller tap
+        // area, making the wrong neighbor easy to hit.
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Center(
+            child: Text(emoji, style: const TextStyle(fontSize: 16)),
+          ),
         ),
       ),
     );
