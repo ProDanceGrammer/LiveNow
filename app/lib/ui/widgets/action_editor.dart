@@ -4,9 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/dependency_service.dart';
+import '../../domain/done_rule.dart';
 import '../providers.dart';
 import 'action_menu_button.dart';
-import 'action_tile.dart' show statusLabel;
 import 'date_time_field.dart';
 
 const _priorities = [
@@ -48,7 +48,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   late final TextEditingController _nameController;
   late final TextEditingController _estimatedMinutesController;
 
-  String _kind = 'task';
   String? _priority;
   String _postponeFlex = 'flexible';
   String? _depthLevel;
@@ -69,7 +68,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     );
 
     if (existing != null) {
-      _kind = existing.kind;
       _priority = existing.priority;
       _postponeFlex = existing.postponeFlex;
       _depthLevel = existing.depthLevel;
@@ -117,7 +115,14 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   Row(
                     children: [
                       Text(
-                        statusLabel(widget.existing!.status),
+                        isDoneBefore(
+                              startAt: dateTimeFromDb(widget.existing!.startAt),
+                              endAt: dateTimeFromDb(widget.existing!.endAt),
+                              isAllDay: widget.existing!.isAllDay,
+                              done: widget.existing!.done,
+                            )
+                            ? 'Done'
+                            : 'Open',
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       const Spacer(),
@@ -125,7 +130,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  _TimeTrackingSection(actionId: widget.existing!.id),
+                  _TimeTrackingSection(
+                    actionId: widget.existing!.id,
+                    scheduledStart: _startAt,
+                  ),
                 ],
                 const SizedBox(height: 12),
                 ExpansionTile(
@@ -133,50 +141,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: const EdgeInsets.only(bottom: 8),
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _kind,
-                            decoration: const InputDecoration(
-                              labelText: 'Kind',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'task',
-                                child: Text('Task'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'habit',
-                                child: Text('Habit'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'bad_habit',
-                                child: Text('Bad habit'),
-                              ),
-                            ],
-                            onChanged: (v) => setState(() => _kind = v!),
-                          ),
+                    DropdownButtonFormField<String?>(
+                      initialValue: _priority,
+                      decoration: const InputDecoration(
+                        labelText: 'Priority',
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: null,
+                          child: Text('None'),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: DropdownButtonFormField<String?>(
-                            initialValue: _priority,
-                            decoration: const InputDecoration(
-                              labelText: 'Priority',
-                            ),
-                            items: [
-                              const DropdownMenuItem(
-                                value: null,
-                                child: Text('None'),
-                              ),
-                              for (final p in _priorities)
-                                DropdownMenuItem(value: p, child: Text(p)),
-                            ],
-                            onChanged: (v) => setState(() => _priority = v),
-                          ),
-                        ),
+                        for (final p in _priorities)
+                          DropdownMenuItem(value: p, child: Text(p)),
                       ],
+                      onChanged: (v) => setState(() => _priority = v),
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -331,7 +309,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       await service.updateAction(
         actionId: id,
         name: name,
-        kind: _kind,
         priority: _priority,
         postponeFlex: _postponeFlex,
         depthLevel: _depthLevel,
@@ -344,7 +321,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     } else {
       await service.createAction(
         name: name,
-        kind: _kind,
         priority: _priority,
         postponeFlex: _postponeFlex,
         depthLevel: _depthLevel,
@@ -361,13 +337,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
 }
 
 
-/// Shows the action's actual start/finish history (`action_occurrences`) —
-/// distinct from `startAt`/`endAt` above, which is only the *scheduled*
-/// time and never changes just because Start/Finish was pressed.
+/// Shows whether an occurrence is currently open (`action_occurrences`), and
+/// if so since when — using [scheduledStart] (`actions.start_at`, the single
+/// source of truth for the current start time) rather than the occurrence's
+/// own `started_at`, so this always agrees with "Scheduled start" above it.
+/// A *closed* occurrence's own start/finish is genuine frozen history and is
+/// shown as-is.
 class _TimeTrackingSection extends ConsumerWidget {
   final String actionId;
+  final DateTime? scheduledStart;
 
-  const _TimeTrackingSection({required this.actionId});
+  const _TimeTrackingSection({
+    required this.actionId,
+    required this.scheduledStart,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -384,11 +367,17 @@ class _TimeTrackingSection extends ConsumerWidget {
               return const Text('Not started yet.');
             }
             final latest = occurrences.first;
+            if (latest.finishedAt == null) {
+              final start = scheduledStart;
+              return Text(
+                start != null
+                    ? 'Currently running — started ${_fmt(start)}'
+                    : 'Currently running',
+              );
+            }
             final started = dateTimeFromDb(latest.startedAt);
             final finished = dateTimeFromDb(latest.finishedAt);
-            final text = (started != null && finished == null)
-                ? 'Currently running — started ${_fmt(started)}'
-                : (started != null && finished != null)
+            final text = (started != null && finished != null)
                 ? 'Last: ${_fmt(started)} → ${_fmt(finished)}'
                 : 'Not started yet.';
             return Text(text);

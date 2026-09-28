@@ -99,7 +99,57 @@ void main() {
     },
   );
 
-  test('watchCalendarWeek filters by range and excludes habits', () async {
+  test(
+    'watchMostImportant excludes a successor whose predecessor is a '
+    'not-done all-day action (manual done flag, not a time comparison)',
+    () async {
+      final notDoneAllDay = await actions.createAction(
+        name: 'All-day, not done',
+        startAt: DateTime.utc(2024, 1, 1),
+        isAllDay: true,
+      );
+      final blocked = await actions.createAction(name: 'Blocked');
+      await deps.addDependency(
+        predecessorId: notDoneAllDay,
+        successorId: blocked,
+      );
+
+      final doneAllDay = await actions.createAction(
+        name: 'All-day, done',
+        startAt: DateTime.utc(2024, 1, 1),
+        isAllDay: true,
+      );
+      await actions.finish(doneAllDay);
+      final ready = await actions.createAction(name: 'Ready');
+      await deps.addDependency(predecessorId: doneAllDay, successorId: ready);
+
+      final result = await queries.watchMostImportant().first;
+      final ids = result.map((a) => a.id).toList();
+
+      expect(ids, isNot(contains(blocked)));
+      expect(ids, contains(ready));
+    },
+  );
+
+  test(
+    'watchMostImportant excludes a successor whose timed predecessor is '
+    'still scheduled ahead of now',
+    () async {
+      final future = DateTime.now().toUtc().add(const Duration(days: 30));
+      final stillAhead = await actions.createAction(
+        name: 'Scheduled far ahead',
+        startAt: future,
+        endAt: future.add(const Duration(hours: 1)),
+      );
+      final blocked = await actions.createAction(name: 'Blocked');
+      await deps.addDependency(predecessorId: stillAhead, successorId: blocked);
+
+      final result = await queries.watchMostImportant().first;
+      expect(result.map((a) => a.id), isNot(contains(blocked)));
+    },
+  );
+
+  test('watchCalendarWeek filters by range', () async {
     final inWeek = await actions.createAction(
       name: 'In week',
       startAt: DateTime.utc(2024, 1, 2),
@@ -107,11 +157,6 @@ void main() {
     await actions.createAction(
       name: 'Out of week',
       startAt: DateTime.utc(2024, 1, 10),
-    );
-    await actions.createAction(
-      name: 'Habit in week',
-      kind: 'habit',
-      startAt: DateTime.utc(2024, 1, 2),
     );
 
     final result = await queries
@@ -121,20 +166,6 @@ void main() {
         )
         .first;
     expect(result.map((a) => a.id), [inWeek]);
-  });
-
-  test('watchHabits returns only open habits', () async {
-    final habit = await actions.createAction(name: 'Pray', kind: 'habit');
-    final task = await actions.createAction(name: 'Task');
-    final doneHabit = await actions.createAction(name: 'Sleep', kind: 'habit');
-    await actions.finish(doneHabit); // habits stay 'open' though; cancel instead
-    await actions.cancel(doneHabit);
-
-    final result = await queries.watchHabits().first;
-    final ids = result.map((a) => a.id).toList();
-    expect(ids, contains(habit));
-    expect(ids, isNot(contains(task)));
-    expect(ids, isNot(contains(doneHabit)));
   });
 
   group('Current Actions board', () {

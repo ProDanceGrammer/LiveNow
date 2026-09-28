@@ -25,7 +25,7 @@ class ActionCard extends ConsumerWidget {
     final isRunning = ref
         .watch(runningOccurrencesProvider)
         .value
-        ?.containsKey(action.id) ?? false;
+        ?.contains(action.id) ?? false;
     final timeLine = _formatTimeRange(action);
 
     return Card(
@@ -65,6 +65,7 @@ class ActionCard extends ConsumerWidget {
                       actionId: action.id,
                       initialStart: action.startAt,
                       initialEnd: action.endAt,
+                      initialEstimatedMinutes: action.estimatedMinutes,
                     ),
                     child: Text(
                       timeLine,
@@ -91,6 +92,8 @@ class ActionCard extends ConsumerWidget {
   /// side isn't today — showing it only when start/end differ *from each
   /// other* (the old behaviour) meant a range entirely in the past could
   /// render with no date at all, which is exactly the confusing case.
+  /// Appends the estimated duration (the same value `QuickTimeEditDialog`
+  /// and the editor's Manual Parameters edit) when it's set.
   String? _formatTimeRange(ActionListItem a) {
     if (a.startAt == null) return null;
     final start = a.startAt!.toLocal();
@@ -98,13 +101,20 @@ class ActionCard extends ConsumerWidget {
     final startStr = _sameDay(start, today)
         ? _time(start)
         : '${_date(start)} ${_time(start)}';
-    if (a.endAt == null) return startStr;
 
-    final end = a.endAt!.toLocal();
-    final endStr = _sameDay(end, today)
-        ? _time(end)
-        : '${_date(end)} ${_time(end)}';
-    return '$startStr → $endStr';
+    final String range;
+    if (a.endAt == null) {
+      range = startStr;
+    } else {
+      final end = a.endAt!.toLocal();
+      final endStr = _sameDay(end, today)
+          ? _time(end)
+          : '${_date(end)} ${_time(end)}';
+      range = '$startStr → $endStr';
+    }
+    return a.estimatedMinutes != null
+        ? '$range · ${a.estimatedMinutes}m'
+        : range;
   }
 
   bool _sameDay(DateTime a, DateTime b) =>

@@ -27,25 +27,18 @@ class $ActionsTableTable extends ActionsTable
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
-  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  static const VerificationMeta _doneMeta = const VerificationMeta('done');
   @override
-  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
-    'kind',
+  late final GeneratedColumn<bool> done = GeneratedColumn<bool>(
+    'done',
     aliasedName,
     false,
-    type: DriftSqlType.string,
+    type: DriftSqlType.bool,
     requiredDuringInsert: false,
-    defaultValue: const Constant('task'),
-  );
-  static const VerificationMeta _statusMeta = const VerificationMeta('status');
-  @override
-  late final GeneratedColumn<String> status = GeneratedColumn<String>(
-    'status',
-    aliasedName,
-    false,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-    defaultValue: const Constant('open'),
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("done" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
   );
   static const VerificationMeta _priorityMeta = const VerificationMeta(
     'priority',
@@ -175,8 +168,7 @@ class $ActionsTableTable extends ActionsTable
   List<GeneratedColumn> get $columns => [
     id,
     name,
-    kind,
-    status,
+    done,
     priority,
     postponeFlex,
     depthLevel,
@@ -214,16 +206,10 @@ class $ActionsTableTable extends ActionsTable
     } else if (isInserting) {
       context.missing(_nameMeta);
     }
-    if (data.containsKey('kind')) {
+    if (data.containsKey('done')) {
       context.handle(
-        _kindMeta,
-        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
-      );
-    }
-    if (data.containsKey('status')) {
-      context.handle(
-        _statusMeta,
-        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+        _doneMeta,
+        done.isAcceptableOrUnknown(data['done']!, _doneMeta),
       );
     }
     if (data.containsKey('priority')) {
@@ -322,13 +308,9 @@ class $ActionsTableTable extends ActionsTable
         DriftSqlType.string,
         data['${effectivePrefix}name'],
       )!,
-      kind: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}kind'],
-      )!,
-      status: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}status'],
+      done: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}done'],
       )!,
       priority: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
@@ -386,8 +368,7 @@ class $ActionsTableTable extends ActionsTable
 class ActionRow extends DataClass implements Insertable<ActionRow> {
   final String id;
   final String name;
-  final String kind;
-  final String status;
+  final bool done;
   final String? priority;
   final String postponeFlex;
   final String? depthLevel;
@@ -406,8 +387,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   const ActionRow({
     required this.id,
     required this.name,
-    required this.kind,
-    required this.status,
+    required this.done,
     this.priority,
     required this.postponeFlex,
     this.depthLevel,
@@ -425,8 +405,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     final map = <String, Expression>{};
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
-    map['kind'] = Variable<String>(kind);
-    map['status'] = Variable<String>(status);
+    map['done'] = Variable<bool>(done);
     if (!nullToAbsent || priority != null) {
       map['priority'] = Variable<String>(priority);
     }
@@ -459,8 +438,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     return ActionsTableCompanion(
       id: Value(id),
       name: Value(name),
-      kind: Value(kind),
-      status: Value(status),
+      done: Value(done),
       priority: priority == null && nullToAbsent
           ? const Value.absent()
           : Value(priority),
@@ -497,8 +475,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     return ActionRow(
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
-      kind: serializer.fromJson<String>(json['kind']),
-      status: serializer.fromJson<String>(json['status']),
+      done: serializer.fromJson<bool>(json['done']),
       priority: serializer.fromJson<String?>(json['priority']),
       postponeFlex: serializer.fromJson<String>(json['postponeFlex']),
       depthLevel: serializer.fromJson<String?>(json['depthLevel']),
@@ -518,8 +495,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
-      'kind': serializer.toJson<String>(kind),
-      'status': serializer.toJson<String>(status),
+      'done': serializer.toJson<bool>(done),
       'priority': serializer.toJson<String?>(priority),
       'postponeFlex': serializer.toJson<String>(postponeFlex),
       'depthLevel': serializer.toJson<String?>(depthLevel),
@@ -537,8 +513,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   ActionRow copyWith({
     String? id,
     String? name,
-    String? kind,
-    String? status,
+    bool? done,
     Value<String?> priority = const Value.absent(),
     String? postponeFlex,
     Value<String?> depthLevel = const Value.absent(),
@@ -553,8 +528,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   }) => ActionRow(
     id: id ?? this.id,
     name: name ?? this.name,
-    kind: kind ?? this.kind,
-    status: status ?? this.status,
+    done: done ?? this.done,
     priority: priority.present ? priority.value : this.priority,
     postponeFlex: postponeFlex ?? this.postponeFlex,
     depthLevel: depthLevel.present ? depthLevel.value : this.depthLevel,
@@ -573,8 +547,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     return ActionRow(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
-      kind: data.kind.present ? data.kind.value : this.kind,
-      status: data.status.present ? data.status.value : this.status,
+      done: data.done.present ? data.done.value : this.done,
       priority: data.priority.present ? data.priority.value : this.priority,
       postponeFlex: data.postponeFlex.present
           ? data.postponeFlex.value
@@ -604,8 +577,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     return (StringBuffer('ActionRow(')
           ..write('id: $id, ')
           ..write('name: $name, ')
-          ..write('kind: $kind, ')
-          ..write('status: $status, ')
+          ..write('done: $done, ')
           ..write('priority: $priority, ')
           ..write('postponeFlex: $postponeFlex, ')
           ..write('depthLevel: $depthLevel, ')
@@ -625,8 +597,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   int get hashCode => Object.hash(
     id,
     name,
-    kind,
-    status,
+    done,
     priority,
     postponeFlex,
     depthLevel,
@@ -645,8 +616,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       (other is ActionRow &&
           other.id == this.id &&
           other.name == this.name &&
-          other.kind == this.kind &&
-          other.status == this.status &&
+          other.done == this.done &&
           other.priority == this.priority &&
           other.postponeFlex == this.postponeFlex &&
           other.depthLevel == this.depthLevel &&
@@ -663,8 +633,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
 class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   final Value<String> id;
   final Value<String> name;
-  final Value<String> kind;
-  final Value<String> status;
+  final Value<bool> done;
   final Value<String?> priority;
   final Value<String> postponeFlex;
   final Value<String?> depthLevel;
@@ -680,8 +649,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   const ActionsTableCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
-    this.kind = const Value.absent(),
-    this.status = const Value.absent(),
+    this.done = const Value.absent(),
     this.priority = const Value.absent(),
     this.postponeFlex = const Value.absent(),
     this.depthLevel = const Value.absent(),
@@ -698,8 +666,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   ActionsTableCompanion.insert({
     required String id,
     required String name,
-    this.kind = const Value.absent(),
-    this.status = const Value.absent(),
+    this.done = const Value.absent(),
     this.priority = const Value.absent(),
     this.postponeFlex = const Value.absent(),
     this.depthLevel = const Value.absent(),
@@ -719,8 +686,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   static Insertable<ActionRow> custom({
     Expression<String>? id,
     Expression<String>? name,
-    Expression<String>? kind,
-    Expression<String>? status,
+    Expression<bool>? done,
     Expression<String>? priority,
     Expression<String>? postponeFlex,
     Expression<String>? depthLevel,
@@ -737,8 +703,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
-      if (kind != null) 'kind': kind,
-      if (status != null) 'status': status,
+      if (done != null) 'done': done,
       if (priority != null) 'priority': priority,
       if (postponeFlex != null) 'postpone_flex': postponeFlex,
       if (depthLevel != null) 'depth_level': depthLevel,
@@ -757,8 +722,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   ActionsTableCompanion copyWith({
     Value<String>? id,
     Value<String>? name,
-    Value<String>? kind,
-    Value<String>? status,
+    Value<bool>? done,
     Value<String?>? priority,
     Value<String>? postponeFlex,
     Value<String?>? depthLevel,
@@ -775,8 +739,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     return ActionsTableCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
-      kind: kind ?? this.kind,
-      status: status ?? this.status,
+      done: done ?? this.done,
       priority: priority ?? this.priority,
       postponeFlex: postponeFlex ?? this.postponeFlex,
       depthLevel: depthLevel ?? this.depthLevel,
@@ -801,11 +764,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     if (name.present) {
       map['name'] = Variable<String>(name.value);
     }
-    if (kind.present) {
-      map['kind'] = Variable<String>(kind.value);
-    }
-    if (status.present) {
-      map['status'] = Variable<String>(status.value);
+    if (done.present) {
+      map['done'] = Variable<bool>(done.value);
     }
     if (priority.present) {
       map['priority'] = Variable<String>(priority.value);
@@ -851,8 +811,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     return (StringBuffer('ActionsTableCompanion(')
           ..write('id: $id, ')
           ..write('name: $name, ')
-          ..write('kind: $kind, ')
-          ..write('status: $status, ')
+          ..write('done: $done, ')
           ..write('priority: $priority, ')
           ..write('postponeFlex: $postponeFlex, ')
           ..write('depthLevel: $depthLevel, ')
@@ -2429,13 +2388,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ActionMetricsTableTable(this);
   late final $ActionTemplatesTableTable actionTemplatesTable =
       $ActionTemplatesTableTable(this);
-  late final Index idxActionsStatusStart = Index(
-    'idx_actions_status_start',
-    'CREATE INDEX idx_actions_status_start ON actions (status, start_at)',
+  late final Index idxActionsDoneStart = Index(
+    'idx_actions_done_start',
+    'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
   );
-  late final Index idxActionsKindStatusAllday = Index(
-    'idx_actions_kind_status_allday',
-    'CREATE INDEX idx_actions_kind_status_allday ON actions (kind, status, is_all_day)',
+  late final Index idxActionsAlldayStart = Index(
+    'idx_actions_allday_start',
+    'CREATE INDEX idx_actions_allday_start ON actions (is_all_day, start_at)',
   );
   late final Index idxDepSuccessor = Index(
     'idx_dep_successor',
@@ -2460,8 +2419,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     metricsTable,
     actionMetricsTable,
     actionTemplatesTable,
-    idxActionsStatusStart,
-    idxActionsKindStatusAllday,
+    idxActionsDoneStart,
+    idxActionsAlldayStart,
     idxDepSuccessor,
     idxOccurrenceAction,
     idxActionMetricsMetric,
@@ -2510,8 +2469,7 @@ typedef $$ActionsTableTableCreateCompanionBuilder =
     ActionsTableCompanion Function({
       required String id,
       required String name,
-      Value<String> kind,
-      Value<String> status,
+      Value<bool> done,
       Value<String?> priority,
       Value<String> postponeFlex,
       Value<String?> depthLevel,
@@ -2529,8 +2487,7 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
     ActionsTableCompanion Function({
       Value<String> id,
       Value<String> name,
-      Value<String> kind,
-      Value<String> status,
+      Value<bool> done,
       Value<String?> priority,
       Value<String> postponeFlex,
       Value<String?> depthLevel,
@@ -2665,13 +2622,8 @@ class $$ActionsTableTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<String> get kind => $composableBuilder(
-    column: $table.kind,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get status => $composableBuilder(
-    column: $table.status,
+  ColumnFilters<bool> get done => $composableBuilder(
+    column: $table.done,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2853,13 +2805,8 @@ class $$ActionsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get kind => $composableBuilder(
-    column: $table.kind,
-    builder: (column) => ColumnOrderings(column),
-  );
-
-  ColumnOrderings<String> get status => $composableBuilder(
-    column: $table.status,
+  ColumnOrderings<bool> get done => $composableBuilder(
+    column: $table.done,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -2934,11 +2881,8 @@ class $$ActionsTableTableAnnotationComposer
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
 
-  GeneratedColumn<String> get kind =>
-      $composableBuilder(column: $table.kind, builder: (column) => column);
-
-  GeneratedColumn<String> get status =>
-      $composableBuilder(column: $table.status, builder: (column) => column);
+  GeneratedColumn<bool> get done =>
+      $composableBuilder(column: $table.done, builder: (column) => column);
 
   GeneratedColumn<String> get priority =>
       $composableBuilder(column: $table.priority, builder: (column) => column);
@@ -3125,8 +3069,7 @@ class $$ActionsTableTableTableManager
               ({
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
-                Value<String> kind = const Value.absent(),
-                Value<String> status = const Value.absent(),
+                Value<bool> done = const Value.absent(),
                 Value<String?> priority = const Value.absent(),
                 Value<String> postponeFlex = const Value.absent(),
                 Value<String?> depthLevel = const Value.absent(),
@@ -3142,8 +3085,7 @@ class $$ActionsTableTableTableManager
               }) => ActionsTableCompanion(
                 id: id,
                 name: name,
-                kind: kind,
-                status: status,
+                done: done,
                 priority: priority,
                 postponeFlex: postponeFlex,
                 depthLevel: depthLevel,
@@ -3161,8 +3103,7 @@ class $$ActionsTableTableTableManager
               ({
                 required String id,
                 required String name,
-                Value<String> kind = const Value.absent(),
-                Value<String> status = const Value.absent(),
+                Value<bool> done = const Value.absent(),
                 Value<String?> priority = const Value.absent(),
                 Value<String> postponeFlex = const Value.absent(),
                 Value<String?> depthLevel = const Value.absent(),
@@ -3178,8 +3119,7 @@ class $$ActionsTableTableTableManager
               }) => ActionsTableCompanion.insert(
                 id: id,
                 name: name,
-                kind: kind,
-                status: status,
+                done: done,
                 priority: priority,
                 postponeFlex: postponeFlex,
                 depthLevel: depthLevel,

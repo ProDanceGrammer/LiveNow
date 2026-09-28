@@ -8,7 +8,6 @@ import '../undo.dart';
 enum _MenuAction {
   start,
   finish,
-  cancel,
   plusOneHour,
   plusFiveHours,
   prolong,
@@ -19,7 +18,7 @@ enum _MenuAction {
   nextMondayMorning,
 }
 
-/// The Start/Finish/Postpone/Cancel menu for one action. Shared by
+/// The Start/Finish/Postpone menu for one action. Shared by
 /// [ActionTile] (a trailing 3-dot menu) and the Current Actions board's
 /// cards, so the button list only lives in one place.
 class ActionMenuButton extends ConsumerWidget {
@@ -68,8 +67,6 @@ class ActionMenuButton extends ConsumerWidget {
           value: _MenuAction.nextMondayMorning,
           child: Text('Postpone: next Monday morning'),
         ),
-        PopupMenuDivider(),
-        PopupMenuItem(value: _MenuAction.cancel, child: Text('Cancel')),
       ],
     );
   }
@@ -82,7 +79,6 @@ class ActionMenuButton extends ConsumerWidget {
     return switch (value) {
       _MenuAction.start => run('Started', () => service.start(actionId)),
       _MenuAction.finish => run('Finished', () => service.finish(actionId)),
-      _MenuAction.cancel => run('Cancelled', () => service.cancel(actionId)),
       _MenuAction.plusOneHour => run(
         'Postponed +1 hour',
         () => service.postpone(actionId, PostponeRule.plusOneHour),

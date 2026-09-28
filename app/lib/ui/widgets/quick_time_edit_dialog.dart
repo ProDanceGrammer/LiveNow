@@ -4,20 +4,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 import 'date_time_field.dart';
 
-/// Lets you edit an action's start/end time directly by tapping the time
-/// shown on a Current Actions board card — the same picker as "Scheduled
-/// start"/"Scheduled end" in the editor's Manual Parameters, just without
-/// having to open the full editor first.
+/// Lets you edit an action's start/end time and estimated duration directly
+/// by tapping the time shown on a Current Actions board card — the same
+/// three fields as "Scheduled start"/"Scheduled end"/"Estimated minutes" in
+/// the editor's Manual Parameters, just without having to open the full
+/// editor first.
 class QuickTimeEditDialog extends ConsumerStatefulWidget {
   final String actionId;
   final DateTime? initialStart;
   final DateTime? initialEnd;
+  final int? initialEstimatedMinutes;
 
   const QuickTimeEditDialog({
     super.key,
     required this.actionId,
     this.initialStart,
     this.initialEnd,
+    this.initialEstimatedMinutes,
   });
 
   static Future<void> show(
@@ -25,6 +28,7 @@ class QuickTimeEditDialog extends ConsumerStatefulWidget {
     required String actionId,
     DateTime? initialStart,
     DateTime? initialEnd,
+    int? initialEstimatedMinutes,
   }) {
     return showDialog<void>(
       context: context,
@@ -32,6 +36,7 @@ class QuickTimeEditDialog extends ConsumerStatefulWidget {
         actionId: actionId,
         initialStart: initialStart,
         initialEnd: initialEnd,
+        initialEstimatedMinutes: initialEstimatedMinutes,
       ),
     );
   }
@@ -44,12 +49,22 @@ class QuickTimeEditDialog extends ConsumerStatefulWidget {
 class _QuickTimeEditDialogState extends ConsumerState<QuickTimeEditDialog> {
   DateTime? _start;
   DateTime? _end;
+  late final TextEditingController _estimatedMinutesController;
 
   @override
   void initState() {
     super.initState();
     _start = widget.initialStart;
     _end = widget.initialEnd;
+    _estimatedMinutesController = TextEditingController(
+      text: widget.initialEstimatedMinutes?.toString() ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _estimatedMinutesController.dispose();
+    super.dispose();
   }
 
   @override
@@ -74,6 +89,14 @@ class _QuickTimeEditDialogState extends ConsumerState<QuickTimeEditDialog> {
               includeTime: true,
               onChanged: (v) => setState(() => _end = v),
             ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _estimatedMinutesController,
+              decoration: const InputDecoration(
+                labelText: 'Estimated minutes',
+              ),
+              keyboardType: TextInputType.number,
+            ),
           ],
         ),
       ),
@@ -88,9 +111,17 @@ class _QuickTimeEditDialogState extends ConsumerState<QuickTimeEditDialog> {
   }
 
   Future<void> _save() async {
+    final estimatedMinutes = int.tryParse(
+      _estimatedMinutesController.text.trim(),
+    );
     await ref
         .read(actionServiceProvider)
-        .updateSchedule(widget.actionId, startAt: _start, endAt: _end);
+        .updateSchedule(
+          widget.actionId,
+          startAt: _start,
+          endAt: _end,
+          estimatedMinutes: estimatedMinutes,
+        );
     if (mounted) Navigator.of(context).pop();
   }
 }

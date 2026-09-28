@@ -9,6 +9,7 @@ import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
 import '../domain/dependency_service.dart';
+import '../domain/done_rule.dart' as done_rule;
 
 final databaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -38,10 +39,6 @@ final todoProvider = StreamProvider.autoDispose<List<ActionListItem>>(
 
 final mostImportantProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchMostImportant(),
-);
-
-final habitsProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref.watch(viewQueriesProvider).watchHabits(),
 );
 
 final currentNotDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
@@ -85,12 +82,22 @@ final templatesProvider = StreamProvider.autoDispose<List<ActionTemplate>>((
   return db.select(db.actionTemplatesTable).watch();
 });
 
-/// All open actions, for the action editor's predecessor/successor picker.
+/// All not-done actions, for the action editor's predecessor/successor
+/// picker.
 final openActionsProvider = StreamProvider.autoDispose<List<ActionRow>>((ref) {
   final db = ref.watch(databaseProvider);
-  return (db.select(
-    db.actionsTable,
-  )..where((t) => t.status.equals('open'))).watch();
+  return db.select(db.actionsTable).watch().map(
+    (rows) => rows
+        .where(
+          (a) => !done_rule.isDoneBefore(
+            startAt: dateTimeFromDb(a.startAt),
+            endAt: dateTimeFromDb(a.endAt),
+            isAllDay: a.isAllDay,
+            done: a.done,
+          ),
+        )
+        .toList(),
+  );
 });
 
 /// The actions that must happen before [actionId] (its current predecessors).
@@ -131,22 +138,17 @@ final successorsOfProvider = StreamProvider.autoDispose
       );
     });
 
-/// Actual start time (`action_occurrences.started_at`) of every action
-/// that's currently running (started but not yet finished), keyed by
-/// action id — lets a tile show "Started HH:mm" without opening the
-/// action, since Start doesn't touch the action's own scheduled time.
-final runningOccurrencesProvider = StreamProvider.autoDispose<Map<String, DateTime>>((
+/// Ids of every action that's currently running (started but not yet
+/// finished) — lets a tile/card mark itself as running without opening the
+/// action. `actions.start_at` (not this table) is the single source for
+/// *when* it started; this only answers "is it running at all."
+final runningOccurrencesProvider = StreamProvider.autoDispose<Set<String>>((
   ref,
 ) {
   final db = ref.watch(databaseProvider);
   final query = db.select(db.actionOccurrencesTable)
     ..where((t) => t.finishedAt.isNull());
-  return query.watch().map((rows) {
-    return {
-      for (final r in rows)
-        if (dateTimeFromDb(r.startedAt) case final started?) r.actionId: started,
-    };
-  });
+  return query.watch().map((rows) => rows.map((r) => r.actionId).toSet());
 });
 
 /// [actionId]'s start/finish/postpone history, most recent first — lets

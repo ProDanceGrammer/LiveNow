@@ -110,7 +110,6 @@ class _TemplateEditorDialogState
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _estimatedMinutesController;
-  String _kind = 'task';
   String? _priority;
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
@@ -130,7 +129,6 @@ class _TemplateEditorDialogState
     _estimatedMinutesController = TextEditingController(
       text: (payload?['estimatedMinutes'] as int?)?.toString() ?? '',
     );
-    _kind = payload?['kind'] as String? ?? 'task';
     _priority = payload?['priority'] as String?;
     _isAllDay = payload?['isAllDay'] as bool? ?? false;
     _selectedMetricIds =
@@ -171,48 +169,15 @@ class _TemplateEditorDialogState
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _kind,
-                        decoration: const InputDecoration(labelText: 'Kind'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'task',
-                            child: Text('Task'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'habit',
-                            child: Text('Habit'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'bad_habit',
-                            child: Text('Bad habit'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _kind = v!),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DropdownButtonFormField<String?>(
-                        initialValue: _priority,
-                        decoration: const InputDecoration(
-                          labelText: 'Priority',
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: null,
-                            child: Text('None'),
-                          ),
-                          for (final p in _priorities)
-                            DropdownMenuItem(value: p, child: Text(p)),
-                        ],
-                        onChanged: (v) => setState(() => _priority = v),
-                      ),
-                    ),
+                DropdownButtonFormField<String?>(
+                  initialValue: _priority,
+                  decoration: const InputDecoration(labelText: 'Priority'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('None')),
+                    for (final p in _priorities)
+                      DropdownMenuItem(value: p, child: Text(p)),
                   ],
+                  onChanged: (v) => setState(() => _priority = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -276,7 +241,6 @@ class _TemplateEditorDialogState
 
     final payload = jsonEncode({
       'name': name,
-      'kind': _kind,
       if (_priority != null) 'priority': _priority,
       if (minutes != null) 'estimatedMinutes': minutes,
       'isAllDay': _isAllDay,

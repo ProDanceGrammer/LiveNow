@@ -30,7 +30,6 @@ void main() {
 
     final actionId = await service.createAction(
       name: 'Go for a run',
-      kind: 'habit',
       metricIds: [metricId],
     );
 
@@ -92,21 +91,6 @@ void main() {
     final startAt = dateTimeFromDb(action.startAt)!;
     final endAt = dateTimeFromDb(action.endAt)!;
     expect(endAt.difference(startAt), const Duration(minutes: 60));
-  });
-
-  test('start defaults to a 10-minute duration for a habit with no time set at all', () async {
-    final actionId = await service.createAction(
-      name: 'Totally unscheduled habit',
-      kind: 'habit',
-    );
-    await service.start(actionId);
-
-    final action = await (db.select(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).getSingle();
-    final startAt = dateTimeFromDb(action.startAt)!;
-    final endAt = dateTimeFromDb(action.endAt)!;
-    expect(endAt.difference(startAt), const Duration(minutes: 10));
   });
 
   test('start sets start_at to the real start time, not just the occurrence', () async {
@@ -283,21 +267,26 @@ void main() {
     },
   );
 
-  test('updateSchedule sets exactly start_at/end_at and nothing else', () async {
-    final actionId = await service.createAction(name: 'Reschedule me');
-    await service.updateSchedule(
-      actionId,
-      startAt: DateTime.utc(2025, 3, 4, 8),
-      endAt: DateTime.utc(2025, 3, 4, 9),
-    );
+  test(
+    'updateSchedule sets exactly start_at/end_at/estimated_minutes and nothing else',
+    () async {
+      final actionId = await service.createAction(name: 'Reschedule me');
+      await service.updateSchedule(
+        actionId,
+        startAt: DateTime.utc(2025, 3, 4, 8),
+        endAt: DateTime.utc(2025, 3, 4, 9),
+        estimatedMinutes: 45,
+      );
 
-    final action = await (db.select(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(dateTimeFromDb(action.startAt), DateTime.utc(2025, 3, 4, 8));
-    expect(dateTimeFromDb(action.endAt), DateTime.utc(2025, 3, 4, 9));
-    expect(action.status, 'open');
-  });
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      expect(dateTimeFromDb(action.startAt), DateTime.utc(2025, 3, 4, 8));
+      expect(dateTimeFromDb(action.endAt), DateTime.utc(2025, 3, 4, 9));
+      expect(action.estimatedMinutes, 45);
+      expect(action.done, false);
+    },
+  );
 
   test(
     'postponing a started action shifts from its real start, e.g. 18:43 + 1h = 19:43',
@@ -328,7 +317,7 @@ void main() {
   );
 
   test(
-    'postponing a running action also moves its open occurrence, so the editor stays in sync with the card',
+    'postponing a running action closes its open occurrence instead of leaving it running into the future',
     () async {
       final actionId = await service.createAction(name: 'Deep work');
       await service.start(actionId);
@@ -343,13 +332,43 @@ void main() {
 
       await service.postpone(actionId, PostponeRule.plusOneHour);
 
+      final stillRunning = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId) & t.finishedAt.isNull())).getSingleOrNull();
+      expect(stillRunning, isNull);
+
       final occurrence = await (db.select(
         db.actionOccurrencesTable,
-      )..where((t) => t.actionId.equals(actionId) & t.finishedAt.isNull())).getSingle();
-      expect(
-        dateTimeFromDb(occurrence.startedAt),
-        DateTime.utc(2024, 1, 1, 16, 43),
+      )..where((t) => t.actionId.equals(actionId))).getSingle();
+      expect(occurrence.finishedAt, isNotNull);
+      expect(occurrence.outcome, 'postponed');
+    },
+  );
+
+  test(
+    'postponing a running action freezes the single source\'s current value '
+    'into history, not whatever the occurrence still had from Start',
+    () async {
+      final actionId = await service.createAction(name: 'Deep work');
+      await service.start(actionId);
+
+      // Simulate a quick-edit of the schedule while running (e.g. tapping
+      // the card's time) — this only ever touches actions.start_at, same as
+      // updateSchedule()/updateAction() do for real, leaving the occurrence's
+      // own started_at (set back when Start ran) stale.
+      final editedStart = DateTime.utc(2024, 1, 1, 12, 0);
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(startAt: Value(dateTimeToDb(editedStart)!)),
       );
+
+      await service.postpone(actionId, PostponeRule.plusOneHour);
+
+      final occurrence = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).getSingle();
+      expect(dateTimeFromDb(occurrence.startedAt), editedStart);
     },
   );
 
@@ -419,14 +438,14 @@ void main() {
     var action = await (db.select(
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'done');
+    expect(action.done, true);
 
     await service.restore(before);
 
     action = await (db.select(
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'open');
+    expect(action.done, false);
 
     final occurrences = await (db.select(
       db.actionOccurrencesTable,
@@ -443,7 +462,7 @@ void main() {
     final action = await (db.select(
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'done');
+    expect(action.done, true);
     expect(action.completedAt, isNotNull);
 
     final occurrence = await (db.select(
@@ -451,18 +470,6 @@ void main() {
     )..where((t) => t.actionId.equals(actionId))).getSingle();
     expect(occurrence.outcome, 'done');
     expect(occurrence.finishedAt, isNotNull);
-  });
-
-  test('finish on a habit closes the occurrence but keeps it open', () async {
-    final actionId = await service.createAction(name: 'Pray', kind: 'habit');
-    await service.start(actionId);
-    await service.finish(actionId);
-
-    final action = await (db.select(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'open');
-    expect(action.completedAt, isNull);
   });
 
   test('starting a done action reopens it', () async {
@@ -473,14 +480,14 @@ void main() {
     var action = await (db.select(
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'done');
+    expect(action.done, true);
 
     await service.start(actionId);
 
     action = await (db.select(
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'open');
+    expect(action.done, false);
     expect(action.completedAt, isNull);
   });
 
@@ -488,13 +495,13 @@ void main() {
     'starting an action stuck as done-while-running self-heals to open',
     () async {
       // Simulates the state a pre-fix build could leave behind: an open
-      // occurrence (still running) but status wrongly stuck at 'done'.
+      // occurrence (still running) but `done` wrongly stuck true.
       final actionId = await service.createAction(name: 'Weird state');
       await service.start(actionId);
       await (db.update(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).write(
-        const ActionsTableCompanion(status: Value('done')),
+        const ActionsTableCompanion(done: Value(true)),
       );
 
       await service.start(actionId);
@@ -502,7 +509,7 @@ void main() {
       final action = await (db.select(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).getSingle();
-      expect(action.status, 'open');
+      expect(action.done, false);
 
       final occurrences = await (db.select(
         db.actionOccurrencesTable,
@@ -510,28 +517,6 @@ void main() {
       expect(occurrences, hasLength(1)); // no duplicate occurrence created
     },
   );
-
-  test('starting a cancelled action reopens it', () async {
-    final actionId = await service.createAction(name: 'Reconsidering');
-    await service.cancel(actionId);
-
-    await service.start(actionId);
-
-    final action = await (db.select(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'open');
-  });
-
-  test('cancel marks the action cancelled', () async {
-    final actionId = await service.createAction(name: 'Old idea');
-    await service.cancel(actionId);
-
-    final action = await (db.select(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).getSingle();
-    expect(action.status, 'cancelled');
-  });
 
   test('postpone on a task updates the schedule without an occurrence log', () async {
     final actionId = await service.createAction(
@@ -552,21 +537,6 @@ void main() {
     expect(occurrences, isEmpty);
   });
 
-  test('postpone on a habit also logs a postponed occurrence', () async {
-    final actionId = await service.createAction(
-      name: 'Stretching',
-      kind: 'habit',
-      startAt: DateTime.utc(2024, 1, 1, 9),
-    );
-    await service.postpone(actionId, PostponeRule.nextWeek);
-
-    final occurrences = await (db.select(
-      db.actionOccurrencesTable,
-    )..where((t) => t.actionId.equals(actionId))).get();
-    expect(occurrences, hasLength(1));
-    expect(occurrences.single.outcome, 'postponed');
-  });
-
   test('createFromTemplate instantiates a new action from the payload', () async {
     final templateId = newId();
     await db
@@ -577,7 +547,6 @@ void main() {
             name: 'Prepare for interview',
             payload: jsonEncode({
               'name': 'Prepare for interview',
-              'kind': 'task',
               'priority': 'B1',
             }),
           ),

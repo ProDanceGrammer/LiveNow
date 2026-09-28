@@ -5,8 +5,8 @@ import '../../domain/postpone_rules.dart';
 import '../providers.dart';
 import '../undo.dart';
 
-/// The Start/Finish/Postpone/Cancel actions as a row of small emoji buttons,
-/// shown directly on a Current Actions board card — no menu to open first.
+/// The Start/Finish/Postpone actions as a row of small emoji buttons, shown
+/// directly on a Current Actions board card — no menu to open first.
 class QuickActionBar extends ConsumerWidget {
   final String actionId;
 
@@ -25,11 +25,10 @@ class QuickActionBar extends ConsumerWidget {
       children: [
         _EmojiButton('▶️', 'Start', () => run('Started', () => service.start(actionId))),
         _EmojiButton('🏁', 'Finish', () => run('Finished', () => service.finish(actionId))),
-        _EmojiButton('❌', 'Cancel', () => run('Cancelled', () => service.cancel(actionId))),
         // A visible gap here separates "act on it now" (above) from
         // "postpone" (below) — those two groups being right next to each
         // other, in small tightly-packed buttons, was the likely cause of
-        // mis-clicking Finish/Cancel while aiming for a postpone option.
+        // mis-clicking Finish while aiming for a postpone option.
         const SizedBox(width: 10),
         _EmojiButton(
           '⏳',

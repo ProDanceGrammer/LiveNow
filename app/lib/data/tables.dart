@@ -1,15 +1,22 @@
 import 'package:drift/drift.dart';
 
-/// One task, habit, or bad habit.
+/// One action.
 ///
 /// The Dart class is named `ActionsTable` (not `Actions`) because
 /// `package:flutter/widgets.dart` already exports a widget called `Actions`;
 /// reusing that name would collide wherever both packages are imported.
+///
+/// `done` is a plain manual flag (Start clears it, Finish sets it) — it is
+/// NOT the same as "is this done for filtering/board purposes". That's a
+/// derived value, `domain/done_rule.dart`'s `isDoneBefore()`: for a
+/// scheduled, non-all-day action it's computed live from `endAt` vs. now
+/// (so Postpone moving the schedule is what flips it, not this flag); for an
+/// unscheduled or all-day action it just mirrors this flag.
 @DataClassName('ActionRow')
-@TableIndex(name: 'idx_actions_status_start', columns: {#status, #startAt})
+@TableIndex(name: 'idx_actions_done_start', columns: {#done, #startAt})
 @TableIndex(
-  name: 'idx_actions_kind_status_allday',
-  columns: {#kind, #status, #isAllDay},
+  name: 'idx_actions_allday_start',
+  columns: {#isAllDay, #startAt},
 )
 class ActionsTable extends Table {
   @override
@@ -17,8 +24,7 @@ class ActionsTable extends Table {
 
   TextColumn get id => text()();
   TextColumn get name => text()();
-  TextColumn get kind => text().withDefault(const Constant('task'))();
-  TextColumn get status => text().withDefault(const Constant('open'))();
+  BoolColumn get done => boolean().withDefault(const Constant(false))();
   TextColumn get priority => text().nullable()();
   TextColumn get postponeFlex =>
       text().withDefault(const Constant('flexible'))();
@@ -41,8 +47,6 @@ class ActionsTable extends Table {
 
   @override
   List<String> get customConstraints => [
-    "CHECK (kind IN ('task','habit','bad_habit'))",
-    "CHECK (status IN ('open','done','cancelled'))",
     "CHECK (priority IS NULL OR priority IN "
         "('A1','A2','A3','B1','B2','B3','C1','C2','C3','D1','D2','D3'))",
     "CHECK (postpone_flex IN ('flexible','hard','impossible'))",
@@ -79,8 +83,8 @@ class ActionDependenciesTable extends Table {
 
 /// Append-only log of started/finished/postponed occurrences for an action.
 /// Used both for time tracking (Start/Finish/Continue buttons) and to derive
-/// habit history for the metric balance calculation, since postpone just
-/// moves `start_at`/`end_at` on the same action row.
+/// recurring-action history for the metric balance calculation, since
+/// postpone just moves `start_at`/`end_at` on the same action row.
 @DataClassName('ActionOccurrence')
 @TableIndex(name: 'idx_occurrence_action', columns: {#actionId})
 class ActionOccurrencesTable extends Table {

@@ -31,7 +31,6 @@ void main() {
     expect(find.text('TODO'), findsOneWidget);
     expect(find.text('Most Important'), findsOneWidget);
     expect(find.text('Calendar'), findsOneWidget);
-    expect(find.text('Habits'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
     expect(find.text('Metrics'), findsOneWidget);
     expect(find.text('Templates'), findsOneWidget);

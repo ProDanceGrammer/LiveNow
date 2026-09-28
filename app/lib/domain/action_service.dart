@@ -17,8 +17,8 @@ class ActionSnapshot {
   const ActionSnapshot({required this.action, required this.occurrences});
 }
 
-/// Create/edit/start/finish/postpone/cancel an action, and instantiate one
-/// from a saved template.
+/// Create/edit/start/finish/postpone an action, and instantiate one from a
+/// saved template.
 class ActionService {
   final AppDatabase db;
 
@@ -26,7 +26,6 @@ class ActionService {
 
   Future<String> createAction({
     required String name,
-    String kind = 'task',
     String? priority,
     String postponeFlex = 'flexible',
     String? depthLevel,
@@ -46,7 +45,6 @@ class ActionService {
             ActionsTableCompanion.insert(
               id: id,
               name: name,
-              kind: Value(kind),
               priority: Value(priority),
               postponeFlex: Value(postponeFlex),
               depthLevel: Value(depthLevel),
@@ -79,7 +77,6 @@ class ActionService {
   Future<void> updateAction({
     required String actionId,
     required String name,
-    required String kind,
     String? priority,
     required String postponeFlex,
     String? depthLevel,
@@ -94,7 +91,6 @@ class ActionService {
     )..where((t) => t.id.equals(actionId))).write(
       ActionsTableCompanion(
         name: Value(name),
-        kind: Value(kind),
         priority: Value(priority),
         postponeFlex: Value(postponeFlex),
         depthLevel: Value(depthLevel),
@@ -132,11 +128,11 @@ class ActionService {
   /// current time of this task", so every press of Start must move it,
   /// whether or not an occurrence was already running. Any existing
   /// duration (see [_predictedDuration]) is preserved onto the new start.
-  /// Always reopens a done/cancelled action first — starting it means it's
-  /// in progress, not finished — including when an occurrence is already
-  /// running (an action can end up "done" while still running if it was
-  /// finished and then started again from an old build; this self-heals
-  /// that instead of getting stuck).
+  /// Always reopens a done action first (clears the manual `done` flag) —
+  /// starting it means it's in progress, not finished — including when an
+  /// occurrence is already running (an action can end up marked done while
+  /// still running if it was finished and then started again from an old
+  /// build; this self-heals that instead of getting stuck).
   Future<void> start(String actionId) async {
     final nowUtc = DateTime.now().toUtc();
     final nowText = dateTimeToDb(nowUtc)!;
@@ -149,7 +145,6 @@ class ActionService {
         estimatedMinutes: action.estimatedMinutes,
         currentStart: dateTimeFromDb(action.startAt),
         currentEnd: dateTimeFromDb(action.endAt),
-        kind: action.kind,
       );
       final newEnd = nowUtc.add(duration);
 
@@ -157,7 +152,7 @@ class ActionService {
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).write(
         ActionsTableCompanion(
-          status: const Value('open'),
+          done: const Value(false),
           completedAt: const Value(null),
           startAt: Value(nowText),
           endAt: Value(dateTimeToDb(newEnd)),
@@ -194,8 +189,8 @@ class ActionService {
     });
   }
 
-  /// Finishes the action, sets `end_at` to now, and marks tasks (but not
-  /// habits/bad habits) done.
+  /// Finishes the action: sets `end_at` to now and the manual `done` flag
+  /// true.
   ///
   /// `start_at` is kept as-is if it's already set and at/before now — the
   /// scheduled start already happened, so the elapsed time is genuine.
@@ -223,7 +218,6 @@ class ActionService {
                 estimatedMinutes: action.estimatedMinutes,
                 currentStart: oldStart,
                 currentEnd: dateTimeFromDb(action.endAt),
-                kind: action.kind,
               ),
             );
 
@@ -265,8 +259,8 @@ class ActionService {
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).write(
         ActionsTableCompanion(
-          status: action.kind == 'task' ? const Value('done') : const Value.absent(),
-          completedAt: action.kind == 'task' ? Value(nowText) : const Value.absent(),
+          done: const Value(true),
+          completedAt: Value(nowText),
           startAt: Value(dateTimeToDb(newStart)),
           endAt: Value(nowText),
           updatedAt: Value(nowText),
@@ -280,13 +274,12 @@ class ActionService {
   /// Countable Activities or same-name-previous-action matching): prefer an
   /// explicit estimate, else the action's own existing start/end gap (even
   /// if that gap is zero — a deliberately point-in-time action stays that
-  /// way rather than being padded out), else a default of 60 minutes (10
-  /// for habits), matching the original formula's fallback exactly.
+  /// way rather than being padded out), else a default of 60 minutes,
+  /// matching the original formula's fallback exactly.
   Duration _predictedDuration({
     required int? estimatedMinutes,
     required DateTime? currentStart,
     required DateTime? currentEnd,
-    required String kind,
   }) {
     if (estimatedMinutes != null && estimatedMinutes > 0) {
       return Duration(minutes: estimatedMinutes);
@@ -294,17 +287,18 @@ class ActionService {
     if (currentStart != null && currentEnd != null) {
       return currentEnd.difference(currentStart);
     }
-    return kind == 'habit'
-        ? const Duration(minutes: 10)
-        : const Duration(minutes: 60);
+    return const Duration(minutes: 60);
   }
 
-  /// Directly sets `start_at`/`end_at` without touching anything else — used
-  /// by the quick "tap the time" editor on a Current Actions board card.
+  /// Directly sets `start_at`/`end_at`/`estimated_minutes` without touching
+  /// anything else — used by the quick "tap the time" editor on a Current
+  /// Actions board card, which edits all three together since they're the
+  /// action's operational scheduling parameters.
   Future<void> updateSchedule(
     String actionId, {
     required DateTime? startAt,
     required DateTime? endAt,
+    required int? estimatedMinutes,
   }) {
     final nowText = dateTimeToDb(DateTime.now())!;
     return (db.update(
@@ -313,33 +307,22 @@ class ActionService {
       ActionsTableCompanion(
         startAt: Value(dateTimeToDb(startAt)),
         endAt: Value(dateTimeToDb(endAt)),
+        estimatedMinutes: Value(estimatedMinutes),
         updatedAt: Value(nowText),
       ),
     );
   }
 
-  Future<void> cancel(String actionId) {
-    final nowText = dateTimeToDb(DateTime.now())!;
-    return (db.update(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).write(
-      ActionsTableCompanion(
-        status: const Value('cancelled'),
-        updatedAt: Value(nowText),
-      ),
-    );
-  }
-
-  /// Applies a postpone rule: recomputes start/end, and — for habits and bad
-  /// habits — logs a `postponed` occurrence so the balance history isn't
-  /// lost (postponing just moves the same row's time, it doesn't create a
-  /// new one).
+  /// Applies a postpone rule: recomputes start/end, and logs a `postponed`
+  /// occurrence so the history isn't lost (postponing just moves the same
+  /// row's time, it doesn't create a new action row).
   ///
-  /// If the action is currently running (an occurrence is open), that
-  /// occurrence's `started_at` is moved to match the new start too. Without
-  /// this, postponing a running action left `actions.start_at` (what the
-  /// card shows) and the open occurrence's `started_at` (what the editor's
-  /// "Currently running" line shows) pointing at two different times.
+  /// If the action is currently running (an occurrence is open), postponing
+  /// it ends that run — closing the occurrence with outcome `postponed` —
+  /// rather than leaving it open with its `started_at` pushed into the
+  /// future. Without this, the card/tile kept showing the action as
+  /// "running" (highlighted icon, "Started HH:mm") even though postponing it
+  /// means it isn't actually in progress at the new, later time.
   Future<void> postpone(String actionId, PostponeRule rule) async {
     final action = await (db.select(
       db.actionsTable,
@@ -377,27 +360,21 @@ class ActionService {
           db.actionOccurrencesTable,
         )..where((t) => t.id.equals(runningOccurrence.id))).write(
           ActionOccurrencesTableCompanion(
-            startedAt: Value(dateTimeToDb(next.startAt)),
+            // Freezes whatever the single source (actions.start_at) said
+            // right before this postpone, not whatever the occurrence's own
+            // startedAt happened to still hold — those two can have drifted
+            // apart if the schedule was quick-edited since Start was pressed.
+            startedAt: Value(dateTimeToDb(current.startAt)),
+            finishedAt: Value(nowText),
+            outcome: const Value('postponed'),
           ),
         );
-      }
-
-      if (action.kind == 'habit' || action.kind == 'bad_habit') {
-        await db
-            .into(db.actionOccurrencesTable)
-            .insert(
-              ActionOccurrencesTableCompanion.insert(
-                id: newId(),
-                actionId: actionId,
-                outcome: const Value('postponed'),
-              ),
-            );
       }
     });
   }
 
   /// Instantiates a new action from a saved template's JSON payload, in one
-  /// transaction. Payload shape: `{name, kind?, priority?, postponeFlex?,
+  /// transaction. Payload shape: `{name, priority?, postponeFlex?,
   /// depthLevel?, estimatedMinutes?, isAllDay?, metricIds?}`.
   /// Snapshots [actionId]'s full row and occurrence history — see
   /// [ActionSnapshot] and [restore].
@@ -446,7 +423,6 @@ class ActionService {
 
     return createAction(
       name: payload['name'] as String,
-      kind: payload['kind'] as String? ?? 'task',
       priority: payload['priority'] as String?,
       postponeFlex: payload['postponeFlex'] as String? ?? 'flexible',
       depthLevel: payload['depthLevel'] as String?,

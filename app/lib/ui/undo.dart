@@ -16,7 +16,7 @@ class _UndoEntry {
 /// this snapshot; either one clears it afterward.
 final lastUndoProvider = StateProvider<Object?>((ref) => null);
 
-/// Wraps a quick-action call (Start/Finish/Postpone/Cancel/...) so it can be
+/// Wraps a quick-action call (Start/Finish/Postpone/...) so it can be
 /// undone: snapshots the action's full row + occurrence history first, runs
 /// the operation, then offers a Notion-style "Undo" snackbar for 5 seconds
 /// (and arms Ctrl+Z for the same window).
@@ -28,14 +28,24 @@ Future<void> runUndoable(
   Future<void> Function() operation,
 ) async {
   final service = ref.read(actionServiceProvider);
+  // Looked up before the operation runs: some operations (e.g. Finish,
+  // which can drop a task off a view that only shows open items) remove
+  // this action's card from the list it's currently shown in, which can
+  // unmount this context by the time the write finishes. The
+  // ScaffoldMessengerState itself belongs to the stable Scaffold ancestor,
+  // so it stays valid to call even after that.
+  final messenger = ScaffoldMessenger.of(context);
   final snapshot = await service.snapshot(actionId);
   await operation();
 
   final entry = _UndoEntry(snapshot);
   ref.read(lastUndoProvider.notifier).state = entry;
 
-  if (!context.mounted) return;
-  final controller = ScaffoldMessenger.of(context).showSnackBar(
+  // Replace rather than queue: only this entry is actually undoable, so a
+  // still-queued snackbar from an earlier quick action would offer an
+  // "Undo" that no longer restores what it claims to.
+  messenger.hideCurrentSnackBar();
+  final controller = messenger.showSnackBar(
     SnackBar(
       content: Text(description),
       duration: const Duration(seconds: 5),

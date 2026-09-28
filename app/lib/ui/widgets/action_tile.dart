@@ -6,7 +6,7 @@ import '../providers.dart';
 import 'action_menu_button.dart';
 
 /// One row in a view list: name, a short "when/how long" subtitle, and the
-/// Start/Finish/Postpone/Cancel menu.
+/// Start/Finish/Postpone menu.
 class ActionTile extends ConsumerWidget {
   final ActionListItem action;
   final VoidCallback? onTap;
@@ -15,22 +15,23 @@ class ActionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final runningSince = ref.watch(runningOccurrencesProvider).value?[action.id];
+    final isRunning =
+        ref.watch(runningOccurrencesProvider).value?.contains(action.id) ??
+        false;
 
     final subtitleParts = <String>[
-      if (action.status != 'open') statusLabel(action.status),
+      if (action.isDoneBefore) 'Done',
       if (action.priority != null) action.priority!,
       if (action.startAt != null) formatScheduledWhen(action),
       if (action.estimatedMinutes != null) '${action.estimatedMinutes}m',
-      if (runningSince != null) 'Started ${formatClockTime(runningSince)}',
+      if (isRunning && action.startAt != null)
+        'Started ${formatClockTime(action.startAt!)}',
     ];
 
     return ListTile(
       leading: Icon(
-        iconForAction(action, runningSince != null),
-        color: runningSince != null
-            ? Theme.of(context).colorScheme.primary
-            : null,
+        iconForAction(action, isRunning),
+        color: isRunning ? Theme.of(context).colorScheme.primary : null,
       ),
       title: Text(action.name),
       subtitle: subtitleParts.isEmpty ? null : Text(subtitleParts.join(' · ')),
@@ -54,21 +55,7 @@ String formatClockTime(DateTime utc) {
 
 String twoDigits(int n) => n.toString().padLeft(2, '0');
 
-String statusLabel(String status) => switch (status) {
-  'done' => 'Done',
-  'cancelled' => 'Cancelled',
-  _ => status,
-};
-
 IconData iconForAction(ActionListItem a, bool isRunning) {
   if (isRunning) return Icons.play_circle_fill;
-  return switch (a.status) {
-    'done' => Icons.check_circle,
-    'cancelled' => Icons.block,
-    _ => switch (a.kind) {
-      'habit' => Icons.repeat,
-      'bad_habit' => Icons.warning_amber,
-      _ => Icons.check_circle_outline,
-    },
-  };
+  return a.isDoneBefore ? Icons.check_circle : Icons.check_circle_outline;
 }
