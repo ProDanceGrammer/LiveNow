@@ -5,7 +5,7 @@ import 'package:flutter/services.dart' show ServicesBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../views/all_actions_view.dart';
-import '../views/calendar_week_view.dart';
+import '../views/calendar_view.dart';
 import '../views/current_actions_view.dart';
 import '../views/most_important_view.dart';
 import '../views/operational_view.dart';
@@ -70,7 +70,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     OperationalView(),
     TodoView(),
     MostImportantView(),
-    CalendarWeekView(),
+    CalendarView(),
     AllActionsView(),
     MetricsScreen(),
     TemplatesScreen(),

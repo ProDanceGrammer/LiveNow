@@ -1,15 +1,14 @@
 import 'package:drift/drift.dart' show OrderingTerm, innerJoin;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
-import 'package:timezone/timezone.dart' as tz;
 
-import '../core/settings.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
 import '../domain/dependency_service.dart';
 import '../domain/done_rule.dart' as done_rule;
+import 'views/calendar_layout.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
@@ -49,24 +48,55 @@ final currentDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchCurrentDone(),
 );
 
-/// The Monday (UTC instant of Istanbul midnight) that starts the currently
-/// viewed calendar week.
-final calendarWeekStartProvider = StateProvider<DateTime>((ref) {
-  final location = tz.getLocation(AppSettings.timeZoneName);
-  final now = tz.TZDateTime.now(location);
-  final monday = now.subtract(Duration(days: now.weekday - 1));
-  return tz.TZDateTime(location, monday.year, monday.month, monday.day).toUtc();
-});
+/// How many day columns the calendar shows (2..7).
+final calendarDayCountProvider = StateProvider<int>((ref) => 7);
 
-final calendarWeekProvider = StreamProvider.autoDispose<List<ActionListItem>>((
+/// The UTC instant of Istanbul midnight that starts the viewed range.
+final calendarRangeStartProvider = StateProvider<DateTime>(
+  (ref) => calendarAnchorStart(DateTime.now().toUtc(), 7),
+);
+
+/// Actions overlapping `[start, start + N days)`.
+final calendarRangeProvider = StreamProvider.autoDispose<List<ActionListItem>>((
   ref,
 ) {
-  final start = ref.watch(calendarWeekStartProvider);
-  final end = start.add(const Duration(days: 7));
+  final start = ref.watch(calendarRangeStartProvider);
+  final days = ref.watch(calendarDayCountProvider);
   return ref
       .watch(viewQueriesProvider)
-      .watchCalendarWeek(weekStartUtc: start, weekEndUtc: end);
+      .watchCalendarWeek(
+        weekStartUtc: start,
+        weekEndUtc: calendarAddDays(start, days),
+      );
 });
+
+/// Changes the day count and re-anchors: 7 -> Monday of the current week,
+/// 2..6 -> today.
+void setCalendarDayCount(WidgetRef ref, int days) {
+  ref.read(calendarDayCountProvider.notifier).state = days.clamp(2, 7);
+  ref.read(calendarRangeStartProvider.notifier).state = calendarAnchorStart(
+    DateTime.now().toUtc(),
+    days.clamp(2, 7),
+  );
+}
+
+/// Shifts the viewed range by [direction] * N days (-1 previous, +1 next).
+void shiftCalendarRange(WidgetRef ref, int direction) {
+  final days = ref.read(calendarDayCountProvider);
+  final start = ref.read(calendarRangeStartProvider);
+  ref.read(calendarRangeStartProvider.notifier).state = calendarAddDays(
+    start,
+    direction * days,
+  );
+}
+
+/// The "Today" button: re-anchors for the current day count.
+void goToCalendarToday(WidgetRef ref) {
+  ref.read(calendarRangeStartProvider.notifier).state = calendarAnchorStart(
+    DateTime.now().toUtc(),
+    ref.read(calendarDayCountProvider),
+  );
+}
 
 /// All metrics, for the action editor's metric picker.
 final metricsProvider = StreamProvider.autoDispose<List<Metric>>((ref) {

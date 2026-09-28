@@ -1,0 +1,213 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/ui/views/calendar_layout.dart';
+
+// Europe/Istanbul is UTC+3 all year: local 10:00 == 07:00Z.
+DateTime u(int d, int h, [int m = 0]) => DateTime.utc(2026, 9, d, h, m);
+
+typedef E = (String, DateTime, DateTime);
+
+void main() {
+  setUpAll(initPostponeTimeZoneData);
+
+  group('snapMinutes', () {
+    test('rounds to nearest 10 min (8 px each)', () {
+      expect(snapMinutes(0), 0);
+      expect(snapMinutes(3), 0); // 3.75 min
+      expect(snapMinutes(5), 10); // 6.25 min
+      expect(snapMinutes(8), 10);
+      expect(snapMinutes(20), 30); // 25 min
+      expect(snapMinutes(48), 60);
+    });
+    test('exact half step rounds away from zero, negatives symmetric', () {
+      expect(snapMinutes(4), 10); // exactly 5 min
+      expect(snapMinutes(-4), -10);
+      expect(snapMinutes(-3), 0);
+      expect(snapMinutes(-8), -10);
+      expect(snapMinutes(-48), -60);
+    });
+    test('px <-> minutes', () {
+      expect(minutesToPx(60), kHourHeight);
+      expect(minutesToPx(10), 8);
+      expect(pxToMinutes(8), 10);
+    });
+  });
+
+  group('movedSchedule', () {
+    test('shifts minutes and preserves duration', () {
+      final r = movedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8, 30),
+        dayDelta: 0,
+        minuteDelta: 20,
+      );
+      expect(r.startAt, u(29, 7, 20));
+      expect(r.endAt, u(29, 8, 50));
+    });
+    test('crosses days, both directions and across midnight', () {
+      var r = movedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        dayDelta: 2,
+        minuteDelta: -30,
+      );
+      expect(r.startAt, DateTime.utc(2026, 10, 1, 6, 30));
+      expect(r.endAt, r.startAt.add(const Duration(hours: 1)));
+
+      r = movedSchedule(
+        startAt: u(29, 21, 30), // local 00:30 on the 30th
+        endAt: u(29, 22, 30),
+        dayDelta: -1,
+        minuteDelta: -60,
+      );
+      expect(r.startAt, u(28, 20, 30)); // local 23:30 on the 28th
+      expect(r.endAt.difference(r.startAt), const Duration(hours: 1));
+    });
+    test('start-only action gets the computed default duration', () {
+      final r = movedSchedule(
+        startAt: u(29, 7),
+        dayDelta: 1,
+        minuteDelta: 0,
+      );
+      expect(r.startAt, u(30, 7));
+      expect(r.endAt, u(30, 8));
+    });
+  });
+
+  group('resizedSchedule', () {
+    test('bottom edge grows/shrinks in steps', () {
+      final r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: false,
+        minuteDelta: 30,
+      );
+      expect(r.startAt, u(29, 7));
+      expect(r.endAt, u(29, 8, 30));
+    });
+    test('top edge moves start, end stays', () {
+      final r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: true,
+        minuteDelta: -20,
+      );
+      expect(r.startAt, u(29, 6, 40));
+      expect(r.endAt, u(29, 8));
+    });
+    test('clamps to a 10 minute minimum', () {
+      var r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: false,
+        minuteDelta: -120,
+      );
+      expect(r.endAt, u(29, 7, 10));
+      r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: true,
+        minuteDelta: 300,
+      );
+      expect(r.startAt, u(29, 7, 50));
+      expect(r.endAt, u(29, 8));
+    });
+    test('start-only action derives its end first', () {
+      final bottom = resizedSchedule(
+        startAt: u(29, 7),
+        fromTop: false,
+        minuteDelta: 30,
+      );
+      expect(bottom.endAt, u(29, 8, 30)); // 60 min default + 30
+      final top = resizedSchedule(
+        startAt: u(29, 7),
+        fromTop: true,
+        minuteDelta: -10,
+      );
+      expect(top.startAt, u(29, 6, 50));
+      expect(top.endAt, u(29, 8));
+    });
+  });
+
+  group('packLanes', () {
+    List<LaneAssignment<E>> pack(List<E> es) =>
+        packLanes<E>(es, startOf: (e) => e.$2, endOf: (e) => e.$3);
+    Map<String, (int, int)> byName(List<LaneAssignment<E>> r) =>
+        {for (final a in r) a.event.$1: (a.lane, a.laneCount)};
+
+    test('non-overlapping events are full width', () {
+      final r = byName(pack([
+        ('a', u(29, 7), u(29, 8)),
+        ('b', u(29, 8), u(29, 9)), // touching, not overlapping
+      ]));
+      expect(r['a'], (0, 1));
+      expect(r['b'], (0, 1));
+    });
+    test('overlapping events get side-by-side lanes', () {
+      final r = byName(pack([
+        ('a', u(29, 7), u(29, 9)),
+        ('b', u(29, 8), u(29, 10)),
+        ('c', u(29, 9), u(29, 10)), // fits lane 0 again, same cluster
+      ]));
+      expect(r['a'], (0, 2));
+      expect(r['b'], (1, 2));
+      expect(r['c'], (0, 2));
+    });
+    test('separate clusters lay out independently', () {
+      final r = byName(pack([
+        ('a', u(29, 7), u(29, 8)),
+        ('b', u(29, 7, 30), u(29, 8, 30)),
+        ('c', u(29, 12), u(29, 13)),
+      ]));
+      expect(r['a']!.$2, 2);
+      expect(r['b']!.$2, 2);
+      expect(r['c'], (0, 1));
+    });
+    test('zero-length events count as the minimum length', () {
+      final r = byName(pack([
+        ('a', u(29, 7), u(29, 7)),
+        ('b', u(29, 7, 5), u(29, 7, 5)),
+      ]));
+      expect(r['a'], (0, 2));
+      expect(r['b'], (1, 2));
+    });
+  });
+
+  group('range anchoring', () {
+    // Sun 2026-09-27 (Istanbul), Mon 2026-09-28, Wed 2026-09-30.
+    final sunday = DateTime.utc(2026, 9, 27, 12);
+    final monday = DateTime.utc(2026, 9, 28, 12);
+    final wednesday = DateTime.utc(2026, 9, 30, 12);
+    final mondayMidnight = DateTime.utc(2026, 9, 27, 21); // 28th 00:00 local
+
+    test('7 days -> Monday of the current week', () {
+      expect(calendarAnchorStart(monday, 7), mondayMidnight);
+      expect(calendarAnchorStart(wednesday, 7), mondayMidnight);
+      // Sunday belongs to the week that started the previous Monday.
+      expect(calendarAnchorStart(sunday, 7), DateTime.utc(2026, 9, 20, 21));
+    });
+    test('2..6 days -> today', () {
+      for (final n in [2, 3, 4, 5, 6]) {
+        expect(calendarAnchorStart(sunday, n), DateTime.utc(2026, 9, 26, 21));
+        expect(calendarAnchorStart(monday, n), mondayMidnight);
+        expect(calendarAnchorStart(wednesday, n), DateTime.utc(2026, 9, 29, 21));
+      }
+    });
+    test('late-evening UTC is already tomorrow in Istanbul', () {
+      // 22:00Z Sunday == 01:00 Monday local.
+      expect(
+        calendarAnchorStart(DateTime.utc(2026, 9, 27, 22), 7),
+        mondayMidnight,
+      );
+    });
+    test('calendarAddDays / dayIndexOf / minutesOfDay', () {
+      expect(calendarAddDays(mondayMidnight, 7), DateTime.utc(2026, 10, 4, 21));
+      expect(calendarAddDays(mondayMidnight, -1), DateTime.utc(2026, 9, 26, 21));
+      expect(dayIndexOf(DateTime.utc(2026, 9, 28, 20, 59), mondayMidnight), 0);
+      expect(dayIndexOf(DateTime.utc(2026, 9, 28, 21), mondayMidnight), 1);
+      expect(dayIndexOf(DateTime.utc(2026, 9, 27, 20), mondayMidnight), -1);
+      expect(minutesOfDay(DateTime.utc(2026, 9, 28, 7, 15)), 10 * 60 + 15);
+      expect(localDayStart(DateTime.utc(2026, 9, 28, 7)), mondayMidnight);
+    });
+  });
+}

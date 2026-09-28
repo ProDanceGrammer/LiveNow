@@ -182,8 +182,10 @@ class ViewQueries {
         .map((rows) => rows.map(ActionListItem.fromQueryRow).toList());
   }
 
-  /// Weekly calendar: actions with a schedule inside `[weekStartUtc,
-  /// weekEndUtc)`.
+  /// Calendar range: every action (all-day or timed, done or not) whose
+  /// schedule overlaps `[weekStartUtc, weekEndUtc)` — i.e. it starts before
+  /// the range ends and either starts inside the range or ends after the
+  /// range start (so an event running past midnight into the range is kept).
   Stream<List<ActionListItem>> watchCalendarWeek({
     required DateTime weekStartUtc,
     required DateTime weekEndUtc,
@@ -194,8 +196,9 @@ class ViewQueries {
     final query = db.select(db.actionsTable)
       ..where(
         (t) =>
-            t.startAt.isBiggerOrEqualValue(startText) &
-            t.startAt.isSmallerThanValue(endText),
+            t.startAt.isSmallerThanValue(endText) &
+            (t.startAt.isBiggerOrEqualValue(startText) |
+                t.endAt.isBiggerThanValue(startText)),
       )
       ..orderBy([(t) => OrderingTerm.asc(t.startAt)]);
 

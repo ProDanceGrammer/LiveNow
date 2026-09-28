@@ -168,6 +168,50 @@ void main() {
     expect(result.map((a) => a.id), [inWeek]);
   });
 
+  test(
+    'watchCalendarWeek keeps all-day, done and range-overlapping rows',
+    () async {
+      final allDay = await actions.createAction(
+        name: 'All day',
+        startAt: DateTime.utc(2024, 1, 2),
+        isAllDay: true,
+      );
+      final done = await actions.createAction(
+        name: 'Done',
+        startAt: DateTime.utc(2024, 1, 3, 10),
+        endAt: DateTime.utc(2024, 1, 3, 11),
+      );
+      await actions.finish(done); // marks done (end_at becomes "now")
+      await actions.updateSchedule(
+        done,
+        startAt: DateTime.utc(2024, 1, 3, 10),
+        endAt: DateTime.utc(2024, 1, 3, 11),
+      );
+      final spanning = await actions.createAction(
+        name: 'Starts before the range, ends inside',
+        startAt: DateTime.utc(2023, 12, 31, 22),
+        endAt: DateTime.utc(2024, 1, 1, 2),
+      );
+      await actions.createAction(
+        name: 'Ends exactly at range start',
+        startAt: DateTime.utc(2023, 12, 31, 22),
+        endAt: DateTime.utc(2024, 1, 1),
+      );
+      await actions.createAction(
+        name: 'Starts exactly at range end',
+        startAt: DateTime.utc(2024, 1, 8),
+      );
+
+      final result = await queries
+          .watchCalendarWeek(
+            weekStartUtc: DateTime.utc(2024, 1, 1),
+            weekEndUtc: DateTime.utc(2024, 1, 8),
+          )
+          .first;
+      expect(result.map((a) => a.id).toSet(), {allDay, done, spanning});
+    },
+  );
+
   group('Current Actions board', () {
     test('watchCurrentNotDone lists open actions, nearest deadline first', () async {
       final noDeadline = await actions.createAction(name: 'Someday');

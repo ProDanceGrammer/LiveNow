@@ -288,6 +288,27 @@ void main() {
   );
 
   test(
+    'updateSchedule keeps the running occurrence started_at in sync',
+    () async {
+      final actionId = await service.createAction(name: 'Deep work');
+      await service.start(actionId);
+
+      final newStart = DateTime.utc(2025, 3, 4, 8);
+      await service.updateSchedule(
+        actionId,
+        startAt: newStart,
+        endAt: DateTime.utc(2025, 3, 4, 9),
+      );
+
+      final occurrence = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).getSingle();
+      expect(dateTimeFromDb(occurrence.startedAt), newStart);
+      expect(occurrence.finishedAt, isNull);
+    },
+  );
+
+  test(
     'postponing a started action shifts from its real start, e.g. 18:43 + 1h = 19:43',
     () async {
       final actionId = await service.createAction(name: 'Deep work');

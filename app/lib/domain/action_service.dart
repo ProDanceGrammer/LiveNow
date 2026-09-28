@@ -268,24 +268,37 @@ class ActionService {
     });
   }
 
-  /// Directly sets `start_at`/`end_at` without touching
-  /// anything else — used by the quick "tap the time" editor on a Current
-  /// Actions board card, which edits both together.
+  /// Directly sets `start_at`/`end_at` — used by the quick "tap the time"
+  /// editor and the calendar's drag/resize. If the action is running, its
+  /// open occurrence's `started_at` follows the new `start_at` (same as
+  /// Start/Finish keep them in sync), so history never drifts from the
+  /// single source. A null [startAt] leaves the occurrence untouched.
   Future<void> updateSchedule(
     String actionId, {
     required DateTime? startAt,
     required DateTime? endAt,
   }) {
     final nowText = dateTimeToDb(DateTime.now())!;
-    return (db.update(
-      db.actionsTable,
-    )..where((t) => t.id.equals(actionId))).write(
-      ActionsTableCompanion(
-        startAt: Value(dateTimeToDb(startAt)),
-        endAt: Value(dateTimeToDb(endAt)),
-        updatedAt: Value(nowText),
-      ),
-    );
+    return db.transaction(() async {
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).write(
+        ActionsTableCompanion(
+          startAt: Value(dateTimeToDb(startAt)),
+          endAt: Value(dateTimeToDb(endAt)),
+          updatedAt: Value(nowText),
+        ),
+      );
+      if (startAt == null) return;
+      await (db.update(db.actionOccurrencesTable)..where(
+            (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
+          ))
+          .write(
+            ActionOccurrencesTableCompanion(
+              startedAt: Value(dateTimeToDb(startAt)),
+            ),
+          );
+    });
   }
 
   /// Applies a postpone rule: recomputes start/end, and logs a `postponed`
