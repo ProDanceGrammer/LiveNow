@@ -247,13 +247,13 @@ void main() {
   );
 
   test(
-    'start prefers Estimated minutes over the existing start/end gap',
+    'start keeps the existing start/end gap over a legacy estimate',
     () async {
       final actionId = await service.createAction(
-        name: 'Has both an estimate and a stale gap',
+        name: 'Has both a legacy estimate and a gap',
         startAt: DateTime.utc(2024, 1, 1, 9),
-        endAt: DateTime.utc(2024, 1, 1, 9, 15), // a stale 15-minute gap
-        estimatedMinutes: 45,
+        endAt: DateTime.utc(2024, 1, 1, 9, 45), // a 45-minute gap
+        estimatedMinutes: 15,
       );
 
       await service.start(actionId);
@@ -268,14 +268,13 @@ void main() {
   );
 
   test(
-    'updateSchedule sets exactly start_at/end_at/estimated_minutes and nothing else',
+    'updateSchedule sets exactly start_at/end_at and nothing else',
     () async {
       final actionId = await service.createAction(name: 'Reschedule me');
       await service.updateSchedule(
         actionId,
         startAt: DateTime.utc(2025, 3, 4, 8),
         endAt: DateTime.utc(2025, 3, 4, 9),
-        estimatedMinutes: 45,
       );
 
       final action = await (db.select(
@@ -283,7 +282,7 @@ void main() {
       )..where((t) => t.id.equals(actionId))).getSingle();
       expect(dateTimeFromDb(action.startAt), DateTime.utc(2025, 3, 4, 8));
       expect(dateTimeFromDb(action.endAt), DateTime.utc(2025, 3, 4, 9));
-      expect(action.estimatedMinutes, 45);
+      expect(action.estimatedMinutes, isNull);
       expect(action.done, false);
     },
   );

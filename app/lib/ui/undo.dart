@@ -48,6 +48,8 @@ Future<void> runUndoable(
   final controller = messenger.showSnackBar(
     SnackBar(
       content: Text(description),
+      // SnackBars with an action persist by default (duration ignored).
+      persist: false,
       duration: const Duration(seconds: 5),
       action: SnackBarAction(label: 'Undo', onPressed: () => performUndo(ref)),
     ),

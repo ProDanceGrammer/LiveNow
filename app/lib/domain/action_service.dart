@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import '../core/ids.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
+import 'duration_rules.dart';
 import 'postpone_rules.dart';
 
 /// A full copy of one action's row and its entire occurrence history, taken
@@ -83,7 +84,6 @@ class ActionService {
     DateTime? startAt,
     DateTime? endAt,
     required bool isAllDay,
-    int? estimatedMinutes,
   }) {
     final nowText = dateTimeToDb(DateTime.now())!;
     return (db.update(
@@ -97,7 +97,6 @@ class ActionService {
         startAt: Value(dateTimeToDb(startAt)),
         endAt: Value(dateTimeToDb(endAt)),
         isAllDay: Value(isAllDay),
-        estimatedMinutes: Value(estimatedMinutes),
         updatedAt: Value(nowText),
       ),
     );
@@ -127,7 +126,7 @@ class ActionService {
   /// time — that field is the one place the UI shows/lets you postpone "the
   /// current time of this task", so every press of Start must move it,
   /// whether or not an occurrence was already running. Any existing
-  /// duration (see [_predictedDuration]) is preserved onto the new start.
+  /// duration (see [computeActionDuration]) is preserved onto the new start.
   /// Always reopens a done action first (clears the manual `done` flag) —
   /// starting it means it's in progress, not finished — including when an
   /// occurrence is already running (an action can end up marked done while
@@ -141,10 +140,10 @@ class ActionService {
       final action = await (db.select(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).getSingle();
-      final duration = _predictedDuration(
-        estimatedMinutes: action.estimatedMinutes,
-        currentStart: dateTimeFromDb(action.startAt),
-        currentEnd: dateTimeFromDb(action.endAt),
+      final duration = computeActionDuration(
+        startAt: dateTimeFromDb(action.startAt),
+        endAt: dateTimeFromDb(action.endAt),
+        legacyEstimatedMinutes: action.estimatedMinutes,
       );
       final newEnd = nowUtc.add(duration);
 
@@ -196,7 +195,7 @@ class ActionService {
   /// scheduled start already happened, so the elapsed time is genuine.
   /// Otherwise (empty, or still in the future — i.e. it was never actually
   /// started) finishing "now" means the whole thing just happened right
-  /// now: `start_at` is set to `now - duration` (see [_predictedDuration]),
+  /// now: `start_at` is set to `now - duration` (see [computeActionDuration]),
   /// so e.g. a 90-minute action finished cold ends up as
   /// "90 minutes ago -> now", not "some stale future time -> now". This
   /// mirrors the original Notion "Finished Now" button formula exactly.
@@ -214,10 +213,10 @@ class ActionService {
       final DateTime newStart = keepExistingStart
           ? oldStart
           : nowUtc.subtract(
-              _predictedDuration(
-                estimatedMinutes: action.estimatedMinutes,
-                currentStart: oldStart,
-                currentEnd: dateTimeFromDb(action.endAt),
+              computeActionDuration(
+                startAt: oldStart,
+                endAt: dateTimeFromDb(action.endAt),
+                legacyEstimatedMinutes: action.estimatedMinutes,
               ),
             );
 
@@ -269,36 +268,13 @@ class ActionService {
     });
   }
 
-  /// Approximates the original "Predicted Time Consumption"/"Minutes
-  /// Consuming" formulas, which our schema has no direct equivalent for (no
-  /// Countable Activities or same-name-previous-action matching): prefer an
-  /// explicit estimate, else the action's own existing start/end gap (even
-  /// if that gap is zero — a deliberately point-in-time action stays that
-  /// way rather than being padded out), else a default of 60 minutes,
-  /// matching the original formula's fallback exactly.
-  Duration _predictedDuration({
-    required int? estimatedMinutes,
-    required DateTime? currentStart,
-    required DateTime? currentEnd,
-  }) {
-    if (estimatedMinutes != null && estimatedMinutes > 0) {
-      return Duration(minutes: estimatedMinutes);
-    }
-    if (currentStart != null && currentEnd != null) {
-      return currentEnd.difference(currentStart);
-    }
-    return const Duration(minutes: 60);
-  }
-
-  /// Directly sets `start_at`/`end_at`/`estimated_minutes` without touching
+  /// Directly sets `start_at`/`end_at` without touching
   /// anything else — used by the quick "tap the time" editor on a Current
-  /// Actions board card, which edits all three together since they're the
-  /// action's operational scheduling parameters.
+  /// Actions board card, which edits both together.
   Future<void> updateSchedule(
     String actionId, {
     required DateTime? startAt,
     required DateTime? endAt,
-    required int? estimatedMinutes,
   }) {
     final nowText = dateTimeToDb(DateTime.now())!;
     return (db.update(
@@ -307,7 +283,6 @@ class ActionService {
       ActionsTableCompanion(
         startAt: Value(dateTimeToDb(startAt)),
         endAt: Value(dateTimeToDb(endAt)),
-        estimatedMinutes: Value(estimatedMinutes),
         updatedAt: Value(nowText),
       ),
     );

@@ -169,7 +169,7 @@ class ViewQueries {
               )
             )
           ORDER BY metrics_weight DESC, downstream_count DESC,
-            (a.estimated_minutes IS NULL) ASC, a.estimated_minutes ASC
+            COALESCE(a.estimated_minutes, 60) ASC
           ''',
           readsFrom: {
             db.actionsTable,

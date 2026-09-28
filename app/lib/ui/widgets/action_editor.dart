@@ -5,6 +5,7 @@ import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/done_rule.dart';
+import '../../domain/duration_rules.dart';
 import '../providers.dart';
 import 'action_menu_button.dart';
 import 'date_time_field.dart';
@@ -46,7 +47,6 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
 class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
-  late final TextEditingController _estimatedMinutesController;
 
   String? _priority;
   String _postponeFlex = 'flexible';
@@ -63,9 +63,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     super.initState();
     final existing = widget.existing;
     _nameController = TextEditingController(text: existing?.name ?? '');
-    _estimatedMinutesController = TextEditingController(
-      text: existing?.estimatedMinutes?.toString() ?? '',
-    );
 
     if (existing != null) {
       _priority = existing.priority;
@@ -84,7 +81,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   @override
   void dispose() {
     _nameController.dispose();
-    _estimatedMinutesController.dispose();
     super.dispose();
   }
 
@@ -234,12 +230,12 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                       onChanged: (v) => setState(() => _endAt = v),
                     ),
                     const SizedBox(height: 8),
-                    TextFormField(
-                      controller: _estimatedMinutesController,
-                      decoration: const InputDecoration(
-                        labelText: 'Estimated minutes',
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Duration: ${formatDuration(computeActionDuration(startAt: _startAt, endAt: _endAt, legacyEstimatedMinutes: widget.existing?.estimatedMinutes))}',
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
-                      keyboardType: TextInputType.number,
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -301,7 +297,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final service = ref.read(actionServiceProvider);
-    final minutes = int.tryParse(_estimatedMinutesController.text.trim());
     final name = _nameController.text.trim();
 
     if (_isEditing) {
@@ -315,7 +310,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         startAt: _startAt,
         endAt: _endAt,
         isAllDay: _isAllDay,
-        estimatedMinutes: minutes,
       );
       await service.setMetrics(id, _selectedMetricIds.toList());
     } else {
@@ -327,7 +321,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         startAt: _startAt,
         endAt: _endAt,
         isAllDay: _isAllDay,
-        estimatedMinutes: minutes,
         metricIds: _selectedMetricIds.toList(),
       );
     }

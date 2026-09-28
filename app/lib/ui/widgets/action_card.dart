@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/queries.dart';
 import '../edit_action.dart';
 import '../providers.dart';
-import 'action_tile.dart' show iconForAction, twoDigits;
+import 'action_tile.dart' show formatActionDuration, iconForAction, twoDigits;
 import 'quick_action_bar.dart';
 import 'quick_time_edit_dialog.dart';
 
@@ -26,7 +26,7 @@ class ActionCard extends ConsumerWidget {
         .watch(runningOccurrencesProvider)
         .value
         ?.contains(action.id) ?? false;
-    final timeLine = _formatTimeRange(action);
+    final timeLine = _formatTimeLine(action);
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -65,7 +65,6 @@ class ActionCard extends ConsumerWidget {
                       actionId: action.id,
                       initialStart: action.startAt,
                       initialEnd: action.endAt,
-                      initialEstimatedMinutes: action.estimatedMinutes,
                     ),
                     child: Text(
                       timeLine,
@@ -92,10 +91,13 @@ class ActionCard extends ConsumerWidget {
   /// side isn't today — showing it only when start/end differ *from each
   /// other* (the old behaviour) meant a range entirely in the past could
   /// render with no date at all, which is exactly the confusing case.
-  /// Appends the estimated duration (the same value `QuickTimeEditDialog`
-  /// and the editor's Manual Parameters edit) when it's set.
-  String? _formatTimeRange(ActionListItem a) {
-    if (a.startAt == null) return null;
+  /// Appends the computed duration (see `computeActionDuration`) — and, if
+  /// there's no schedule at all yet, shows just the duration on its own
+  /// rather than hiding it entirely, so it's still visible/tappable-to-edit.
+  String? _formatTimeLine(ActionListItem a) {
+    if (a.startAt == null) {
+      return a.isAllDay ? null : formatActionDuration(a);
+    }
     final start = a.startAt!.toLocal();
     final today = DateTime.now();
     final startStr = _sameDay(start, today)
@@ -112,9 +114,7 @@ class ActionCard extends ConsumerWidget {
           : '${_date(end)} ${_time(end)}';
       range = '$startStr → $endStr';
     }
-    return a.estimatedMinutes != null
-        ? '$range · ${a.estimatedMinutes}m'
-        : range;
+    return a.isAllDay ? range : '$range · ${formatActionDuration(a)}';
   }
 
   bool _sameDay(DateTime a, DateTime b) =>

@@ -109,7 +109,8 @@ class _TemplateEditorDialogState
     extends ConsumerState<_TemplateEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
-  late final TextEditingController _estimatedMinutesController;
+  // Legacy payload field: no longer editable, but preserved on re-save.
+  int? _legacyEstimatedMinutes;
   String? _priority;
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
@@ -126,9 +127,7 @@ class _TemplateEditorDialogState
     _nameController = TextEditingController(
       text: payload?['name'] as String? ?? '',
     );
-    _estimatedMinutesController = TextEditingController(
-      text: (payload?['estimatedMinutes'] as int?)?.toString() ?? '',
-    );
+    _legacyEstimatedMinutes = payload?['estimatedMinutes'] as int?;
     _priority = payload?['priority'] as String?;
     _isAllDay = payload?['isAllDay'] as bool? ?? false;
     _selectedMetricIds =
@@ -140,7 +139,6 @@ class _TemplateEditorDialogState
   @override
   void dispose() {
     _nameController.dispose();
-    _estimatedMinutesController.dispose();
     super.dispose();
   }
 
@@ -184,13 +182,6 @@ class _TemplateEditorDialogState
                   title: const Text('All day'),
                   value: _isAllDay,
                   onChanged: (v) => setState(() => _isAllDay = v),
-                ),
-                TextFormField(
-                  controller: _estimatedMinutesController,
-                  decoration: const InputDecoration(
-                    labelText: 'Estimated minutes',
-                  ),
-                  keyboardType: TextInputType.number,
                 ),
                 const SizedBox(height: 16),
                 Text('Metrics', style: Theme.of(context).textTheme.titleSmall),
@@ -237,12 +228,12 @@ class _TemplateEditorDialogState
     if (!_formKey.currentState!.validate()) return;
     final db = ref.read(databaseProvider);
     final name = _nameController.text.trim();
-    final minutes = int.tryParse(_estimatedMinutesController.text.trim());
 
     final payload = jsonEncode({
       'name': name,
       if (_priority != null) 'priority': _priority,
-      if (minutes != null) 'estimatedMinutes': minutes,
+      if (_legacyEstimatedMinutes != null)
+        'estimatedMinutes': _legacyEstimatedMinutes,
       'isAllDay': _isAllDay,
       'metricIds': _selectedMetricIds.toList(),
     });

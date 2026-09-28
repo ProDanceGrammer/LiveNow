@@ -4,12 +4,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'domain/postpone_rules.dart';
 import 'ui/screens/home_shell.dart';
+import 'ui/theme_mode.dart';
 import 'ui/undo.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initPostponeTimeZoneData();
-  runApp(const ProviderScope(child: LiveNowApp()));
+  final initialTheme = await loadThemeMode();
+  runApp(
+    ProviderScope(
+      overrides: [
+        themeModeProvider.overrideWith(() => ThemeModeNotifier(initialTheme)),
+      ],
+      child: const LiveNowApp(),
+    ),
+  );
 }
 
 class LiveNowApp extends ConsumerWidget {
@@ -25,6 +34,11 @@ class LiveNowApp extends ConsumerWidget {
       bindings: {
         LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyZ):
             () => performUndo(ref),
+        LogicalKeySet(
+          LogicalKeyboardKey.control,
+          LogicalKeyboardKey.shift,
+          LogicalKeyboardKey.keyL,
+        ): () => ref.read(themeModeProvider.notifier).toggle(),
       },
       child: Focus(
         autofocus: true,
@@ -34,6 +48,14 @@ class LiveNowApp extends ConsumerWidget {
             colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
             useMaterial3: true,
           ),
+          darkTheme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.teal,
+              brightness: Brightness.dark,
+            ),
+            useMaterial3: true,
+          ),
+          themeMode: ref.watch(themeModeProvider),
           home: const HomeShell(),
         ),
       ),
