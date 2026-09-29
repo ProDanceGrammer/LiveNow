@@ -3,6 +3,316 @@
 part of 'database.dart';
 
 // ignore_for_file: type=lint
+class $CountableActivitiesTableTable extends CountableActivitiesTable
+    with TableInfo<$CountableActivitiesTableTable, CountableActivity> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CountableActivitiesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, createdAt, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'countable_activities';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CountableActivity> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CountableActivity map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CountableActivity(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CountableActivitiesTableTable createAlias(String alias) {
+    return $CountableActivitiesTableTable(attachedDatabase, alias);
+  }
+}
+
+class CountableActivity extends DataClass
+    implements Insertable<CountableActivity> {
+  final String id;
+  final String name;
+  final String createdAt;
+  final String updatedAt;
+  const CountableActivity({
+    required this.id,
+    required this.name,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  CountableActivitiesTableCompanion toCompanion(bool nullToAbsent) {
+    return CountableActivitiesTableCompanion(
+      id: Value(id),
+      name: Value(name),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory CountableActivity.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CountableActivity(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  CountableActivity copyWith({
+    String? id,
+    String? name,
+    String? createdAt,
+    String? updatedAt,
+  }) => CountableActivity(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  CountableActivity copyWithCompanion(CountableActivitiesTableCompanion data) {
+    return CountableActivity(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CountableActivity(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, createdAt, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CountableActivity &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CountableActivitiesTableCompanion
+    extends UpdateCompanion<CountableActivity> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const CountableActivitiesTableCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CountableActivitiesTableCompanion.insert({
+    required String id,
+    required String name,
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<CountableActivity> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CountableActivitiesTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return CountableActivitiesTableCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CountableActivitiesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $ActionsTableTable extends ActionsTable
     with TableInfo<$ActionsTableTable, ActionRow> {
   @override
@@ -142,6 +452,31 @@ class $ActionsTableTable extends ActionsTable
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _sequenceNumberMeta = const VerificationMeta(
+    'sequenceNumber',
+  );
+  @override
+  late final GeneratedColumn<int> sequenceNumber = GeneratedColumn<int>(
+    'sequence_number',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _countableActivityIdMeta =
+      const VerificationMeta('countableActivityId');
+  @override
+  late final GeneratedColumn<String> countableActivityId =
+      GeneratedColumn<String>(
+        'countable_activity_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+        defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'REFERENCES countable_activities (id) ON DELETE SET NULL',
+        ),
+      );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -178,6 +513,8 @@ class $ActionsTableTable extends ActionsTable
     estimatedMinutes,
     resultNote,
     completedAt,
+    sequenceNumber,
+    countableActivityId,
     createdAt,
     updatedAt,
   ];
@@ -275,6 +612,24 @@ class $ActionsTableTable extends ActionsTable
         ),
       );
     }
+    if (data.containsKey('sequence_number')) {
+      context.handle(
+        _sequenceNumberMeta,
+        sequenceNumber.isAcceptableOrUnknown(
+          data['sequence_number']!,
+          _sequenceNumberMeta,
+        ),
+      );
+    }
+    if (data.containsKey('countable_activity_id')) {
+      context.handle(
+        _countableActivityIdMeta,
+        countableActivityId.isAcceptableOrUnknown(
+          data['countable_activity_id']!,
+          _countableActivityIdMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -348,6 +703,14 @@ class $ActionsTableTable extends ActionsTable
         DriftSqlType.string,
         data['${effectivePrefix}completed_at'],
       ),
+      sequenceNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sequence_number'],
+      ),
+      countableActivityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}countable_activity_id'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_at'],
@@ -382,6 +745,14 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   final int? estimatedMinutes;
   final String? resultNote;
   final String? completedAt;
+
+  /// Position in a "Continue with Same Action" chain (`[#2] Read a Bible`).
+  /// The name prefix is display only; this column is the source of truth.
+  final int? sequenceNumber;
+
+  /// The repeatable activity type this action is an instance of; its past
+  /// durations feed the predicted duration of a continuation.
+  final String? countableActivityId;
   final String createdAt;
   final String updatedAt;
   const ActionRow({
@@ -397,6 +768,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     this.estimatedMinutes,
     this.resultNote,
     this.completedAt,
+    this.sequenceNumber,
+    this.countableActivityId,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -428,6 +801,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     }
     if (!nullToAbsent || completedAt != null) {
       map['completed_at'] = Variable<String>(completedAt);
+    }
+    if (!nullToAbsent || sequenceNumber != null) {
+      map['sequence_number'] = Variable<int>(sequenceNumber);
+    }
+    if (!nullToAbsent || countableActivityId != null) {
+      map['countable_activity_id'] = Variable<String>(countableActivityId);
     }
     map['created_at'] = Variable<String>(createdAt);
     map['updated_at'] = Variable<String>(updatedAt);
@@ -462,6 +841,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       completedAt: completedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(completedAt),
+      sequenceNumber: sequenceNumber == null && nullToAbsent
+          ? const Value.absent()
+          : Value(sequenceNumber),
+      countableActivityId: countableActivityId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(countableActivityId),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -485,6 +870,10 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       estimatedMinutes: serializer.fromJson<int?>(json['estimatedMinutes']),
       resultNote: serializer.fromJson<String?>(json['resultNote']),
       completedAt: serializer.fromJson<String?>(json['completedAt']),
+      sequenceNumber: serializer.fromJson<int?>(json['sequenceNumber']),
+      countableActivityId: serializer.fromJson<String?>(
+        json['countableActivityId'],
+      ),
       createdAt: serializer.fromJson<String>(json['createdAt']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
     );
@@ -505,6 +894,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       'estimatedMinutes': serializer.toJson<int?>(estimatedMinutes),
       'resultNote': serializer.toJson<String?>(resultNote),
       'completedAt': serializer.toJson<String?>(completedAt),
+      'sequenceNumber': serializer.toJson<int?>(sequenceNumber),
+      'countableActivityId': serializer.toJson<String?>(countableActivityId),
       'createdAt': serializer.toJson<String>(createdAt),
       'updatedAt': serializer.toJson<String>(updatedAt),
     };
@@ -523,6 +914,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     Value<int?> estimatedMinutes = const Value.absent(),
     Value<String?> resultNote = const Value.absent(),
     Value<String?> completedAt = const Value.absent(),
+    Value<int?> sequenceNumber = const Value.absent(),
+    Value<String?> countableActivityId = const Value.absent(),
     String? createdAt,
     String? updatedAt,
   }) => ActionRow(
@@ -540,6 +933,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
         : this.estimatedMinutes,
     resultNote: resultNote.present ? resultNote.value : this.resultNote,
     completedAt: completedAt.present ? completedAt.value : this.completedAt,
+    sequenceNumber: sequenceNumber.present
+        ? sequenceNumber.value
+        : this.sequenceNumber,
+    countableActivityId: countableActivityId.present
+        ? countableActivityId.value
+        : this.countableActivityId,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -567,6 +966,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       completedAt: data.completedAt.present
           ? data.completedAt.value
           : this.completedAt,
+      sequenceNumber: data.sequenceNumber.present
+          ? data.sequenceNumber.value
+          : this.sequenceNumber,
+      countableActivityId: data.countableActivityId.present
+          ? data.countableActivityId.value
+          : this.countableActivityId,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -587,6 +992,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           ..write('estimatedMinutes: $estimatedMinutes, ')
           ..write('resultNote: $resultNote, ')
           ..write('completedAt: $completedAt, ')
+          ..write('sequenceNumber: $sequenceNumber, ')
+          ..write('countableActivityId: $countableActivityId, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -607,6 +1014,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     estimatedMinutes,
     resultNote,
     completedAt,
+    sequenceNumber,
+    countableActivityId,
     createdAt,
     updatedAt,
   );
@@ -626,6 +1035,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           other.estimatedMinutes == this.estimatedMinutes &&
           other.resultNote == this.resultNote &&
           other.completedAt == this.completedAt &&
+          other.sequenceNumber == this.sequenceNumber &&
+          other.countableActivityId == this.countableActivityId &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -643,6 +1054,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   final Value<int?> estimatedMinutes;
   final Value<String?> resultNote;
   final Value<String?> completedAt;
+  final Value<int?> sequenceNumber;
+  final Value<String?> countableActivityId;
   final Value<String> createdAt;
   final Value<String> updatedAt;
   final Value<int> rowid;
@@ -659,6 +1072,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.estimatedMinutes = const Value.absent(),
     this.resultNote = const Value.absent(),
     this.completedAt = const Value.absent(),
+    this.sequenceNumber = const Value.absent(),
+    this.countableActivityId = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -676,6 +1091,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.estimatedMinutes = const Value.absent(),
     this.resultNote = const Value.absent(),
     this.completedAt = const Value.absent(),
+    this.sequenceNumber = const Value.absent(),
+    this.countableActivityId = const Value.absent(),
     required String createdAt,
     required String updatedAt,
     this.rowid = const Value.absent(),
@@ -696,6 +1113,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Expression<int>? estimatedMinutes,
     Expression<String>? resultNote,
     Expression<String>? completedAt,
+    Expression<int>? sequenceNumber,
+    Expression<String>? countableActivityId,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<int>? rowid,
@@ -713,6 +1132,9 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       if (estimatedMinutes != null) 'estimated_minutes': estimatedMinutes,
       if (resultNote != null) 'result_note': resultNote,
       if (completedAt != null) 'completed_at': completedAt,
+      if (sequenceNumber != null) 'sequence_number': sequenceNumber,
+      if (countableActivityId != null)
+        'countable_activity_id': countableActivityId,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -732,6 +1154,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Value<int?>? estimatedMinutes,
     Value<String?>? resultNote,
     Value<String?>? completedAt,
+    Value<int?>? sequenceNumber,
+    Value<String?>? countableActivityId,
     Value<String>? createdAt,
     Value<String>? updatedAt,
     Value<int>? rowid,
@@ -749,6 +1173,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       resultNote: resultNote ?? this.resultNote,
       completedAt: completedAt ?? this.completedAt,
+      sequenceNumber: sequenceNumber ?? this.sequenceNumber,
+      countableActivityId: countableActivityId ?? this.countableActivityId,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -794,6 +1220,14 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     if (completedAt.present) {
       map['completed_at'] = Variable<String>(completedAt.value);
     }
+    if (sequenceNumber.present) {
+      map['sequence_number'] = Variable<int>(sequenceNumber.value);
+    }
+    if (countableActivityId.present) {
+      map['countable_activity_id'] = Variable<String>(
+        countableActivityId.value,
+      );
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
     }
@@ -821,6 +1255,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
           ..write('estimatedMinutes: $estimatedMinutes, ')
           ..write('resultNote: $resultNote, ')
           ..write('completedAt: $completedAt, ')
+          ..write('sequenceNumber: $sequenceNumber, ')
+          ..write('countableActivityId: $countableActivityId, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -2378,6 +2814,8 @@ class ActionTemplatesTableCompanion extends UpdateCompanion<ActionTemplate> {
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
+  late final $CountableActivitiesTableTable countableActivitiesTable =
+      $CountableActivitiesTableTable(this);
   late final $ActionsTableTable actionsTable = $ActionsTableTable(this);
   late final $ActionDependenciesTableTable actionDependenciesTable =
       $ActionDependenciesTableTable(this);
@@ -2413,6 +2851,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
+    countableActivitiesTable,
     actionsTable,
     actionDependenciesTable,
     actionOccurrencesTable,
@@ -2427,6 +2866,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'countable_activities',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('actions', kind: UpdateKind.update)],
+    ),
     WritePropagation(
       on: TableUpdateQuery.onTableName(
         'actions',
@@ -2465,6 +2911,314 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   ]);
 }
 
+typedef $$CountableActivitiesTableTableCreateCompanionBuilder =
+    CountableActivitiesTableCompanion Function({
+      required String id,
+      required String name,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$CountableActivitiesTableTableUpdateCompanionBuilder =
+    CountableActivitiesTableCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$CountableActivitiesTableTableReferences
+    extends
+        BaseReferences<
+          _$AppDatabase,
+          $CountableActivitiesTableTable,
+          CountableActivity
+        > {
+  $$CountableActivitiesTableTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static MultiTypedResultKey<$ActionsTableTable, List<ActionRow>>
+  _actionsTableRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.actionsTable,
+    aliasName: 'countable_activities__id__actions__countable_activity_id',
+  );
+
+  $$ActionsTableTableProcessedTableManager get actionsTableRefs {
+    final manager = $$ActionsTableTableTableManager($_db, $_db.actionsTable)
+        .filter(
+          (f) =>
+              f.countableActivityId.id.sqlEquals($_itemColumn<String>('id')!),
+        );
+
+    final cache = $_typedResult.readTableOrNull(_actionsTableRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$CountableActivitiesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $CountableActivitiesTableTable> {
+  $$CountableActivitiesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  Expression<bool> actionsTableRefs(
+    Expression<bool> Function($$ActionsTableTableFilterComposer f) f,
+  ) {
+    final $$ActionsTableTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.actionsTable,
+      getReferencedColumn: (t) => t.countableActivityId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ActionsTableTableFilterComposer(
+            $db: $db,
+            $table: $db.actionsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$CountableActivitiesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $CountableActivitiesTableTable> {
+  $$CountableActivitiesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CountableActivitiesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CountableActivitiesTableTable> {
+  $$CountableActivitiesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  Expression<T> actionsTableRefs<T extends Object>(
+    Expression<T> Function($$ActionsTableTableAnnotationComposer a) f,
+  ) {
+    final $$ActionsTableTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.actionsTable,
+      getReferencedColumn: (t) => t.countableActivityId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ActionsTableTableAnnotationComposer(
+            $db: $db,
+            $table: $db.actionsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$CountableActivitiesTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CountableActivitiesTableTable,
+          CountableActivity,
+          $$CountableActivitiesTableTableFilterComposer,
+          $$CountableActivitiesTableTableOrderingComposer,
+          $$CountableActivitiesTableTableAnnotationComposer,
+          $$CountableActivitiesTableTableCreateCompanionBuilder,
+          $$CountableActivitiesTableTableUpdateCompanionBuilder,
+          (CountableActivity, $$CountableActivitiesTableTableReferences),
+          CountableActivity,
+          PrefetchHooks Function({bool actionsTableRefs})
+        > {
+  $$CountableActivitiesTableTableTableManager(
+    _$AppDatabase db,
+    $CountableActivitiesTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CountableActivitiesTableTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CountableActivitiesTableTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CountableActivitiesTableTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CountableActivitiesTableCompanion(
+                id: id,
+                name: name,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CountableActivitiesTableCompanion.insert(
+                id: id,
+                name: name,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $CountableActivitiesTableTable,
+                    CountableActivity
+                  >(table),
+                  $$CountableActivitiesTableTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({actionsTableRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (actionsTableRefs) db.actionsTable],
+              addJoins: null,
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (actionsTableRefs)
+                    await $_getPrefetchedData<
+                      CountableActivity,
+                      $CountableActivitiesTableTable,
+                      ActionRow
+                    >(
+                      currentTable: table,
+                      referencedTable: $$CountableActivitiesTableTableReferences
+                          ._actionsTableRefsTable(db),
+                      managerFromTypedResult: (p0) =>
+                          $$CountableActivitiesTableTableReferences(
+                            db,
+                            table,
+                            p0,
+                          ).actionsTableRefs,
+                      referencedItemsForCurrentItem: (item, referencedItems) =>
+                          referencedItems.where(
+                            (e) => e.countableActivityId == item.id,
+                          ),
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$CountableActivitiesTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CountableActivitiesTableTable,
+      CountableActivity,
+      $$CountableActivitiesTableTableFilterComposer,
+      $$CountableActivitiesTableTableOrderingComposer,
+      $$CountableActivitiesTableTableAnnotationComposer,
+      $$CountableActivitiesTableTableCreateCompanionBuilder,
+      $$CountableActivitiesTableTableUpdateCompanionBuilder,
+      (CountableActivity, $$CountableActivitiesTableTableReferences),
+      CountableActivity,
+      PrefetchHooks Function({bool actionsTableRefs})
+    >;
 typedef $$ActionsTableTableCreateCompanionBuilder =
     ActionsTableCompanion Function({
       required String id,
@@ -2479,6 +3233,8 @@ typedef $$ActionsTableTableCreateCompanionBuilder =
       Value<int?> estimatedMinutes,
       Value<String?> resultNote,
       Value<String?> completedAt,
+      Value<int?> sequenceNumber,
+      Value<String?> countableActivityId,
       required String createdAt,
       required String updatedAt,
       Value<int> rowid,
@@ -2497,6 +3253,8 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
       Value<int?> estimatedMinutes,
       Value<String?> resultNote,
       Value<String?> completedAt,
+      Value<int?> sequenceNumber,
+      Value<String?> countableActivityId,
       Value<String> createdAt,
       Value<String> updatedAt,
       Value<int> rowid,
@@ -2505,6 +3263,27 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
 final class $$ActionsTableTableReferences
     extends BaseReferences<_$AppDatabase, $ActionsTableTable, ActionRow> {
   $$ActionsTableTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $CountableActivitiesTableTable _countableActivityIdTable(
+    _$AppDatabase db,
+  ) => db.countableActivitiesTable.createAlias(
+    'actions__countable_activity_id__countable_activities__id',
+  );
+
+  $$CountableActivitiesTableTableProcessedTableManager?
+  get countableActivityId {
+    final $_column = $_itemColumn<String>('countable_activity_id');
+    if ($_column == null) return null;
+    final manager = $$CountableActivitiesTableTableTableManager(
+      $_db,
+      $_db.countableActivitiesTable,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_countableActivityIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
 
   static MultiTypedResultKey<
     $ActionDependenciesTableTable,
@@ -2672,6 +3451,11 @@ class $$ActionsTableTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get sequenceNumber => $composableBuilder(
+    column: $table.sequenceNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
   ColumnFilters<String> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnFilters(column),
@@ -2681,6 +3465,30 @@ class $$ActionsTableTableFilterComposer
     column: $table.updatedAt,
     builder: (column) => ColumnFilters(column),
   );
+
+  $$CountableActivitiesTableTableFilterComposer get countableActivityId {
+    final $$CountableActivitiesTableTableFilterComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.countableActivityId,
+          referencedTable: $db.countableActivitiesTable,
+          getReferencedColumn: (t) => t.id,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$CountableActivitiesTableTableFilterComposer(
+                $db: $db,
+                $table: $db.countableActivitiesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return composer;
+  }
 
   Expression<bool> predecessorDependencies(
     Expression<bool> Function($$ActionDependenciesTableTableFilterComposer f) f,
@@ -2855,6 +3663,11 @@ class $$ActionsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get sequenceNumber => $composableBuilder(
+    column: $table.sequenceNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2864,6 +3677,30 @@ class $$ActionsTableTableOrderingComposer
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  $$CountableActivitiesTableTableOrderingComposer get countableActivityId {
+    final $$CountableActivitiesTableTableOrderingComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.countableActivityId,
+          referencedTable: $db.countableActivitiesTable,
+          getReferencedColumn: (t) => t.id,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$CountableActivitiesTableTableOrderingComposer(
+                $db: $db,
+                $table: $db.countableActivitiesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return composer;
+  }
 }
 
 class $$ActionsTableTableAnnotationComposer
@@ -2921,11 +3758,40 @@ class $$ActionsTableTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<int> get sequenceNumber => $composableBuilder(
+    column: $table.sequenceNumber,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
   GeneratedColumn<String> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$CountableActivitiesTableTableAnnotationComposer get countableActivityId {
+    final $$CountableActivitiesTableTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.countableActivityId,
+          referencedTable: $db.countableActivitiesTable,
+          getReferencedColumn: (t) => t.id,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$CountableActivitiesTableTableAnnotationComposer(
+                $db: $db,
+                $table: $db.countableActivitiesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return composer;
+  }
 
   Expression<T> predecessorDependencies<T extends Object>(
     Expression<T> Function($$ActionDependenciesTableTableAnnotationComposer a)
@@ -3048,6 +3914,7 @@ class $$ActionsTableTableTableManager
           (ActionRow, $$ActionsTableTableReferences),
           ActionRow,
           PrefetchHooks Function({
+            bool countableActivityId,
             bool predecessorDependencies,
             bool successorDependencies,
             bool actionOccurrencesTableRefs,
@@ -3079,6 +3946,8 @@ class $$ActionsTableTableTableManager
                 Value<int?> estimatedMinutes = const Value.absent(),
                 Value<String?> resultNote = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
+                Value<int?> sequenceNumber = const Value.absent(),
+                Value<String?> countableActivityId = const Value.absent(),
                 Value<String> createdAt = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -3095,6 +3964,8 @@ class $$ActionsTableTableTableManager
                 estimatedMinutes: estimatedMinutes,
                 resultNote: resultNote,
                 completedAt: completedAt,
+                sequenceNumber: sequenceNumber,
+                countableActivityId: countableActivityId,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -3113,6 +3984,8 @@ class $$ActionsTableTableTableManager
                 Value<int?> estimatedMinutes = const Value.absent(),
                 Value<String?> resultNote = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
+                Value<int?> sequenceNumber = const Value.absent(),
+                Value<String?> countableActivityId = const Value.absent(),
                 required String createdAt,
                 required String updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -3129,6 +4002,8 @@ class $$ActionsTableTableTableManager
                 estimatedMinutes: estimatedMinutes,
                 resultNote: resultNote,
                 completedAt: completedAt,
+                sequenceNumber: sequenceNumber,
+                countableActivityId: countableActivityId,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -3143,6 +4018,7 @@ class $$ActionsTableTableTableManager
               .toList(),
           prefetchHooksCallback:
               ({
+                countableActivityId = false,
                 predecessorDependencies = false,
                 successorDependencies = false,
                 actionOccurrencesTableRefs = false,
@@ -3156,7 +4032,36 @@ class $$ActionsTableTableTableManager
                     if (actionOccurrencesTableRefs) db.actionOccurrencesTable,
                     if (actionMetricsTableRefs) db.actionMetricsTable,
                   ],
-                  addJoins: null,
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (countableActivityId) {
+                          state = state.withJoin(
+                            currentTable: table,
+                            currentColumn: table.countableActivityId,
+                            referencedTable: $$ActionsTableTableReferences
+                                ._countableActivityIdTable(db),
+                            referencedColumn: $$ActionsTableTableReferences
+                                ._countableActivityIdTable(db)
+                                .id,
+                          ) as T;
+                        }
+
+                        return state;
+                      },
                   getPrefetchedDataCallback: (items) async {
                     return [
                       if (predecessorDependencies)
@@ -3264,6 +4169,7 @@ typedef $$ActionsTableTableProcessedTableManager =
       (ActionRow, $$ActionsTableTableReferences),
       ActionRow,
       PrefetchHooks Function({
+        bool countableActivityId,
         bool predecessorDependencies,
         bool successorDependencies,
         bool actionOccurrencesTableRefs,
@@ -4873,6 +5779,11 @@ typedef $$ActionTemplatesTableTableProcessedTableManager =
 class $AppDatabaseManager {
   final _$AppDatabase _db;
   $AppDatabaseManager(this._db);
+  $$CountableActivitiesTableTableTableManager get countableActivitiesTable =>
+      $$CountableActivitiesTableTableTableManager(
+        _db,
+        _db.countableActivitiesTable,
+      );
   $$ActionsTableTableTableManager get actionsTable =>
       $$ActionsTableTableTableManager(_db, _db.actionsTable);
   $$ActionDependenciesTableTableTableManager get actionDependenciesTable =>

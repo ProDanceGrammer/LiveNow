@@ -23,8 +23,21 @@ class QuickActionBar extends ConsumerWidget {
       spacing: 6,
       runSpacing: 6,
       children: [
-        _EmojiButton('▶️', 'Start', () => run('Started', () => service.start(actionId))),
-        _EmojiButton('🏁', 'Finish', () => run('Finished', () => service.finish(actionId))),
+        _EmojiButton(
+          '▶️',
+          'Start',
+          () => run('Started', () => service.start(actionId)),
+        ),
+        _EmojiButton(
+          '🏁',
+          'Finish',
+          () => run('Finished', () => service.finish(actionId)),
+        ),
+        _EmojiButton(
+          '⏭️',
+          'Continue with same action',
+          () => runUndoableContinue(context, ref, actionId),
+        ),
         // A visible gap here separates "act on it now" (above) from
         // "postpone" (below) — those two groups being right next to each
         // other, in small tightly-packed buttons, was the likely cause of
@@ -94,17 +107,33 @@ class QuickActionBar extends ConsumerWidget {
             () => service.postpone(actionId, PostponeRule.nextMondayMorning),
           ),
         ),
+        // Set apart from the everyday buttons so it isn't hit by accident;
+        // Undo (snackbar / Ctrl+Z) is the safety net, not a confirmation.
+        const SizedBox(width: 10),
+        _EmojiButton.icon(
+          Icon(
+            Icons.delete_outline,
+            size: 20,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          'Delete',
+          () => runUndoableDelete(context, ref, actionId),
+        ),
       ],
     );
   }
 }
 
 class _EmojiButton extends StatelessWidget {
-  final String emoji;
+  final String? emoji;
+  final Widget? icon;
   final String tooltip;
   final Future<void> Function() onTap;
 
-  const _EmojiButton(this.emoji, this.tooltip, this.onTap);
+  const _EmojiButton(String this.emoji, this.tooltip, this.onTap) : icon = null;
+
+  const _EmojiButton.icon(Widget this.icon, this.tooltip, this.onTap)
+    : emoji = null;
 
   @override
   Widget build(BuildContext context) {
@@ -122,7 +151,7 @@ class _EmojiButton extends StatelessWidget {
           width: 36,
           height: 36,
           child: Center(
-            child: Text(emoji, style: const TextStyle(fontSize: 16)),
+            child: icon ?? Text(emoji!, style: const TextStyle(fontSize: 16)),
           ),
         ),
       ),

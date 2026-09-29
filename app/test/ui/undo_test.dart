@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/undo.dart';
+import 'package:livenow/ui/widgets/quick_action_bar.dart';
 
 void main() {
   late AppDatabase db;
@@ -93,6 +94,49 @@ void main() {
     expect(find.text('Renamed'), findsNothing);
     expect(container.read(lastUndoProvider), isNull);
 
+    await unmount(tester);
+  });
+
+  testWidgets('Continue button creates the next action and Undo removes it', (
+    tester,
+  ) async {
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await tester.runAsync(() async {
+      actionId = await ProviderContainer(
+        overrides: [databaseProvider.overrideWithValue(db)],
+      ).read(actionServiceProvider).createAction(name: 'Read');
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: Scaffold(body: QuickActionBar(actionId: actionId)),
+        ),
+      ),
+    );
+
+    Future<List<String>> names() async =>
+        (await tester.runAsync(() => db.select(db.actionsTable).get()))!
+            .map((a) => a.name)
+            .toList()
+          ..sort();
+
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Continue with same action'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(await names(), ['[#1] Read', '[#2] Read']);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    expect(await names(), ['Read']);
+
+    await tester.pump(const Duration(seconds: 1));
     await unmount(tester);
   });
 

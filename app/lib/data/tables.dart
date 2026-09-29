@@ -14,10 +14,7 @@ import 'package:drift/drift.dart';
 /// unscheduled or all-day action it just mirrors this flag.
 @DataClassName('ActionRow')
 @TableIndex(name: 'idx_actions_done_start', columns: {#done, #startAt})
-@TableIndex(
-  name: 'idx_actions_allday_start',
-  columns: {#isAllDay, #startAt},
-)
+@TableIndex(name: 'idx_actions_allday_start', columns: {#isAllDay, #startAt})
 class ActionsTable extends Table {
   @override
   String get tableName => 'actions';
@@ -39,6 +36,18 @@ class ActionsTable extends Table {
   IntColumn get estimatedMinutes => integer().nullable()();
   TextColumn get resultNote => text().nullable()();
   TextColumn get completedAt => text().nullable()();
+
+  /// Position in a "Continue with Same Action" chain (`[#2] Read a Bible`).
+  /// The name prefix is display only; this column is the source of truth.
+  IntColumn get sequenceNumber => integer().nullable()();
+
+  /// The repeatable activity type this action is an instance of; its past
+  /// durations feed the predicted duration of a continuation.
+  TextColumn get countableActivityId => text().nullable().references(
+    CountableActivitiesTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
 
@@ -52,6 +61,23 @@ class ActionsTable extends Table {
     "CHECK (postpone_flex IN ('flexible','hard','impossible'))",
     "CHECK (depth_level IS NULL OR depth_level IN ('easy','medium','deep'))",
   ];
+}
+
+/// A trackable, repeatable activity type (e.g. "Read the Bible"). Actions
+/// link to one so the average of its recent finished runs can predict how
+/// long the next one takes.
+@DataClassName('CountableActivity')
+class CountableActivitiesTable extends Table {
+  @override
+  String get tableName => 'countable_activities';
+
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
 }
 
 /// A "this must follow that" edge between two actions. This is the core

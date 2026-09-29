@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/queries.dart';
 import '../edit_action.dart';
 import '../providers.dart';
+import '../undo.dart';
 import 'action_tile.dart' show formatActionDuration, iconForAction, twoDigits;
 import 'quick_action_bar.dart';
 import 'quick_time_edit_dialog.dart';
@@ -22,69 +23,102 @@ class ActionCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isRunning = ref
-        .watch(runningOccurrencesProvider)
-        .value
-        ?.contains(action.id) ?? false;
+    final isRunning =
+        ref.watch(runningOccurrencesProvider).value?.contains(action.id) ??
+        false;
     final timeLine = _formatTimeLine(action);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: InkWell(
-        onTap: () => openActionEditor(context, ref, action.id),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    iconForAction(action, isRunning),
-                    size: 20,
-                    color: isRunning
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      action.name,
-                      style: Theme.of(context).textTheme.titleSmall,
+    return GestureDetector(
+      onSecondaryTapDown: (d) =>
+          _showContextMenu(context, ref, d.globalPosition),
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: InkWell(
+          onTap: () => openActionEditor(context, ref, action.id),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      iconForAction(action, isRunning),
+                      size: 20,
+                      color: isRunning
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
                     ),
-                  ),
-                ],
-              ),
-              if (timeLine != null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 28, top: 2),
-                  child: InkWell(
-                    onTap: () => QuickTimeEditDialog.show(
-                      context,
-                      actionId: action.id,
-                      initialStart: action.startAt,
-                      initialEnd: action.endAt,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        action.name,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                     ),
-                    child: Text(
-                      timeLine,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.secondary,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Theme.of(
-                          context,
-                        ).colorScheme.secondary.withValues(alpha: 0.4),
+                  ],
+                ),
+                if (timeLine != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 28, top: 2),
+                    child: InkWell(
+                      onTap: () => QuickTimeEditDialog.show(
+                        context,
+                        actionId: action.id,
+                        initialStart: action.startAt,
+                        initialEnd: action.endAt,
+                      ),
+                      child: Text(
+                        timeLine,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.secondary,
+                          decoration: TextDecoration.underline,
+                          decorationColor: Theme.of(context)
+                              .colorScheme
+                              .secondary
+                              .withValues(alpha: 0.4),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              const SizedBox(height: 6),
-              QuickActionBar(actionId: action.id),
-            ],
+                const SizedBox(height: 6),
+                QuickActionBar(actionId: action.id),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// Right-click menu: currently just a red "Delete" (undoable afterwards).
+  Future<void> _showContextMenu(
+    BuildContext context,
+    WidgetRef ref,
+    Offset position,
+  ) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'delete',
+          child: Text(
+            'Delete',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ),
+      ],
+    );
+    if (choice == 'delete' && context.mounted) {
+      await runUndoableDelete(context, ref, action.id);
+    }
   }
 
   /// Independently shows a date on the start and/or the end whenever that

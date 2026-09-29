@@ -4,6 +4,43 @@ import 'package:livenow/domain/duration_rules.dart';
 void main() {
   final t0 = DateTime.utc(2026, 1, 1, 10);
 
+  group('predictedDuration', () {
+    const own = Duration(minutes: 25);
+
+    test('countable average wins over everything', () {
+      expect(
+        predictedDuration(
+          ownDuration: own,
+          countableAverage: const Duration(minutes: 40),
+          chainSamples: const [Duration(minutes: 10)],
+        ),
+        const Duration(minutes: 40),
+      );
+    });
+    test('chain samples are averaged when there is no countable average', () {
+      expect(
+        predictedDuration(
+          ownDuration: own,
+          chainSamples: const [Duration(minutes: 10), Duration(minutes: 20)],
+        ),
+        const Duration(minutes: 15),
+      );
+    });
+    test('a zero countable average falls through', () {
+      expect(
+        predictedDuration(
+          ownDuration: own,
+          countableAverage: Duration.zero,
+          chainSamples: const [Duration(minutes: 10)],
+        ),
+        const Duration(minutes: 10),
+      );
+    });
+    test('falls back to the own duration', () {
+      expect(predictedDuration(ownDuration: own), own);
+    });
+  });
+
   group('computeActionDuration', () {
     test('scheduled uses end - start', () {
       expect(
@@ -16,10 +53,7 @@ void main() {
       );
     });
     test('zero gap is kept', () {
-      expect(
-        computeActionDuration(startAt: t0, endAt: t0),
-        Duration.zero,
-      );
+      expect(computeActionDuration(startAt: t0, endAt: t0), Duration.zero);
     });
     test('unscheduled uses legacy estimate, else default', () {
       expect(
@@ -60,9 +94,8 @@ void main() {
   });
 
   group('formatDuration', () {
-    String f({int d = 0, int h = 0, int m = 0, int s = 0}) => formatDuration(
-      Duration(days: d, hours: h, minutes: m, seconds: s),
-    );
+    String f({int d = 0, int h = 0, int m = 0, int s = 0}) =>
+        formatDuration(Duration(days: d, hours: h, minutes: m, seconds: s));
     test('basic examples', () {
       expect(f(s: 20), '20 sec');
       expect(f(m: 1), '1 min');

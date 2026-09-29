@@ -28,6 +28,28 @@ Duration computeActionDuration({
   return defaultActionDuration;
 }
 
+/// How long a continuation of an action should take, mirroring the Notion
+/// "Predicted Time Consumption" formula: the linked Countable Activity's
+/// recent average wins, else the average of recent same-name runs in the
+/// action's chain ([chainSamples]), else the action's [ownDuration].
+Duration predictedDuration({
+  required Duration ownDuration,
+  Duration? countableAverage,
+  List<Duration> chainSamples = const [],
+}) {
+  if (countableAverage != null && countableAverage > Duration.zero) {
+    return countableAverage;
+  }
+  if (chainSamples.isNotEmpty) {
+    final totalMicros = chainSamples.fold<int>(
+      0,
+      (sum, d) => sum + d.inMicroseconds,
+    );
+    return Duration(microseconds: totalMicros ~/ chainSamples.length);
+  }
+  return ownDuration;
+}
+
 /// Formats [d] with second precision using its two most significant
 /// consecutive units (skipping the second if it's zero): '20 sec', '1 min',
 /// '1 hour 23 min', '7 hours', '2 days', '1 day 3 hours'. Negative durations
@@ -50,8 +72,7 @@ String formatDuration(Duration d) {
   final first = parts.indexWhere((p) => p.$1 > 0);
   if (first == -1) return '0 sec';
 
-  String fmt((int, String, String) p) =>
-      '${p.$1} ${p.$1 == 1 ? p.$2 : p.$3}';
+  String fmt((int, String, String) p) => '${p.$1} ${p.$1 == 1 ? p.$2 : p.$3}';
   final out = [fmt(parts[first])];
   if (first + 1 < parts.length && parts[first + 1].$1 > 0) {
     out.add(fmt(parts[first + 1]));

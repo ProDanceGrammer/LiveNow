@@ -7,6 +7,7 @@ import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'duration_rules.dart';
 import 'postpone_rules.dart';
+import 'sequence_naming.dart';
 
 /// A full copy of one action's row and its entire occurrence history, taken
 /// just before a quick-action button changes it — lets [ActionService.restore]
@@ -18,8 +19,56 @@ class ActionSnapshot {
   const ActionSnapshot({required this.action, required this.occurrences});
 }
 
-/// Create/edit/start/finish/postpone an action, and instantiate one from a
-/// saved template.
+/// What [ActionService.continueSameAction] created, plus everything
+/// [ActionService.undoContinue] needs to take it back.
+class ContinueResult {
+  final String newActionId;
+  final ContinueUndo undo;
+
+  const ContinueResult({required this.newActionId, required this.undo});
+}
+
+/// The pre-continue state that a continue changes: the source action's row
+/// (it gets renamed/numbered) and which actions it used to point at (those
+/// edges are moved onto the new action).
+class ContinueUndo {
+  final String newActionId;
+  final ActionRow sourceBefore;
+  final List<String> formerSuccessorIds;
+
+  const ContinueUndo({
+    required this.newActionId,
+    required this.sourceBefore,
+    required this.formerSuccessorIds,
+  });
+}
+
+/// Every row [ActionService.deleteAction] removed, kept so
+/// [ActionService.undoDelete] can restore the action exactly.
+class DeleteUndo {
+  final ActionRow action;
+  final List<ActionOccurrence> occurrences;
+  final List<ActionMetric> metricLinks;
+  final List<ActionDependency> edges;
+
+  const DeleteUndo({
+    required this.action,
+    required this.occurrences,
+    required this.metricLinks,
+    required this.edges,
+  });
+}
+
+/// How far back finished runs count toward a Countable Activity's average
+/// ("over the last month" in the Notion prototype).
+const Duration _countableAverageWindow = Duration(days: 30);
+
+/// How far back same-name runs in an action's chain count when it has no
+/// Countable Activity.
+const Duration _chainAverageWindow = Duration(days: 7);
+
+/// Create/edit/start/finish/postpone an action, continue it, and instantiate
+/// one from a saved template.
 class ActionService {
   final AppDatabase db;
 
@@ -34,6 +83,7 @@ class ActionService {
     DateTime? endAt,
     bool isAllDay = false,
     int? estimatedMinutes,
+    String? countableActivityId,
     List<String> metricIds = const [],
   }) async {
     final id = newId();
@@ -53,6 +103,7 @@ class ActionService {
               endAt: Value(dateTimeToDb(endAt)),
               isAllDay: Value(isAllDay),
               estimatedMinutes: Value(estimatedMinutes),
+              countableActivityId: Value(countableActivityId),
               createdAt: nowText,
               updatedAt: nowText,
             ),
@@ -98,6 +149,116 @@ class ActionService {
         endAt: Value(dateTimeToDb(endAt)),
         isAllDay: Value(isAllDay),
         updatedAt: Value(nowText),
+      ),
+    );
+  }
+
+  /// Deletes an action together with its dependency edges, metric links and
+  /// occurrence history, and returns everything it removed so [undoDelete]
+  /// can put it back. Its neighbours in a chain are left as they are (no
+  /// bridging), so a deleted middle link splits the chain.
+  /// Rows are removed explicitly rather than relying on ON DELETE CASCADE,
+  /// which is only active when foreign keys are enabled on the connection.
+  Future<DeleteUndo> deleteAction(String actionId) {
+    return db.transaction(() async {
+      final action = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle();
+      final occurrences = await (db.select(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).get();
+      final metricLinks = await (db.select(
+        db.actionMetricsTable,
+      )..where((t) => t.actionId.equals(actionId))).get();
+      final edges =
+          await (db.select(db.actionDependenciesTable)..where(
+                (t) =>
+                    t.predecessorId.equals(actionId) |
+                    t.successorId.equals(actionId),
+              ))
+              .get();
+
+      await (db.delete(db.actionDependenciesTable)..where(
+            (t) =>
+                t.predecessorId.equals(actionId) |
+                t.successorId.equals(actionId),
+          ))
+          .go();
+      await (db.delete(
+        db.actionMetricsTable,
+      )..where((t) => t.actionId.equals(actionId))).go();
+      await (db.delete(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(actionId))).go();
+      await (db.delete(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).go();
+
+      return DeleteUndo(
+        action: action,
+        occurrences: occurrences,
+        metricLinks: metricLinks,
+        edges: edges,
+      );
+    });
+  }
+
+  /// Puts back what [deleteAction] removed, under the same ids. Edges whose
+  /// other end has been deleted in the meantime, and metric links to a
+  /// deleted metric, are skipped rather than failing the whole undo.
+  Future<void> undoDelete(DeleteUndo undo) {
+    return db.transaction(() async {
+      await db.into(db.actionsTable).insert(undo.action);
+      for (final occurrence in undo.occurrences) {
+        await db.into(db.actionOccurrencesTable).insert(occurrence);
+      }
+
+      final metricIds = (await db.select(db.metricsTable).get())
+          .map((m) => m.id)
+          .toSet();
+      for (final link in undo.metricLinks) {
+        if (metricIds.contains(link.metricId)) {
+          await db.into(db.actionMetricsTable).insert(link);
+        }
+      }
+
+      final actionIds = (await db.select(db.actionsTable).get())
+          .map((a) => a.id)
+          .toSet();
+      for (final edge in undo.edges) {
+        if (actionIds.contains(edge.predecessorId) &&
+            actionIds.contains(edge.successorId)) {
+          await db.into(db.actionDependenciesTable).insert(edge);
+        }
+      }
+    });
+  }
+
+  /// Creates a Countable Activity and returns its id.
+  Future<String> createCountableActivity(String name) async {
+    final id = newId();
+    final nowText = dateTimeToDb(DateTime.now())!;
+    await db
+        .into(db.countableActivitiesTable)
+        .insert(
+          CountableActivitiesTableCompanion.insert(
+            id: id,
+            name: name,
+            createdAt: nowText,
+            updatedAt: nowText,
+          ),
+        );
+    return id;
+  }
+
+  /// Links [actionId] to a Countable Activity (null clears the link).
+  Future<void> setCountableActivity(String actionId, String? activityId) {
+    return (db.update(
+      db.actionsTable,
+    )..where((t) => t.id.equals(actionId))).write(
+      ActionsTableCompanion(
+        countableActivityId: Value(activityId),
+        updatedAt: Value(dateTimeToDb(DateTime.now())!),
       ),
     );
   }
@@ -168,11 +329,9 @@ class ActionService {
       if (runningOccurrence != null) {
         // Re-pressing Start while already running resets when it "started"
         // too, rather than leaving the button looking like it did nothing.
-        await (db.update(
-          db.actionOccurrencesTable,
-        )..where((t) => t.id.equals(runningOccurrence.id))).write(
-          ActionOccurrencesTableCompanion(startedAt: Value(nowText)),
-        );
+        await (db.update(db.actionOccurrencesTable)
+              ..where((t) => t.id.equals(runningOccurrence.id)))
+            .write(ActionOccurrencesTableCompanion(startedAt: Value(nowText)));
         return;
       }
 
@@ -268,6 +427,236 @@ class ActionService {
     });
   }
 
+  /// "Continue with Same Action": creates the next numbered run of
+  /// [sourceId], starting now for its predicted duration (see
+  /// [predictedDuration]).
+  ///
+  /// The source becomes `[#n] Name` and the new action `[#n+1] Name`. The
+  /// source's next-action edges move onto the new action and a
+  /// source -> new edge is added, so the source ends up with exactly one next
+  /// action (the new one) and the new one with exactly one previous action
+  /// (the source). The source's own predecessors are not copied. The moved
+  /// edges need no cycle check: the new action is a fresh node, and each
+  /// `new -> X` only mirrors a `source -> X` that already existed.
+  Future<ContinueResult> continueSameAction(String sourceId) {
+    final nowUtc = DateTime.now().toUtc();
+    final nowText = dateTimeToDb(nowUtc)!;
+
+    return db.transaction(() async {
+      final source = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(sourceId))).getSingle();
+      final metricIds =
+          (await (db.select(
+                db.actionMetricsTable,
+              )..where((t) => t.actionId.equals(sourceId))).get())
+              .map((m) => m.metricId)
+              .toList();
+      final formerSuccessorIds =
+          (await (db.select(
+                db.actionDependenciesTable,
+              )..where((t) => t.predecessorId.equals(sourceId))).get())
+              .map((d) => d.successorId)
+              .toList();
+
+      final (prefixNumber, baseName) = parseSequencePrefix(source.name);
+      final sequence = source.sequenceNumber ?? prefixNumber ?? 1;
+
+      final predicted = predictedDuration(
+        ownDuration: computeActionDuration(
+          startAt: dateTimeFromDb(source.startAt),
+          endAt: dateTimeFromDb(source.endAt),
+          legacyEstimatedMinutes: source.estimatedMinutes,
+        ),
+        countableAverage: await _countableAverage(
+          source.countableActivityId,
+          nowUtc,
+        ),
+        chainSamples: await _chainSamples(source, nowUtc),
+      );
+
+      await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(sourceId))).write(
+        ActionsTableCompanion(
+          name: Value(formatSequenceName(sequence, baseName)),
+          sequenceNumber: Value(sequence),
+          updatedAt: Value(nowText),
+        ),
+      );
+
+      final newActionId = newId();
+      await db
+          .into(db.actionsTable)
+          .insert(
+            ActionsTableCompanion.insert(
+              id: newActionId,
+              name: formatSequenceName(sequence + 1, baseName),
+              priority: Value(source.priority),
+              postponeFlex: Value(source.postponeFlex),
+              depthLevel: Value(source.depthLevel),
+              // Timed even when the source is all-day: it starts right now.
+              startAt: Value(nowText),
+              endAt: Value(dateTimeToDb(nowUtc.add(predicted))),
+              estimatedMinutes: Value(source.estimatedMinutes),
+              sequenceNumber: Value(sequence + 1),
+              countableActivityId: Value(source.countableActivityId),
+              createdAt: nowText,
+              updatedAt: nowText,
+            ),
+          );
+      for (final metricId in metricIds) {
+        await db
+            .into(db.actionMetricsTable)
+            .insert(
+              ActionMetricsTableCompanion.insert(
+                id: newId(),
+                actionId: newActionId,
+                metricId: metricId,
+              ),
+            );
+      }
+      await db
+          .into(db.actionOccurrencesTable)
+          .insert(
+            ActionOccurrencesTableCompanion.insert(
+              id: newId(),
+              actionId: newActionId,
+              startedAt: Value(nowText),
+            ),
+          );
+
+      await (db.delete(
+        db.actionDependenciesTable,
+      )..where((t) => t.predecessorId.equals(sourceId))).go();
+      await _insertEdge(sourceId, newActionId);
+      for (final successorId in formerSuccessorIds) {
+        await _insertEdge(newActionId, successorId);
+      }
+
+      return ContinueResult(
+        newActionId: newActionId,
+        undo: ContinueUndo(
+          newActionId: newActionId,
+          sourceBefore: source,
+          formerSuccessorIds: formerSuccessorIds,
+        ),
+      );
+    });
+  }
+
+  /// Takes back a [continueSameAction]: deletes the new action (and, in the
+  /// same breath, every row hanging off it), puts the source's row back, and
+  /// re-attaches the source to the next actions that were moved away.
+  ///
+  /// The source row is rewritten with an UPDATE rather than [restore]'s
+  /// insert-or-replace: a REPLACE deletes the row first, which would cascade
+  /// away the source's own dependency and metric rows.
+  Future<void> undoContinue(ContinueUndo undo) {
+    final sourceId = undo.sourceBefore.id;
+    return db.transaction(() async {
+      await (db.delete(db.actionDependenciesTable)..where(
+            (t) =>
+                t.predecessorId.equals(undo.newActionId) |
+                t.successorId.equals(undo.newActionId),
+          ))
+          .go();
+      await (db.delete(
+        db.actionMetricsTable,
+      )..where((t) => t.actionId.equals(undo.newActionId))).go();
+      await (db.delete(
+        db.actionOccurrencesTable,
+      )..where((t) => t.actionId.equals(undo.newActionId))).go();
+      await (db.delete(
+        db.actionsTable,
+      )..where((t) => t.id.equals(undo.newActionId))).go();
+
+      await db.update(db.actionsTable).replace(undo.sourceBefore);
+      for (final successorId in undo.formerSuccessorIds) {
+        await _insertEdge(sourceId, successorId);
+      }
+    });
+  }
+
+  Future<void> _insertEdge(String predecessorId, String successorId) {
+    return db
+        .into(db.actionDependenciesTable)
+        .insert(
+          ActionDependenciesTableCompanion.insert(
+            id: newId(),
+            predecessorId: predecessorId,
+            successorId: successorId,
+          ),
+        );
+  }
+
+  /// Mean actual duration of the activity's finished runs over the last
+  /// [_countableAverageWindow], or null when it has none (or no activity).
+  Future<Duration?> _countableAverage(
+    String? activityId,
+    DateTime nowUtc,
+  ) async {
+    if (activityId == null) return null;
+    final cutoff = dateTimeToDb(nowUtc.subtract(_countableAverageWindow))!;
+    final rows =
+        await (db.select(db.actionsTable)..where(
+              (t) =>
+                  t.countableActivityId.equals(activityId) &
+                  t.done.equals(true) &
+                  t.completedAt.isBiggerOrEqualValue(cutoff) &
+                  t.startAt.isNotNull() &
+                  t.endAt.isNotNull(),
+            ))
+            .get();
+    final durations = _actualDurations(rows);
+    if (durations.isEmpty) return null;
+    final totalMicros = durations.fold<int>(0, (s, d) => s + d.inMicroseconds);
+    return Duration(microseconds: totalMicros ~/ durations.length);
+  }
+
+  /// Actual durations of the finished runs, over the last
+  /// [_chainAverageWindow], of [source]'s chain (itself plus everything
+  /// upstream of it) that carry the same normalized name.
+  Future<List<Duration>> _chainSamples(
+    ActionRow source,
+    DateTime nowUtc,
+  ) async {
+    final cutoff = dateTimeToDb(nowUtc.subtract(_chainAverageWindow))!;
+    final rows = await db
+        .customSelect(
+          '''
+          WITH RECURSIVE chain(id) AS (
+            SELECT ?
+            UNION
+            SELECT d.predecessor_id
+            FROM action_dependencies d JOIN chain c ON d.successor_id = c.id
+          )
+          SELECT a.* FROM actions a JOIN chain c ON c.id = a.id
+          WHERE a.done = 1 AND a.completed_at >= ?
+            AND a.start_at IS NOT NULL AND a.end_at IS NOT NULL
+          ''',
+          variables: [Variable<String>(source.id), Variable<String>(cutoff)],
+          readsFrom: {db.actionsTable, db.actionDependenciesTable},
+        )
+        .map((row) => db.actionsTable.map(row.data))
+        .get();
+    final key = normalizeForMatch(source.name);
+    return _actualDurations(
+      rows.where((r) => normalizeForMatch(r.name) == key),
+    );
+  }
+
+  List<Duration> _actualDurations(Iterable<ActionRow> rows) {
+    final durations = <Duration>[];
+    for (final row in rows) {
+      final start = dateTimeFromDb(row.startAt);
+      final end = dateTimeFromDb(row.endAt);
+      if (start == null || end == null || end.isBefore(start)) continue;
+      durations.add(end.difference(start));
+    }
+    return durations;
+  }
+
   /// Directly sets `start_at`/`end_at` — used by the quick "tap the time"
   /// editor and the calendar's drag/resize. If the action is running, its
   /// open occurrence's `started_at` follows the new `start_at` (same as
@@ -290,9 +679,8 @@ class ActionService {
         ),
       );
       if (startAt == null) return;
-      await (db.update(db.actionOccurrencesTable)..where(
-            (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
-          ))
+      await (db.update(db.actionOccurrencesTable)
+            ..where((t) => t.actionId.equals(actionId) & t.finishedAt.isNull()))
           .write(
             ActionOccurrencesTableCompanion(
               startedAt: Value(dateTimeToDb(startAt)),
@@ -417,8 +805,7 @@ class ActionService {
       isAllDay: payload['isAllDay'] as bool? ?? false,
       estimatedMinutes: payload['estimatedMinutes'] as int?,
       metricIds:
-          (payload['metricIds'] as List<dynamic>?)?.cast<String>() ??
-          const [],
+          (payload['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [],
     );
   }
 }

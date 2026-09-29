@@ -581,4 +581,98 @@ void main() {
     expect(action.name, 'Prepare for interview');
     expect(action.priority, 'B1');
   });
+
+  test('deleteAction removes the action and everything hanging off it', () async {
+    final metricId = newId();
+    await db
+        .into(db.metricsTable)
+        .insert(MetricsTableCompanion.insert(id: metricId, name: 'Health'));
+    final p = await service.createAction(name: 'P');
+    final s = await service.createAction(name: 'S', metricIds: [metricId]);
+    final x = await service.createAction(name: 'X');
+    for (final (from, to) in [(p, s), (s, x)]) {
+      await db
+          .into(db.actionDependenciesTable)
+          .insert(
+            ActionDependenciesTableCompanion.insert(
+              id: newId(),
+              predecessorId: from,
+              successorId: to,
+            ),
+          );
+    }
+    await service.start(s);
+
+    await service.deleteAction(s);
+
+    final remaining = await db.select(db.actionsTable).get();
+    expect(remaining.map((a) => a.id).toSet(), {p, x});
+    expect(await db.select(db.actionDependenciesTable).get(), isEmpty);
+    expect(await db.select(db.actionMetricsTable).get(), isEmpty);
+    expect(await db.select(db.actionOccurrencesTable).get(), isEmpty);
+    // The metric itself is not the action's to delete.
+    expect(await db.select(db.metricsTable).get(), hasLength(1));
+  });
+
+  test('undoDelete restores the action, its links and its history', () async {
+    final metricId = newId();
+    await db
+        .into(db.metricsTable)
+        .insert(MetricsTableCompanion.insert(id: metricId, name: 'Health'));
+    final p = await service.createAction(name: 'P');
+    final s = await service.createAction(name: 'S', metricIds: [metricId]);
+    final x = await service.createAction(name: 'X');
+    for (final (from, to) in [(p, s), (s, x)]) {
+      await db
+          .into(db.actionDependenciesTable)
+          .insert(
+            ActionDependenciesTableCompanion.insert(
+              id: newId(),
+              predecessorId: from,
+              successorId: to,
+            ),
+          );
+    }
+    await service.start(s);
+    final before = await service.snapshot(s);
+    final edgesBefore = (await db.select(
+      db.actionDependenciesTable,
+    ).get()).map((e) => (e.id, e.predecessorId, e.successorId)).toSet();
+
+    final undo = await service.deleteAction(s);
+    await service.undoDelete(undo);
+
+    final after = await service.snapshot(s);
+    expect(after.action, before.action);
+    expect(after.occurrences, before.occurrences);
+    expect(
+      (await db.select(
+        db.actionDependenciesTable,
+      ).get()).map((e) => (e.id, e.predecessorId, e.successorId)).toSet(),
+      edgesBefore,
+    );
+    final links = await db.select(db.actionMetricsTable).get();
+    expect(links.map((l) => l.metricId), [metricId]);
+  });
+
+  test('undoDelete skips edges to an action deleted in the meantime', () async {
+    final p = await service.createAction(name: 'P');
+    final s = await service.createAction(name: 'S');
+    await db
+        .into(db.actionDependenciesTable)
+        .insert(
+          ActionDependenciesTableCompanion.insert(
+            id: newId(),
+            predecessorId: p,
+            successorId: s,
+          ),
+        );
+
+    final undo = await service.deleteAction(s);
+    await service.deleteAction(p);
+    await service.undoDelete(undo);
+
+    expect((await db.select(db.actionsTable).get()).map((a) => a.id), [s]);
+    expect(await db.select(db.actionDependenciesTable).get(), isEmpty);
+  });
 }

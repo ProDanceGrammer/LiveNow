@@ -40,8 +40,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<ActionEditorDialog> createState() =>
-      _ActionEditorDialogState();
+  ConsumerState<ActionEditorDialog> createState() => _ActionEditorDialogState();
 }
 
 class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
@@ -55,6 +54,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   DateTime? _endAt;
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
+  String? _countableActivityId;
+  int _activityFieldEpoch = 0;
 
   bool get _isEditing => widget.existing != null;
 
@@ -71,9 +72,21 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       _startAt = dateTimeFromDb(existing.startAt);
       _endAt = dateTimeFromDb(existing.endAt);
       _isAllDay = existing.isAllDay;
+      _countableActivityId = existing.countableActivityId;
 
-      ref.read(metricIdsOfProvider(existing.id).future).then((ids) {
-        if (mounted) setState(() => _selectedMetricIds = ids.toSet());
+      // A one-shot query, not `ref.read(metricIdsOfProvider(..).future)`:
+      // nothing listens to that auto-dispose provider, so Riverpod can
+      // dispose it mid-load — which throws and leaves the future forever
+      // pending, silently dropping the action's metric selection.
+      final db = ref.read(databaseProvider);
+      (db.select(
+        db.actionMetricsTable,
+      )..where((t) => t.actionId.equals(existing.id))).get().then((links) {
+        if (mounted) {
+          setState(
+            () => _selectedMetricIds = links.map((l) => l.metricId).toSet(),
+          );
+        }
       });
     }
   }
@@ -139,9 +152,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   children: [
                     DropdownButtonFormField<String?>(
                       initialValue: _priority,
-                      decoration: const InputDecoration(
-                        labelText: 'Priority',
-                      ),
+                      decoration: const InputDecoration(labelText: 'Priority'),
                       items: [
                         const DropdownMenuItem(
                           value: null,
@@ -187,10 +198,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                               labelText: 'Depth (learning)',
                             ),
                             items: const [
-                              DropdownMenuItem(
-                                value: null,
-                                child: Text('N/A'),
-                              ),
+                              DropdownMenuItem(value: null, child: Text('N/A')),
                               DropdownMenuItem(
                                 value: 'easy',
                                 child: Text('Easy'),
@@ -209,6 +217,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    _buildCountableActivityField(),
                     const SizedBox(height: 8),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
@@ -252,9 +262,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                                 for (final m in metrics)
                                   FilterChip(
                                     label: Text(m.name),
-                                    selected: _selectedMetricIds.contains(
-                                      m.id,
-                                    ),
+                                    selected: _selectedMetricIds.contains(m.id),
                                     onSelected: (selected) => setState(() {
                                       if (selected) {
                                         _selectedMetricIds.add(m.id);
@@ -294,6 +302,80 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     );
   }
 
+  static const _newActivityValue = '__new_activity__';
+
+  /// Picker for the Countable Activity; its recent average predicts the
+  /// duration of "Continue with same action". "New activity…" creates one
+  /// inline.
+  Widget _buildCountableActivityField() {
+    final activities =
+        ref.watch(countableActivitiesProvider).value ??
+        const <CountableActivity>[];
+    // A stale id (activity deleted elsewhere) must not crash the dropdown.
+    final selected = activities.any((a) => a.id == _countableActivityId)
+        ? _countableActivityId
+        : null;
+
+    return DropdownButtonFormField<String?>(
+      key: ValueKey((selected, _activityFieldEpoch)),
+      initialValue: selected,
+      decoration: const InputDecoration(labelText: 'Countable activity'),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('None')),
+        for (final a in activities)
+          DropdownMenuItem(value: a.id, child: Text(a.name)),
+        const DropdownMenuItem(
+          value: _newActivityValue,
+          child: Text('New activity…'),
+        ),
+      ],
+      onChanged: (v) async {
+        if (v != _newActivityValue) {
+          setState(() => _countableActivityId = v);
+          return;
+        }
+        final name = await _askActivityName();
+        if (!mounted) return;
+        if (name == null) {
+          // Cancelled: rebuild the field so it stops showing "New activity…".
+          setState(() => _activityFieldEpoch++);
+          return;
+        }
+        final id = await ref
+            .read(actionServiceProvider)
+            .createCountableActivity(name);
+        if (mounted) setState(() => _countableActivityId = id);
+      },
+    );
+  }
+
+  Future<String?> _askActivityName() {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('New countable activity'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Name'),
+          onSubmitted: (v) => Navigator.of(dialogContext).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    ).then((name) => (name == null || name.isEmpty) ? null : name);
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final service = ref.read(actionServiceProvider);
@@ -312,6 +394,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         isAllDay: _isAllDay,
       );
       await service.setMetrics(id, _selectedMetricIds.toList());
+      await service.setCountableActivity(id, _countableActivityId);
     } else {
       await service.createAction(
         name: name,
@@ -321,6 +404,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         startAt: _startAt,
         endAt: _endAt,
         isAllDay: _isAllDay,
+        countableActivityId: _countableActivityId,
         metricIds: _selectedMetricIds.toList(),
       );
     }
@@ -328,7 +412,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     if (mounted) Navigator.of(context).pop();
   }
 }
-
 
 /// Shows whether an occurrence is currently open (`action_occurrences`), and
 /// if so since when — using [scheduledStart] (`actions.start_at`, the single
@@ -409,8 +492,7 @@ class _DependencySection extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         predecessors.when(
-          data: (list) =>
-              _chipList(context, ref, list, isPredecessor: true),
+          data: (list) => _chipList(context, ref, list, isPredecessor: true),
           loading: () => const LinearProgressIndicator(),
           error: (e, _) => Text('Error: $e'),
         ),
@@ -426,8 +508,7 @@ class _DependencySection extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         successors.when(
-          data: (list) =>
-              _chipList(context, ref, list, isPredecessor: false),
+          data: (list) => _chipList(context, ref, list, isPredecessor: false),
           loading: () => const LinearProgressIndicator(),
           error: (e, _) => Text('Error: $e'),
         ),
@@ -453,6 +534,10 @@ class _DependencySection extends ConsumerWidget {
         for (final item in items)
           InputChip(
             label: Text(item.name),
+            tooltip: 'Open this action',
+            // Stacked on top (not replacing) so unsaved edits in the
+            // current editor aren't lost; closing it returns here.
+            onPressed: () => ActionEditorDialog.show(context, existing: item),
             onDeleted: () {
               final deps = ref.read(dependencyServiceProvider);
               if (isPredecessor) {
@@ -554,8 +639,7 @@ class _ActionPickerDialogState extends ConsumerState<_ActionPickerDialog> {
                     ),
                   );
                 },
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => Center(child: Text('Error: $e')),
               ),
             ),

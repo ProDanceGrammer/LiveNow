@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show DragStartBehavior;
+import 'package:flutter/gestures.dart'
+    show DragStartBehavior, PointerScrollEvent, PointerSignalEvent;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'
+    show HardwareKeyboard, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -20,7 +23,7 @@ import 'calendar_layout.dart';
 const double _kGutter = 56;
 const double _kHandle = 6;
 const double _kMinBlockHeight = kPxPerMinute * kMinDurationMinutes;
-const double _kToolbarWidth = 96;
+const double _kToolbarWidth = 165;
 const double _kToolbarHeight = 24;
 const double _kGridHeight = kHourHeight * 24;
 
@@ -64,45 +67,117 @@ class CalendarView extends ConsumerWidget {
     final running =
         ref.watch(runningOccurrencesProvider).value ?? const <String>{};
 
-    return Column(
-      children: [
-        _Header(start: start, dayCount: dayCount),
-        const Divider(height: 1),
-        Expanded(
-          child: items == null
-              ? const Center(child: CircularProgressIndicator())
-              : LayoutBuilder(
-                  builder: (context, box) {
-                    final dayW = (box.maxWidth - _kGutter) / dayCount;
-                    return Column(
-                      children: [
-                        _DayHeaderRow(
-                          start: start,
-                          dayCount: dayCount,
-                          dayWidth: dayW,
-                        ),
-                        _AllDayStrip(
-                          start: start,
-                          dayCount: dayCount,
-                          dayWidth: dayW,
-                          items: items,
-                          running: running,
-                        ),
-                        Expanded(
-                          child: _TimeGrid(
+    return _CalendarInput(
+      child: Column(
+        children: [
+          _Header(start: start, dayCount: dayCount),
+          const Divider(height: 1),
+          Expanded(
+            child: items == null
+                ? const Center(child: CircularProgressIndicator())
+                : LayoutBuilder(
+                    builder: (context, box) {
+                      final dayW = (box.maxWidth - _kGutter) / dayCount;
+                      return Column(
+                        children: [
+                          _DayHeaderRow(
+                            start: start,
+                            dayCount: dayCount,
+                            dayWidth: dayW,
+                          ),
+                          _AllDayStrip(
                             start: start,
                             dayCount: dayCount,
                             dayWidth: dayW,
                             items: items,
                             running: running,
                           ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-        ),
-      ],
+                          Expanded(
+                            child: _TimeGrid(
+                              start: start,
+                              dayCount: dayCount,
+                              dayWidth: dayW,
+                              items: items,
+                              running: running,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Keyboard and wheel navigation for the whole calendar: Left/Right arrows
+/// and Shift+scroll move the range one day at a time, Delete removes the
+/// selected event (after confirming). The wrapper owns focus, and takes it
+/// back on any click inside the calendar so the keys keep working after a
+/// dialog or a header button had it.
+class _CalendarInput extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const _CalendarInput({required this.child});
+
+  @override
+  ConsumerState<_CalendarInput> createState() => _CalendarInputState();
+}
+
+class _CalendarInputState extends ConsumerState<_CalendarInput> {
+  /// Scroll distance that counts as one day: one mouse-wheel notch reports
+  /// 100, a touchpad sends many small deltas that accumulate to the same step.
+  static const _pixelsPerDay = 100.0;
+
+  final _focus = FocusNode(debugLabel: 'calendar');
+  double _scrollAccumulated = 0;
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        !HardwareKeyboard.instance.isShiftPressed) {
+      return;
+    }
+    // Some mice report Shift+wheel on the horizontal axis instead.
+    final delta = event.scrollDelta.dy != 0
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    _scrollAccumulated += delta;
+    final days = (_scrollAccumulated / _pixelsPerDay).truncate();
+    if (days == 0) return;
+    _scrollAccumulated -= days * _pixelsPerDay;
+    shiftCalendarDays(ref, days);
+  }
+
+  void _deleteSelected() {
+    final id = ref.read(calendarSelectedActionProvider);
+    if (id != null) runUndoableDelete(context, ref, id);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      onPointerDown: (_) {
+        if (!_focus.hasFocus) _focus.requestFocus();
+      },
+      onPointerSignal: _onPointerSignal,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+              shiftCalendarDays(ref, -1),
+          const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+              shiftCalendarDays(ref, 1),
+          const SingleActivator(LogicalKeyboardKey.delete): _deleteSelected,
+        },
+        child: Focus(focusNode: _focus, autofocus: true, child: widget.child),
+      ),
     );
   }
 }
@@ -294,7 +369,9 @@ class _AllDayStrip extends StatelessWidget {
                 constraints: const BoxConstraints(minHeight: 30),
                 padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
                 decoration: BoxDecoration(
-                  border: Border(left: BorderSide(color: scheme.outlineVariant)),
+                  border: Border(
+                    left: BorderSide(color: scheme.outlineVariant),
+                  ),
                 ),
                 child: Column(
                   children: [
@@ -334,16 +411,29 @@ class _AllDayChip extends ConsumerWidget {
         : done
         ? scheme.onSurfaceVariant
         : scheme.onTertiaryContainer;
+    final selected = ref.watch(
+      calendarSelectedActionProvider.select((id) => id == item.id),
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: _HoverToolbarHost(
         actionId: item.id,
         child: Material(
           color: bg,
-          borderRadius: BorderRadius.circular(4),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4),
+            side: selected
+                ? BorderSide(color: scheme.onSurface, width: 2)
+                : BorderSide.none,
+          ),
           child: InkWell(
             borderRadius: BorderRadius.circular(4),
-            onTap: () => openActionEditor(context, ref, item.id),
+            // Click selects (so Delete can act on it); double-click edits.
+            onTapDown: (_) =>
+                ref.read(calendarSelectedActionProvider.notifier).state =
+                    item.id,
+            onTap: () {},
+            onDoubleTap: () => openActionEditor(context, ref, item.id),
             child: Container(
               height: 22,
               width: double.infinity,
@@ -447,11 +537,16 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
             },
             child: _Toolbar(
               onStart: () => _run('Started', (s) => s.start(widget.actionId)),
-              onFinish: () => _run('Finished', (s) => s.finish(widget.actionId)),
+              onFinish: () =>
+                  _run('Finished', (s) => s.finish(widget.actionId)),
+              onContinue: () =>
+                  runUndoableContinue(context, ref, widget.actionId),
               onWeek: () => _run(
                 'Postponed to next week',
                 (s) => s.postpone(widget.actionId, PostponeRule.nextWeek),
               ),
+              onDelete: () =>
+                  runUndoableDelete(context, ref, widget.actionId),
             ),
           ),
         );
@@ -474,12 +569,16 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
 class _Toolbar extends StatelessWidget {
   final VoidCallback onStart;
   final VoidCallback onFinish;
+  final VoidCallback onContinue;
   final VoidCallback onWeek;
+  final VoidCallback onDelete;
 
   const _Toolbar({
     required this.onStart,
     required this.onFinish,
+    required this.onContinue,
     required this.onWeek,
+    required this.onDelete,
   });
 
   @override
@@ -494,7 +593,31 @@ class _Toolbar extends StatelessWidget {
         children: [
           _ToolButton('▶️', 'Start', 28, onStart),
           _ToolButton('🏁', 'Finish', 28, onFinish),
+          _ToolButton('⏭️', 'Continue with same action', 28, onContinue),
           _ToolButton('7⃣📅', 'Postpone +7 days', 40, onWeek),
+          // Kept apart from the everyday buttons so it isn't hit by accident.
+          Container(
+            width: 1,
+            height: 16,
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            color: scheme.outlineVariant,
+          ),
+          Tooltip(
+            message: 'Delete',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: onDelete,
+              child: SizedBox(
+                width: 28,
+                height: 24,
+                child: Icon(
+                  Icons.delete_outline,
+                  size: 16,
+                  color: scheme.error,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -519,7 +642,9 @@ class _ToolButton extends StatelessWidget {
         child: SizedBox(
           width: width,
           height: 24,
-          child: Center(child: Text(emoji, style: const TextStyle(fontSize: 13))),
+          child: Center(
+            child: Text(emoji, style: const TextStyle(fontSize: 13)),
+          ),
         ),
       ),
     );
@@ -538,7 +663,14 @@ class _Seg {
   final bool isStart;
   final bool isEnd;
 
-  const _Seg(this.item, this.day, this.start, this.end, this.isStart, this.isEnd);
+  const _Seg(
+    this.item,
+    this.day,
+    this.start,
+    this.end,
+    this.isStart,
+    this.isEnd,
+  );
 }
 
 typedef _Placed = LaneAssignment<_Seg>;
@@ -601,8 +733,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   }
 
   List<DateTime> get _dayStarts => [
-    for (var i = 0; i <= widget.dayCount; i++)
-      calendarAddDays(widget.start, i),
+    for (var i = 0; i <= widget.dayCount; i++) calendarAddDays(widget.start, i),
   ];
 
   List<_Placed> _layout(List<DateTime> dayStarts) {
@@ -836,7 +967,10 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   Widget _ghost(_Drag drag, List<DateTime> dayStarts) {
     final scheme = Theme.of(context).colorScheme;
     final s = _preview(drag);
-    final day = dayIndexOf(s.startAt, widget.start).clamp(0, widget.dayCount - 1);
+    final day = dayIndexOf(
+      s.startAt,
+      widget.start,
+    ).clamp(0, widget.dayCount - 1);
     final topMin = s.startAt.difference(dayStarts[day]).inMinutes;
     final endMin = math.min(1440, s.endAt.difference(dayStarts[day]).inMinutes);
     final p = drag.placed;
@@ -849,17 +983,37 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       height: math.max(_kMinBlockHeight, minutesToPx(endMin - topMin)),
       child: IgnorePointer(
         child: Container(
-          padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
+          padding: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             color: scheme.primary.withValues(alpha: 0.35),
             border: Border.all(color: scheme.primary),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: ClipRect(
-            child: Text(
-              '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}',
-              maxLines: 1,
-              style: TextStyle(fontSize: 11, color: scheme.onSurface),
+          // Not clipped: on a short block the chip spills below it rather
+          // than being cut off.
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                // Solid white with dark text in both themes, so the times
+                // stay legible over whatever block sits underneath.
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(4),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black38, blurRadius: 4),
+                ],
+              ),
+              child: Text(
+                '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}',
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
             ),
           ),
         ),
@@ -922,6 +1076,9 @@ class _EventBlock extends ConsumerWidget {
     required this.onDragCancel,
   });
 
+  void _select(WidgetRef ref, String id) =>
+      ref.read(calendarSelectedActionProvider.notifier).state = id;
+
   _DragKind _kindAt(double dy) {
     final h = math.min(_kHandle, height / 3);
     if (seg.isStart && dy < h) return _DragKind.resizeTop;
@@ -950,19 +1107,29 @@ class _EventBlock extends ConsumerWidget {
       color: fg,
       decoration: done ? TextDecoration.lineThrough : null,
     );
-    final dur = formatActionDuration(item);
+    final selected = ref.watch(
+      calendarSelectedActionProvider.select((id) => id == item.id),
+    );
+    // The action's own start time (not this day-slice's), so a block that
+    // continues past midnight doesn't read "00:00".
+    final startTime = _hhmm(item.startAt!);
 
     final Widget label = height >= 34
         ? Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(item.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: name),
-              Text(dur, style: TextStyle(fontSize: 11, color: fg)),
+              Text(
+                item.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: name,
+              ),
+              Text(startTime, style: TextStyle(fontSize: 11, color: fg)),
             ],
           )
         : Text(
-            '${item.name} · $dur',
+            '${item.name} · $startTime',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: name.copyWith(fontSize: 11),
@@ -971,8 +1138,13 @@ class _EventBlock extends ConsumerWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       dragStartBehavior: DragStartBehavior.down,
-      onTap: () => openActionEditor(context, ref, item.id),
-      onPanStart: (d) => onDragStart(_kindAt(d.localPosition.dy), d.globalPosition),
+      // Click selects (so Delete can act on it); double-click edits.
+      onTapDown: (_) => _select(ref, item.id),
+      onDoubleTap: () => openActionEditor(context, ref, item.id),
+      onPanStart: (d) {
+        _select(ref, item.id);
+        onDragStart(_kindAt(d.localPosition.dy), d.globalPosition);
+      },
       onPanUpdate: (d) => onDragUpdate(d.globalPosition),
       onPanEnd: (_) => onDragEnd(),
       onPanCancel: onDragCancel,
@@ -987,7 +1159,9 @@ class _EventBlock extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: bg,
                   borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: scheme.surface),
+                  border: selected
+                      ? Border.all(color: scheme.onSurface, width: 2)
+                      : Border.all(color: scheme.surface),
                 ),
                 child: ClipRect(
                   child: OverflowBox(
@@ -995,7 +1169,12 @@ class _EventBlock extends ConsumerWidget {
                     minHeight: 0,
                     maxHeight: double.infinity,
                     child: Padding(
-                      padding: EdgeInsets.fromLTRB(6, height >= 20 ? 3 : 0, 6, 0),
+                      padding: EdgeInsets.fromLTRB(
+                        6,
+                        height >= 20 ? 3 : 0,
+                        6,
+                        0,
+                      ),
                       child: label,
                     ),
                   ),

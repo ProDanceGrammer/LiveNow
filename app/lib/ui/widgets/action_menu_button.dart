@@ -8,6 +8,7 @@ import '../undo.dart';
 enum _MenuAction {
   start,
   finish,
+  continueSame,
   plusOneHour,
   plusFiveHours,
   prolong,
@@ -34,6 +35,10 @@ class ActionMenuButton extends ConsumerWidget {
       itemBuilder: (context) => const [
         PopupMenuItem(value: _MenuAction.start, child: Text('Start')),
         PopupMenuItem(value: _MenuAction.finish, child: Text('Finish')),
+        PopupMenuItem(
+          value: _MenuAction.continueSame,
+          child: Text('Continue with same action'),
+        ),
         PopupMenuDivider(),
         PopupMenuItem(
           value: _MenuAction.plusOneHour,
@@ -79,6 +84,7 @@ class ActionMenuButton extends ConsumerWidget {
     return switch (value) {
       _MenuAction.start => run('Started', () => service.start(actionId)),
       _MenuAction.finish => run('Finished', () => service.finish(actionId)),
+      _MenuAction.continueSame => runUndoableContinue(context, ref, actionId),
       _MenuAction.plusOneHour => run(
         'Postponed +1 hour',
         () => service.postpone(actionId, PostponeRule.plusOneHour),

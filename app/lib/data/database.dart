@@ -14,6 +14,7 @@ part 'database.g.dart';
     MetricsTable,
     ActionMetricsTable,
     ActionTemplatesTable,
+    CountableActivitiesTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -23,11 +24,20 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
-  MigrationStrategy get migration =>
-      MigrationStrategy(onCreate: (m) => m.createAll());
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        // Continue-with-same-action: sequence numbers + countable activities.
+        await m.createTable(countableActivitiesTable);
+        await m.addColumn(actionsTable, actionsTable.sequenceNumber);
+        await m.addColumn(actionsTable, actionsTable.countableActivityId);
+      }
+    },
+  );
 }
 
 DatabaseConnection _openConnection() {
