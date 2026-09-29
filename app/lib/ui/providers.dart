@@ -101,6 +101,19 @@ void shiftCalendarDays(WidgetRef ref, int days) {
   );
 }
 
+/// How many hours of a day the calendar grid shows at once (its zoom); one
+/// of [kCalendarZoomHours].
+final calendarVisibleHoursProvider = StateProvider<int>(
+  (ref) => kCalendarDefaultZoomHours,
+);
+
+/// Ctrl++ / Ctrl+- / Ctrl+scroll: [direction] > 0 zooms in (fewer hours
+/// visible), < 0 zooms out.
+void zoomCalendar(WidgetRef ref, int direction) {
+  final notifier = ref.read(calendarVisibleHoursProvider.notifier);
+  notifier.state = stepZoomHours(notifier.state, direction);
+}
+
 /// The calendar event last clicked (Delete removes it); null = none.
 final calendarSelectedActionProvider = StateProvider<String?>((ref) => null);
 

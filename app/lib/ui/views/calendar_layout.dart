@@ -11,6 +11,29 @@ const double kPxPerMinute = kHourHeight / 60;
 const int kSnapMinutes = 10;
 const int kMinDurationMinutes = 10;
 
+/// Zoom levels of the time grid, as "how many hours of a day fit the
+/// viewport" (fewer hours = bigger blocks).
+const List<int> kCalendarZoomHours = [3, 6, 9, 12, 16, 24];
+const int kCalendarDefaultZoomHours = 12;
+
+/// The zoom level after [current] one step in [direction]: positive zooms in
+/// (fewer hours), negative zooms out (more hours). Stops at the ends; a
+/// [current] that isn't a level first snaps to the nearest one.
+int stepZoomHours(int current, int direction) {
+  var nearest = 0;
+  for (var i = 1; i < kCalendarZoomHours.length; i++) {
+    if ((kCalendarZoomHours[i] - current).abs() <
+        (kCalendarZoomHours[nearest] - current).abs()) {
+      nearest = i;
+    }
+  }
+  final next = (nearest - direction.sign).clamp(
+    0,
+    kCalendarZoomHours.length - 1,
+  );
+  return kCalendarZoomHours[next];
+}
+
 /// A start/end pair, both UTC.
 typedef CalendarSchedule = ({DateTime startAt, DateTime endAt});
 
@@ -58,9 +81,11 @@ DateTime localDayStart(DateTime utc) {
 int dayIndexOf(DateTime utc, DateTime rangeStartUtc) {
   final a = tz.TZDateTime.from(utc, _location);
   final b = tz.TZDateTime.from(rangeStartUtc, _location);
-  return DateTime.utc(a.year, a.month, a.day)
-      .difference(DateTime.utc(b.year, b.month, b.day))
-      .inDays;
+  return DateTime.utc(
+    a.year,
+    a.month,
+    a.day,
+  ).difference(DateTime.utc(b.year, b.month, b.day)).inDays;
 }
 
 /// Where the range starts for [dayCount] columns: 7 -> Monday of the week
@@ -101,7 +126,8 @@ List<LaneAssignment<T>> packLanes<T>(
     return end.isBefore(s.add(minLen)) ? s.add(minLen) : end;
   }
 
-  final sorted = [...events]..sort((a, b) {
+  final sorted = [...events]
+    ..sort((a, b) {
       final c = startOf(a).compareTo(startOf(b));
       return c != 0 ? c : effEnd(b).compareTo(effEnd(a));
     });

@@ -2,7 +2,11 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart'
-    show DragStartBehavior, PointerScrollEvent, PointerSignalEvent;
+    show
+        DragStartBehavior,
+        GestureBinding,
+        PointerScrollEvent,
+        PointerSignalEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, LogicalKeyboardKey;
@@ -22,10 +26,16 @@ import 'calendar_layout.dart';
 
 const double _kGutter = 56;
 const double _kHandle = 6;
-const double _kMinBlockHeight = kPxPerMinute * kMinDurationMinutes;
+
+/// A block is never drawn shorter than this, however far the grid is zoomed
+/// out, so a 10-minute event stays easy to grab.
+const double _kMinBlockHeight = 8;
 const double _kToolbarWidth = 165;
 const double _kToolbarHeight = 24;
-const double _kGridHeight = kHourHeight * 24;
+
+/// The smallest hour height the grid is drawn with, so a tiny window at the
+/// 24-hour zoom stays usable (the grid then scrolls a little).
+const double _kMinHourHeight = 12;
 
 const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const _monthNames = [
@@ -175,6 +185,28 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
           const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
               shiftCalendarDays(ref, 1),
           const SingleActivator(LogicalKeyboardKey.delete): _deleteSelected,
+          // Ctrl + "+" is Ctrl+= on most layouts (with or without Shift),
+          // plus the numpad keys.
+          const SingleActivator(LogicalKeyboardKey.equal, control: true): () =>
+              zoomCalendar(ref, 1),
+          const SingleActivator(
+            LogicalKeyboardKey.equal,
+            control: true,
+            shift: true,
+          ): () =>
+              zoomCalendar(ref, 1),
+          const SingleActivator(
+            LogicalKeyboardKey.numpadAdd,
+            control: true,
+          ): () =>
+              zoomCalendar(ref, 1),
+          const SingleActivator(LogicalKeyboardKey.minus, control: true): () =>
+              zoomCalendar(ref, -1),
+          const SingleActivator(
+            LogicalKeyboardKey.numpadSubtract,
+            control: true,
+          ): () =>
+              zoomCalendar(ref, -1),
         },
         child: Focus(focusNode: _focus, autofocus: true, child: widget.child),
       ),
@@ -223,6 +255,23 @@ class _Header extends ConsumerWidget {
           const SizedBox(width: 8),
           Text(_label(), style: Theme.of(context).textTheme.titleMedium),
           const Spacer(),
+          // Zoom: how many hours of a day are visible at once.
+          IconButton(
+            icon: const Icon(Icons.zoom_out),
+            tooltip: 'Show more hours (Ctrl+−)',
+            onPressed: () => zoomCalendar(ref, -1),
+          ),
+          Text(
+            '${ref.watch(calendarVisibleHoursProvider)} h',
+            key: const ValueKey('zoom-label'),
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          IconButton(
+            icon: const Icon(Icons.zoom_in),
+            tooltip: 'Show fewer hours (Ctrl++)',
+            onPressed: () => zoomCalendar(ref, 1),
+          ),
+          const SizedBox(width: 12),
           SegmentedButton<int>(
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
@@ -545,8 +594,7 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
                 'Postponed to next week',
                 (s) => s.postpone(widget.actionId, PostponeRule.nextWeek),
               ),
-              onDelete: () =>
-                  runUndoableDelete(context, ref, widget.actionId),
+              onDelete: () => runUndoableDelete(context, ref, widget.actionId),
             ),
           ),
         );
@@ -708,18 +756,30 @@ class _TimeGrid extends ConsumerStatefulWidget {
 }
 
 class _TimeGridState extends ConsumerState<_TimeGrid> {
-  late final ScrollController _scroll;
+  /// Created on the first build, once the viewport height (and so the hour
+  /// height) is known, so the initial "an hour before now" offset is right.
+  ScrollController? _scrollController;
+  ScrollController get _scroll => _scrollController!;
   Timer? _tick;
   _Drag? _drag;
+
+  /// Pixels per hour at the current zoom: viewport height / visible hours.
+  /// Refreshed on every build; everything vertical is measured with it.
+  double _hourHeight = kHourHeight;
+  double _viewportHeight = 0;
+  double get _pxPerMinute => _hourHeight / 60;
+  double _px(num minutes) => minutesToPx(minutes, pxPerMinute: _pxPerMinute);
+
+  /// The viewport y that stays put while zooming (the pointer for Ctrl+wheel);
+  /// null means the viewport's centre.
+  double? _zoomFocal;
+
+  /// Ctrl+wheel distance not yet worth a zoom step (see [_onWheel]).
+  double _wheelAccumulated = 0;
 
   @override
   void initState() {
     super.initState();
-    final now = _local(DateTime.now().toUtc());
-    final nowMin = now.hour * 60 + now.minute;
-    _scroll = ScrollController(
-      initialScrollOffset: math.max(0, minutesToPx(nowMin - 60)),
-    );
     _tick = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -728,9 +788,52 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   @override
   void dispose() {
     _tick?.cancel();
-    _scroll.dispose();
+    _scrollController?.dispose();
     super.dispose();
   }
+
+  /// Called just before the zoom level changes (so [_hourHeight] is still the
+  /// old one): remembers which time sits at the focal point, then after the
+  /// next layout scrolls so the same time is still there.
+  void _anchorZoom() {
+    final controller = _scrollController;
+    if (controller == null || !controller.hasClients) return;
+    final focal = (_zoomFocal ?? _viewportHeight / 2).clamp(
+      0.0,
+      _viewportHeight,
+    );
+    _zoomFocal = null;
+    final minuteAtFocal = (controller.offset + focal) / _pxPerMinute;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !controller.hasClients) return;
+      final target = minuteAtFocal * _pxPerMinute - focal;
+      controller.jumpTo(target.clamp(0.0, controller.position.maxScrollExtent));
+    });
+  }
+
+  /// Ctrl+wheel zooms (wheel up = in). Registered with the pointer-signal
+  /// resolver from *inside* the scroll view, so it wins over the scrollable's
+  /// own claim on the same event and the grid doesn't also scroll.
+  void _onWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        !HardwareKeyboard.instance.isControlPressed) {
+      return;
+    }
+    final focalInViewport = event.localPosition.dy - _scroll.offset;
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      _wheelAccumulated += event.scrollDelta.dy;
+      final steps = (_wheelAccumulated / _wheelPixelsPerStep).truncate();
+      if (steps == 0) return;
+      _wheelAccumulated -= steps * _wheelPixelsPerStep;
+      for (var i = 0; i < steps.abs(); i++) {
+        _zoomFocal = focalInViewport;
+        zoomCalendar(ref, steps < 0 ? 1 : -1);
+      }
+    });
+  }
+
+  /// One mouse-wheel notch reports 100; a touchpad's small deltas add up.
+  static const _wheelPixelsPerStep = 100.0;
 
   List<DateTime> get _dayStarts => [
     for (var i = 0; i <= widget.dayCount; i++) calendarAddDays(widget.start, i),
@@ -786,7 +889,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final startMin = minutesOfDay(start);
     final dy = d.current.dy - d.origin.dy;
     final dx = d.current.dx - d.origin.dx;
-    var minutes = snapMinutes(dy);
+    var minutes = snapMinutes(dy, pxPerMinute: _pxPerMinute);
 
     switch (d.kind) {
       case _DragKind.move:
@@ -858,6 +961,27 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
   @override
   Widget build(BuildContext context) {
+    final visibleHours = ref.watch(calendarVisibleHoursProvider);
+    ref.listen<int>(calendarVisibleHoursProvider, (_, _) => _anchorZoom());
+
+    return LayoutBuilder(
+      builder: (context, box) {
+        _viewportHeight = box.maxHeight;
+        _hourHeight = math.max(_kMinHourHeight, box.maxHeight / visibleHours);
+        _scrollController ??= ScrollController(
+          initialScrollOffset: math.max(0, _px(_minutesNow() - 60)),
+        );
+        return _buildGrid(context);
+      },
+    );
+  }
+
+  int _minutesNow() {
+    final now = _local(DateTime.now().toUtc());
+    return now.hour * 60 + now.minute;
+  }
+
+  Widget _buildGrid(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dayW = widget.dayWidth;
     final dayStarts = _dayStarts;
@@ -865,6 +989,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final now = DateTime.now().toUtc();
     final todayIdx = dayIndexOf(now, widget.start);
     final drag = _drag;
+    final gridHeight = _hourHeight * 24;
 
     final children = <Widget>[
       Positioned.fill(
@@ -873,6 +998,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
             painter: _GridPainter(
               dayCount: widget.dayCount,
               dayWidth: dayW,
+              hourHeight: _hourHeight,
               color: scheme.outlineVariant,
             ),
           ),
@@ -884,7 +1010,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         Positioned(
           left: todayIdx * dayW,
           width: dayW,
-          top: minutesToPx(minutesOfDay(now)) - 1,
+          top: _px(minutesOfDay(now)) - 1,
           height: 2,
           child: IgnorePointer(
             key: const ValueKey('now-line'),
@@ -896,37 +1022,43 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
     return SingleChildScrollView(
       controller: _scroll,
-      child: SizedBox(
-        height: _kGridHeight + 8,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: _kGutter,
-              height: _kGridHeight,
-              child: Stack(
-                children: [
-                  for (var h = 1; h < 24; h++)
-                    Positioned(
-                      top: h * kHourHeight - 7,
-                      right: 6,
-                      child: Text(
-                        '${twoDigits(h)}:00',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: scheme.onSurfaceVariant,
+      child: Listener(
+        // Translucent: empty grid space has nothing hit-testable in it, and
+        // the wheel must still reach us there.
+        behavior: HitTestBehavior.translucent,
+        onPointerSignal: _onWheel,
+        child: SizedBox(
+          height: gridHeight + 8,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: _kGutter,
+                height: gridHeight,
+                child: Stack(
+                  children: [
+                    for (var h = 1; h < 24; h++)
+                      Positioned(
+                        top: h * _hourHeight - 7,
+                        right: 6,
+                        child: Text(
+                          '${twoDigits(h)}:00',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            SizedBox(
-              width: dayW * widget.dayCount,
-              height: _kGridHeight,
-              child: Stack(clipBehavior: Clip.none, children: children),
-            ),
-          ],
+              SizedBox(
+                width: dayW * widget.dayCount,
+                height: gridHeight,
+                child: Stack(clipBehavior: Clip.none, children: children),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -937,14 +1069,14 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final laneW = widget.dayWidth / p.laneCount;
     final topMin = seg.start.difference(dayStarts[seg.day]).inSeconds / 60;
     final lenMin = seg.end.difference(seg.start).inSeconds / 60;
-    final height = math.max(_kMinBlockHeight, minutesToPx(lenMin));
+    final height = math.max(_kMinBlockHeight, _px(lenMin));
     final key = seg.isStart
         ? ValueKey('event-${seg.item.id}')
         : ValueKey('event-${seg.item.id}-d${seg.day}');
     return Positioned(
       key: key,
       left: seg.day * widget.dayWidth + p.lane * laneW,
-      top: minutesToPx(topMin),
+      top: _px(topMin),
       width: laneW - 2,
       height: height,
       child: _HoverToolbarHost(
@@ -978,9 +1110,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     return Positioned(
       key: const ValueKey('drag-ghost'),
       left: day * widget.dayWidth + p.lane * laneW,
-      top: minutesToPx(topMin),
+      top: _px(topMin),
       width: laneW - 2,
-      height: math.max(_kMinBlockHeight, minutesToPx(endMin - topMin)),
+      height: math.max(_kMinBlockHeight, _px(endMin - topMin)),
       child: IgnorePointer(
         child: Container(
           padding: const EdgeInsets.all(2),
@@ -1025,11 +1157,13 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 class _GridPainter extends CustomPainter {
   final int dayCount;
   final double dayWidth;
+  final double hourHeight;
   final Color color;
 
   const _GridPainter({
     required this.dayCount,
     required this.dayWidth,
+    required this.hourHeight,
     required this.color,
   });
 
@@ -1039,7 +1173,7 @@ class _GridPainter extends CustomPainter {
       ..color = color
       ..strokeWidth = 1;
     for (var h = 0; h <= 24; h++) {
-      final y = h * kHourHeight;
+      final y = h * hourHeight;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
     for (var d = 0; d < dayCount; d++) {
@@ -1052,6 +1186,7 @@ class _GridPainter extends CustomPainter {
   bool shouldRepaint(_GridPainter old) =>
       old.dayCount != dayCount ||
       old.dayWidth != dayWidth ||
+      old.hourHeight != hourHeight ||
       old.color != color;
 }
 

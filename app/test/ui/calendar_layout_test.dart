@@ -10,6 +10,31 @@ typedef E = (String, DateTime, DateTime);
 void main() {
   setUpAll(initPostponeTimeZoneData);
 
+  group('stepZoomHours', () {
+    test('zooming in walks 24 -> 3 and stops', () {
+      var h = 24;
+      final seen = <int>[];
+      for (var i = 0; i < 7; i++) {
+        h = stepZoomHours(h, 1);
+        seen.add(h);
+      }
+      expect(seen, [16, 12, 9, 6, 3, 3, 3]);
+    });
+    test('zooming out walks 3 -> 24 and stops', () {
+      var h = 3;
+      final seen = <int>[];
+      for (var i = 0; i < 7; i++) {
+        h = stepZoomHours(h, -1);
+        seen.add(h);
+      }
+      expect(seen, [6, 9, 12, 16, 24, 24, 24]);
+    });
+    test('a value that is not a level snaps to the nearest first', () {
+      expect(stepZoomHours(15, 1), 12); // 15 -> 16 (nearest), then in -> 12
+      expect(stepZoomHours(10, -1), 12); // 10 -> 9 (nearest), then out -> 12
+    });
+  });
+
   group('snapMinutes', () {
     test('rounds to nearest 10 min (8 px each)', () {
       expect(snapMinutes(0), 0);
@@ -64,11 +89,7 @@ void main() {
       expect(r.endAt.difference(r.startAt), const Duration(hours: 1));
     });
     test('start-only action gets the computed default duration', () {
-      final r = movedSchedule(
-        startAt: u(29, 7),
-        dayDelta: 1,
-        minuteDelta: 0,
-      );
+      final r = movedSchedule(startAt: u(29, 7), dayDelta: 1, minuteDelta: 0);
       expect(r.startAt, u(30, 7));
       expect(r.endAt, u(30, 8));
     });
@@ -132,42 +153,48 @@ void main() {
   group('packLanes', () {
     List<LaneAssignment<E>> pack(List<E> es) =>
         packLanes<E>(es, startOf: (e) => e.$2, endOf: (e) => e.$3);
-    Map<String, (int, int)> byName(List<LaneAssignment<E>> r) =>
-        {for (final a in r) a.event.$1: (a.lane, a.laneCount)};
+    Map<String, (int, int)> byName(List<LaneAssignment<E>> r) => {
+      for (final a in r) a.event.$1: (a.lane, a.laneCount),
+    };
 
     test('non-overlapping events are full width', () {
-      final r = byName(pack([
-        ('a', u(29, 7), u(29, 8)),
-        ('b', u(29, 8), u(29, 9)), // touching, not overlapping
-      ]));
+      final r = byName(
+        pack([
+          ('a', u(29, 7), u(29, 8)),
+          ('b', u(29, 8), u(29, 9)), // touching, not overlapping
+        ]),
+      );
       expect(r['a'], (0, 1));
       expect(r['b'], (0, 1));
     });
     test('overlapping events get side-by-side lanes', () {
-      final r = byName(pack([
-        ('a', u(29, 7), u(29, 9)),
-        ('b', u(29, 8), u(29, 10)),
-        ('c', u(29, 9), u(29, 10)), // fits lane 0 again, same cluster
-      ]));
+      final r = byName(
+        pack([
+          ('a', u(29, 7), u(29, 9)),
+          ('b', u(29, 8), u(29, 10)),
+          ('c', u(29, 9), u(29, 10)), // fits lane 0 again, same cluster
+        ]),
+      );
       expect(r['a'], (0, 2));
       expect(r['b'], (1, 2));
       expect(r['c'], (0, 2));
     });
     test('separate clusters lay out independently', () {
-      final r = byName(pack([
-        ('a', u(29, 7), u(29, 8)),
-        ('b', u(29, 7, 30), u(29, 8, 30)),
-        ('c', u(29, 12), u(29, 13)),
-      ]));
+      final r = byName(
+        pack([
+          ('a', u(29, 7), u(29, 8)),
+          ('b', u(29, 7, 30), u(29, 8, 30)),
+          ('c', u(29, 12), u(29, 13)),
+        ]),
+      );
       expect(r['a']!.$2, 2);
       expect(r['b']!.$2, 2);
       expect(r['c'], (0, 1));
     });
     test('zero-length events count as the minimum length', () {
-      final r = byName(pack([
-        ('a', u(29, 7), u(29, 7)),
-        ('b', u(29, 7, 5), u(29, 7, 5)),
-      ]));
+      final r = byName(
+        pack([('a', u(29, 7), u(29, 7)), ('b', u(29, 7, 5), u(29, 7, 5))]),
+      );
       expect(r['a'], (0, 2));
       expect(r['b'], (1, 2));
     });
@@ -190,7 +217,10 @@ void main() {
       for (final n in [2, 3, 4, 5, 6]) {
         expect(calendarAnchorStart(sunday, n), DateTime.utc(2026, 9, 26, 21));
         expect(calendarAnchorStart(monday, n), mondayMidnight);
-        expect(calendarAnchorStart(wednesday, n), DateTime.utc(2026, 9, 29, 21));
+        expect(
+          calendarAnchorStart(wednesday, n),
+          DateTime.utc(2026, 9, 29, 21),
+        );
       }
     });
     test('late-evening UTC is already tomorrow in Istanbul', () {
@@ -202,7 +232,10 @@ void main() {
     });
     test('calendarAddDays / dayIndexOf / minutesOfDay', () {
       expect(calendarAddDays(mondayMidnight, 7), DateTime.utc(2026, 10, 4, 21));
-      expect(calendarAddDays(mondayMidnight, -1), DateTime.utc(2026, 9, 26, 21));
+      expect(
+        calendarAddDays(mondayMidnight, -1),
+        DateTime.utc(2026, 9, 26, 21),
+      );
       expect(dayIndexOf(DateTime.utc(2026, 9, 28, 20, 59), mondayMidnight), 0);
       expect(dayIndexOf(DateTime.utc(2026, 9, 28, 21), mondayMidnight), 1);
       expect(dayIndexOf(DateTime.utc(2026, 9, 27, 20), mondayMidnight), -1);

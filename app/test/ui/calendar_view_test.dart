@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:drift/drift.dart' show BooleanExpressionOperators;
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
@@ -34,7 +36,12 @@ void main() {
     addTearDown(db.close);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          // The whole day fits the window, so nothing sits out of view
+          // whatever the time of day; the zoom tests change it themselves.
+          calendarVisibleHoursProvider.overrideWith((ref) => 24),
+        ],
         child: const MaterialApp(home: Scaffold(body: CalendarView())),
       ),
     );
@@ -42,6 +49,13 @@ void main() {
       tester.element(find.byType(CalendarView)),
     );
   }
+
+  /// Pixels per minute as drawn, read off two gutter labels: it depends on the
+  /// zoom level and the window height, so tests must not hard-code it.
+  double pxPerMinute(WidgetTester tester) =>
+      (tester.getTopLeft(find.text('14:00')).dy -
+          tester.getTopLeft(find.text('13:00')).dy) /
+      60;
 
   Future<String> create(
     WidgetTester tester, {
@@ -166,12 +180,12 @@ void main() {
     await pump(tester);
     final id = await create(tester, startAt: at(10), endAt: at(11));
     await useDays(tester, 3);
-    // 17 px = 21.25 min -> snaps to 20.
+    // 21 min of pixels -> snaps to 20.
     await dragBy(
       tester,
       find.byKey(ValueKey('event-$id')),
       const Offset(30, 24),
-      const Offset(0, 17),
+      Offset(0, 21 * pxPerMinute(tester)),
     );
     final r = await row(tester, id);
     expect(dateTimeFromDb(r.startAt), at(10, 20));
@@ -186,8 +200,14 @@ void main() {
     final id = await create(tester, startAt: at(10), endAt: at(11));
     await useDays(tester, 3);
     final block = find.byKey(ValueKey('event-$id'));
-    // 16 px = 20 min.
-    await dragBy(tester, block, const Offset(30, 46), const Offset(0, 16));
+    final ppm = pxPerMinute(tester);
+    // 20 min of pixels, grabbing the bottom handle.
+    await dragBy(
+      tester,
+      block,
+      Offset(30, tester.getSize(block).height - 2),
+      Offset(0, 20 * ppm),
+    );
     var r = await row(tester, id);
     expect(dateTimeFromDb(r.startAt), at(10));
     expect(dateTimeFromDb(r.endAt), at(11, 20));
@@ -213,7 +233,7 @@ void main() {
       tester,
       find.byKey(ValueKey('event-$id')),
       const Offset(30, 2),
-      const Offset(0, 16),
+      Offset(0, 20 * pxPerMinute(tester)),
     );
     final r = await row(tester, id);
     expect(dateTimeFromDb(r.startAt), at(10, 20));
@@ -250,7 +270,7 @@ void main() {
       tester.getTopLeft(block) + const Offset(30, 24),
       kind: PointerDeviceKind.mouse,
     );
-    await g.moveBy(const Offset(0, 40));
+    await g.moveBy(Offset(0, 50 * pxPerMinute(tester)));
     await tester.pump();
     expect(find.byKey(const ValueKey('drag-ghost')), findsOneWidget);
     // The times are readable: bold, on a white chip.
@@ -309,6 +329,160 @@ void main() {
     expect(find.text('Holiday'), findsOneWidget);
     expect(find.byKey(ValueKey('event-$id')), findsNothing);
     await unmount(tester);
+  });
+
+  group('zoom', () {
+    Future<void> withCtrl(
+      WidgetTester tester,
+      Future<void> Function() body,
+    ) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await body();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+    }
+
+    int hours() => container.read(calendarVisibleHoursProvider);
+
+    /// The grid's scroll viewport (the last scroll view; the first is the
+    /// all-day strip).
+    Finder gridScroll() => find.byType(SingleChildScrollView).last;
+
+    ScrollPosition gridPosition(WidgetTester tester) => tester
+        .state<ScrollableState>(
+          find.descendant(of: gridScroll(), matching: find.byType(Scrollable)),
+        )
+        .position;
+
+    testWidgets('Ctrl+= / Ctrl+- step 3-6-9-12-16-24 and stop at the ends', (
+      tester,
+    ) async {
+      await pump(tester);
+      await settle(tester);
+      // Hours visible * pixels per hour is always the viewport height.
+      final viewport = pxPerMinute(tester) * 60 * hours();
+
+      Future<void> press(LogicalKeyboardKey key) =>
+          withCtrl(tester, () => tester.sendKeyEvent(key));
+
+      expect(hours(), 24);
+      await press(LogicalKeyboardKey.minus);
+      expect(hours(), 24, reason: 'already the most zoomed out');
+
+      final seen = <int>[];
+      for (var i = 0; i < 6; i++) {
+        await press(LogicalKeyboardKey.equal);
+        seen.add(hours());
+        expect(pxPerMinute(tester) * 60 * hours(), closeTo(viewport, 0.5));
+      }
+      expect(seen, [16, 12, 9, 6, 3, 3]);
+      expect(find.text('3 h'), findsOneWidget);
+
+      await press(LogicalKeyboardKey.minus);
+      expect(hours(), 6);
+      await press(LogicalKeyboardKey.numpadAdd);
+      expect(hours(), 3);
+      await press(LogicalKeyboardKey.numpadSubtract);
+      expect(hours(), 6);
+      await unmount(tester);
+    });
+
+    testWidgets('Ctrl+scroll zooms (up = in), plain scroll does not', (
+      tester,
+    ) async {
+      await pump(tester);
+      await settle(tester);
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pointer.hover(const Offset(700, 600)));
+
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, -100)));
+      await tester.pump();
+      expect(hours(), 24, reason: 'no Ctrl, no zoom');
+
+      await withCtrl(tester, () async {
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, -100)));
+        await tester.pump();
+        expect(hours(), 16);
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, -100)));
+        await tester.pump();
+        expect(hours(), 12);
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, 100)));
+        await tester.pump();
+        expect(hours(), 16);
+      });
+      await unmount(tester);
+    });
+
+    testWidgets('the time at the viewport centre stays put when zooming', (
+      tester,
+    ) async {
+      await pump(tester);
+      container.read(calendarVisibleHoursProvider.notifier).state = 12;
+      await settle(tester);
+      final position = gridPosition(tester);
+      position.jumpTo(position.maxScrollExtent / 2);
+      await tester.pump();
+
+      // The hour label nearest the viewport centre.
+      final centre = tester.getRect(gridScroll()).center.dy;
+      String nearest() {
+        String? best;
+        var bestDistance = double.infinity;
+        for (var h = 1; h < 24; h++) {
+          final label = '${h.toString().padLeft(2, '0')}:00';
+          final y = tester.getCenter(find.text(label)).dy;
+          if ((y - centre).abs() < bestDistance) {
+            bestDistance = (y - centre).abs();
+            best = label;
+          }
+        }
+        return best!;
+      }
+
+      final label = nearest();
+      final before = tester.getCenter(find.text(label)).dy;
+      await withCtrl(
+        tester,
+        () => tester.sendKeyEvent(LogicalKeyboardKey.equal),
+      );
+      await tester.pump(); // the scroll correction runs after the layout
+      expect(hours(), 9);
+      expect(tester.getCenter(find.text(label)).dy, closeTo(before, 2));
+      await unmount(tester);
+    });
+
+    testWidgets('Ctrl+scroll keeps the time under the pointer in place', (
+      tester,
+    ) async {
+      await pump(tester);
+      container.read(calendarVisibleHoursProvider.notifier).state = 12;
+      await settle(tester);
+      final position = gridPosition(tester);
+      position.jumpTo(position.maxScrollExtent / 2);
+      await tester.pump();
+
+      // Point at the 3rd visible hour label from the top of the viewport.
+      final top = tester.getRect(gridScroll()).top;
+      String? label;
+      for (var h = 1; h < 24 && label == null; h++) {
+        final l = '${h.toString().padLeft(2, '0')}:00';
+        if (tester.getCenter(find.text(l)).dy > top + 120) label = l;
+      }
+      final target = tester.getCenter(find.text(label!));
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(
+        pointer.hover(Offset(target.dx + 300, target.dy)),
+      );
+
+      await withCtrl(tester, () async {
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, -100)));
+        await tester.pump();
+        await tester.pump();
+      });
+      expect(hours(), 9);
+      expect(tester.getCenter(find.text(label)).dy, closeTo(target.dy, 2));
+      await unmount(tester);
+    });
   });
 
   group('day navigation', () {
@@ -507,14 +681,18 @@ void main() {
       await unmount(tester);
     });
 
-    testWidgets('toolbar stays clickable for a 10-minute (8 px) block', (
+    testWidgets('toolbar stays clickable for a 10-minute (tiny) block', (
       tester,
     ) async {
       await pump(tester);
       final id = await create(tester, startAt: at(10), endAt: at(10, 10));
       await useDays(tester, 3);
       final block = find.byKey(ValueKey('event-$id'));
-      expect(tester.getSize(block).height, closeTo(8, 0.01));
+      // 10 minutes of pixels, but never under the 8 px floor.
+      expect(
+        tester.getSize(block).height,
+        closeTo(math.max(8, 10 * pxPerMinute(tester)), 0.01),
+      );
       final m = await hover(tester, block);
 
       // Move from the block onto the toolbar (above its top-right corner).
