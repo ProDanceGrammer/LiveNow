@@ -31,12 +31,31 @@ const _priorities = [
 class ActionEditorDialog extends ConsumerStatefulWidget {
   final ActionRow? existing;
 
-  const ActionEditorDialog({super.key, this.existing});
+  /// For a new action: the schedule to start with (UTC), e.g. the time range
+  /// dragged out on the calendar.
+  final DateTime? initialStart;
+  final DateTime? initialEnd;
 
-  static Future<void> show(BuildContext context, {ActionRow? existing}) {
+  const ActionEditorDialog({
+    super.key,
+    this.existing,
+    this.initialStart,
+    this.initialEnd,
+  });
+
+  static Future<void> show(
+    BuildContext context, {
+    ActionRow? existing,
+    DateTime? initialStart,
+    DateTime? initialEnd,
+  }) {
     return showDialog<void>(
       context: context,
-      builder: (_) => ActionEditorDialog(existing: existing),
+      builder: (_) => ActionEditorDialog(
+        existing: existing,
+        initialStart: initialStart,
+        initialEnd: initialEnd,
+      ),
     );
   }
 
@@ -65,6 +84,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     super.initState();
     final existing = widget.existing;
     _nameController = TextEditingController(text: existing?.name ?? '');
+    _startAt = widget.initialStart;
+    _endAt = widget.initialEnd;
 
     if (existing != null) {
       _priority = existing.priority;
@@ -115,6 +136,9 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   controller: _nameController,
                   decoration: const InputDecoration(labelText: 'Name'),
                   autofocus: true,
+                  // Enter = the Save button.
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _save(),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
@@ -146,6 +170,9 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                 const SizedBox(height: 12),
                 ExpansionTile(
                   title: const Text('Manual parameters'),
+                  // Opened when a schedule came with the dialog (dragged out
+                  // on the calendar), so the chosen time is visible.
+                  initiallyExpanded: widget.initialStart != null,
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: const EdgeInsets.only(bottom: 8),
                   children: [

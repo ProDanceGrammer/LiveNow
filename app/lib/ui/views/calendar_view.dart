@@ -21,6 +21,7 @@ import '../../domain/postpone_rules.dart';
 import '../edit_action.dart';
 import '../providers.dart';
 import '../undo.dart';
+import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
 import 'calendar_layout.dart';
 
@@ -762,6 +763,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   ScrollController get _scroll => _scrollController!;
   Timer? _tick;
   _Drag? _drag;
+  _NewRange? _newRange;
 
   /// Pixels per hour at the current zoom: viewport height / visible hours.
   /// Refreshed on every build; everything vertical is measured with it.
@@ -993,7 +995,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
     final children = <Widget>[
       Positioned.fill(
-        child: IgnorePointer(
+        // Empty grid space: a click clears the selection, a drag sweeps out a
+        // time range for a new action. Events sit above and take their own
+        // gestures.
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
+          onTapDown: (_) =>
+              ref.read(calendarSelectedActionProvider.notifier).state = null,
+          onPanStart: _createStart,
+          onPanUpdate: _createUpdate,
+          onPanEnd: (_) => _createEnd(),
+          onPanCancel: _createCancel,
           child: CustomPaint(
             painter: _GridPainter(
               dayCount: widget.dayCount,
@@ -1018,6 +1031,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           ),
         ),
       if (drag != null) _ghost(drag, dayStarts),
+      if (_newRange != null) _createPreview(scheme, _newRange!),
     ];
 
     return SingleChildScrollView(
@@ -1113,38 +1127,44 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       top: _px(topMin),
       width: laneW - 2,
       height: math.max(_kMinBlockHeight, _px(endMin - topMin)),
-      child: IgnorePointer(
-        child: Container(
-          padding: const EdgeInsets.all(2),
-          decoration: BoxDecoration(
-            color: scheme.primary.withValues(alpha: 0.35),
-            border: Border.all(color: scheme.primary),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          // Not clipped: on a short block the chip spills below it rather
-          // than being cut off.
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                // Solid white with dark text in both themes, so the times
-                // stay legible over whatever block sits underneath.
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black38, blurRadius: 4),
-                ],
-              ),
-              child: Text(
-                '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}',
-                maxLines: 1,
-                softWrap: false,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87,
-                ),
+      child: _rangeBox(scheme, '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}'),
+    );
+  }
+
+  /// The translucent box with the bold white time chip, shared by the
+  /// move/resize ghost and the drag-to-create preview.
+  Widget _rangeBox(ColorScheme scheme, String range) {
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: scheme.primary.withValues(alpha: 0.35),
+          border: Border.all(color: scheme.primary),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        // Not clipped: on a short block the chip spills below it rather
+        // than being cut off.
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              // Solid white with dark text in both themes, so the times
+              // stay legible over whatever block sits underneath.
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(4),
+              boxShadow: const [
+                BoxShadow(color: Colors.black38, blurRadius: 4),
+              ],
+            ),
+            child: Text(
+              range,
+              maxLines: 1,
+              softWrap: false,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
               ),
             ),
           ),
@@ -1152,6 +1172,93 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       ),
     );
   }
+
+  // -- drag-to-create --
+
+  void _createStart(DragStartDetails d) {
+    final day = (d.localPosition.dx / widget.dayWidth).floor().clamp(
+      0,
+      widget.dayCount - 1,
+    );
+    setState(
+      () => _newRange = _NewRange(day, d.localPosition.dy, d.localPosition.dy),
+    );
+  }
+
+  void _createUpdate(DragUpdateDetails d) {
+    final r = _newRange;
+    if (r != null) setState(() => _newRange = r.at(d.localPosition.dy));
+  }
+
+  void _createCancel() => setState(() => _newRange = null);
+
+  /// The dragged range as UTC start/end: the start snaps down and the end up
+  /// to the 10-minute grid, so the slot covers what was swept; at least
+  /// [kMinDurationMinutes] long and inside its day.
+  (DateTime, DateTime) _newRangeTimes(_NewRange r) {
+    int minuteAt(double y, double Function(double) round) {
+      final minutes = pxToMinutes(y, pxPerMinute: _pxPerMinute);
+      return (round(minutes / kSnapMinutes) * kSnapMinutes).round().clamp(
+        0,
+        1440,
+      );
+    }
+
+    var from = minuteAt(
+      math.min(r.originY, r.currentY),
+      (v) => v.floorToDouble(),
+    );
+    var to = minuteAt(math.max(r.originY, r.currentY), (v) => v.ceilToDouble());
+    if (to - from < kMinDurationMinutes) to = from + kMinDurationMinutes;
+    if (to > 1440) {
+      to = 1440;
+      from = 1440 - kMinDurationMinutes;
+    }
+    final dayStart = calendarAddDays(widget.start, r.day);
+    return (
+      dayStart.add(Duration(minutes: from)),
+      dayStart.add(Duration(minutes: to)),
+    );
+  }
+
+  Future<void> _createEnd() async {
+    final r = _newRange;
+    setState(() => _newRange = null);
+    if (r == null) return;
+    final (start, end) = _newRangeTimes(r);
+    await ActionEditorDialog.show(
+      context,
+      initialStart: start,
+      initialEnd: end,
+    );
+  }
+
+  Widget _createPreview(ColorScheme scheme, _NewRange r) {
+    final (start, end) = _newRangeTimes(r);
+    final dayStart = calendarAddDays(widget.start, r.day);
+    final topMin = start.difference(dayStart).inMinutes;
+    final lenMin = end.difference(start).inMinutes;
+    return Positioned(
+      key: const ValueKey('create-preview'),
+      left: r.day * widget.dayWidth,
+      top: _px(topMin),
+      width: widget.dayWidth - 2,
+      height: math.max(_kMinBlockHeight, _px(lenMin)),
+      child: _rangeBox(scheme, '${_hhmm(start)} – ${_hhmm(end)}'),
+    );
+  }
+}
+
+/// A time range being dragged out on empty grid space: the day column it
+/// started in and the vertical extent (px inside the grid) so far.
+class _NewRange {
+  final int day;
+  final double originY;
+  final double currentY;
+
+  const _NewRange(this.day, this.originY, this.currentY);
+
+  _NewRange at(double y) => _NewRange(day, originY, y);
 }
 
 class _GridPainter extends CustomPainter {
@@ -1245,9 +1352,10 @@ class _EventBlock extends ConsumerWidget {
     final selected = ref.watch(
       calendarSelectedActionProvider.select((id) => id == item.id),
     );
-    // The action's own start time (not this day-slice's), so a block that
-    // continues past midnight doesn't read "00:00".
-    final startTime = _hhmm(item.startAt!);
+    // The action's own start–end (not this day-slice's), so a block that
+    // continues past midnight doesn't read "00:00", and the end is visible
+    // without opening the event. The end is the one the block is drawn to.
+    final timeRange = '${_hhmm(item.startAt!)}–${_hhmm(_effectiveEnd(item))}';
 
     final Widget label = height >= 34
         ? Column(
@@ -1260,11 +1368,11 @@ class _EventBlock extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
                 style: name,
               ),
-              Text(startTime, style: TextStyle(fontSize: 11, color: fg)),
+              Text(timeRange, style: TextStyle(fontSize: 11, color: fg)),
             ],
           )
         : Text(
-            '${item.name} · $startTime',
+            '${item.name} · $timeRange',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: name.copyWith(fontSize: 11),

@@ -162,6 +162,9 @@ class _TemplateEditorDialogState
                     labelText: 'Name (also the default action name)',
                   ),
                   autofocus: true,
+                  // Enter = the Save button.
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _save(),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),

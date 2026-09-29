@@ -106,6 +106,11 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                   controller: _name,
                   decoration: const InputDecoration(labelText: 'Name'),
                   autofocus: true,
+                  // Enter = the Save button (once the relations have loaded).
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) {
+                    if (_relationsLoaded) _save();
+                  },
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
@@ -172,6 +177,10 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
+                          textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) {
+                            if (_relationsLoaded) _save();
+                          },
                           validator: (v) {
                             final n = double.tryParse(
                               (v ?? '').trim().replaceAll(',', '.'),

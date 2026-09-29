@@ -30,18 +30,6 @@ final viewQueriesProvider = Provider<ViewQueries>(
   (ref) => ViewQueries(ref.watch(databaseProvider)),
 );
 
-final operationalProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref.watch(viewQueriesProvider).watchOperational(),
-);
-
-final todoProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref.watch(viewQueriesProvider).watchTodo(),
-);
-
-final mostImportantProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref.watch(viewQueriesProvider).watchMostImportant(),
-);
-
 final currentNotDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchCurrentNotDone(),
 );

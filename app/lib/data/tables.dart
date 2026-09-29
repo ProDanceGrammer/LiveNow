@@ -147,7 +147,7 @@ class ActionOccurrencesTable extends Table {
 /// - `is_main`: a main growth direction, always weighing 1000.
 /// - `weight` and `importance_level` are derived caches, rewritten by
 ///   `MetricService.recomputeWeights()` whenever the graph or a main flag
-///   changes (so SQL such as the Most Important ranking can read them).
+///   changes (so SQL can read them without re-walking the graph).
 @DataClassName('Metric')
 class MetricsTable extends Table {
   @override

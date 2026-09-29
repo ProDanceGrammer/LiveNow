@@ -155,7 +155,7 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('timed event shows name and start time, not duration', (
+  testWidgets('timed event shows name and start–end time, not duration', (
     tester,
   ) async {
     await pump(tester);
@@ -167,10 +167,26 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: block, matching: find.text('10:00')),
+      find.descendant(of: block, matching: find.text('10:00–11:30')),
       findsOneWidget,
     );
     expect(find.text('1 hour 30 min'), findsNothing);
+    await unmount(tester);
+  });
+
+  testWidgets('a short event shows its whole range on one line', (
+    tester,
+  ) async {
+    await pump(tester);
+    final id = await create(tester, startAt: at(15, 40), endAt: at(15, 50));
+    await useDays(tester, 3);
+    expect(
+      find.descendant(
+        of: find.byKey(ValueKey('event-$id')),
+        matching: find.text('Alpha · 15:40–15:50'),
+      ),
+      findsOneWidget,
+    );
     await unmount(tester);
   });
 
@@ -329,6 +345,153 @@ void main() {
     expect(find.text('Holiday'), findsOneWidget);
     expect(find.byKey(ValueKey('event-$id')), findsNothing);
     await unmount(tester);
+  });
+
+  group('create by dragging on empty space', () {
+    double lineY(WidgetTester tester, int hour) =>
+        tester.getTopLeft(find.text('13:00')).dy +
+        7 +
+        (hour - 13) * 60 * pxPerMinute(tester);
+
+    /// Drags from [fromY] to [toY] inside day column [day] of a 3-day view,
+    /// like a mouse would (a tiny first move to pass the drag slop).
+    Future<TestGesture> sweep(
+      WidgetTester tester, {
+      required int day,
+      required double fromY,
+      required double toY,
+    }) async {
+      final dayW = (1400 - 56) / 3;
+      final x = 56 + dayW * day + dayW / 2;
+      final g = await tester.startGesture(
+        Offset(x, fromY),
+        kind: PointerDeviceKind.mouse,
+      );
+      await g.moveBy(const Offset(0, 1));
+      await tester.pump();
+      await g.moveTo(Offset(x, toY));
+      await tester.pump();
+      return g;
+    }
+
+    Future<void> animate(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<List<ActionRow>> allActions(WidgetTester tester) async =>
+        (await tester.runAsync(() => db.select(db.actionsTable).get()))!;
+
+    testWidgets(
+      'sweeping a range opens New action with that time; Enter saves',
+      (tester) async {
+        await pump(tester);
+        await useDays(tester, 3);
+        final ppm = pxPerMinute(tester);
+
+        // 09:07 -> 10:33: the start snaps down and the end up to 10 minutes.
+        final g = await sweep(
+          tester,
+          day: 1,
+          fromY: lineY(tester, 9) + 7 * ppm,
+          toY: lineY(tester, 10) + 33 * ppm,
+        );
+        final preview = find.byKey(const ValueKey('create-preview'));
+        expect(preview, findsOneWidget);
+        expect(
+          find.descendant(of: preview, matching: find.text('09:00 – 10:40')),
+          findsOneWidget,
+        );
+
+        await g.up();
+        await animate(tester);
+        expect(preview, findsNothing);
+        expect(find.text('New action'), findsOneWidget);
+
+        // Enter in the name field is the Save button.
+        await tester.enterText(find.byType(TextFormField).first, 'Focus block');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 300)),
+        );
+        await tester.pump(const Duration(milliseconds: 400));
+
+        final saved = await allActions(tester);
+        expect(saved.single.name, 'Focus block');
+        final tomorrow = const Duration(days: 1);
+        expect(dateTimeFromDb(saved.single.startAt), at(9).add(tomorrow));
+        expect(dateTimeFromDb(saved.single.endAt), at(10, 40).add(tomorrow));
+        expect(saved.single.isAllDay, isFalse);
+        await settle(tester);
+        await unmount(tester);
+      },
+    );
+
+    testWidgets('sweeping upwards gives the same kind of range', (
+      tester,
+    ) async {
+      await pump(tester);
+      await useDays(tester, 3);
+
+      // From 10:59 up to 10:01 (a minute inside each edge, so pixel rounding
+      // can't tip the snapping).
+      final ppm = pxPerMinute(tester);
+      final g = await sweep(
+        tester,
+        day: 0,
+        fromY: lineY(tester, 11) - ppm,
+        toY: lineY(tester, 10) + ppm,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('create-preview')),
+          matching: find.text('10:00 – 11:00'),
+        ),
+        findsOneWidget,
+      );
+      await g.up();
+      await animate(tester);
+
+      // Cancelling creates nothing.
+      await tester.tap(find.text('Cancel'));
+      await animate(tester);
+      expect(await allActions(tester), isEmpty);
+      await settle(tester);
+      await unmount(tester);
+    });
+
+    testWidgets('a plain click on empty space creates nothing', (tester) async {
+      await pump(tester);
+      await useDays(tester, 3);
+      final dayW = (1400 - 56) / 3;
+      await tester.tapAt(
+        Offset(56 + dayW / 2, lineY(tester, 10)),
+        kind: PointerDeviceKind.mouse,
+      );
+      await animate(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byKey(const ValueKey('create-preview')), findsNothing);
+      await unmount(tester);
+    });
+
+    testWidgets('dragging that starts on an event still moves the event', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(11));
+      await useDays(tester, 3);
+      await dragBy(
+        tester,
+        find.byKey(ValueKey('event-$id')),
+        const Offset(30, 24),
+        Offset(0, 20 * pxPerMinute(tester)),
+      );
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(dateTimeFromDb((await row(tester, id)).startAt), at(10, 20));
+      await tester.pump(const Duration(seconds: 1));
+      await unmount(tester);
+    });
   });
 
   group('zoom', () {

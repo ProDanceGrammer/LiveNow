@@ -7,9 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../views/all_actions_view.dart';
 import '../views/calendar_view.dart';
 import '../views/current_actions_view.dart';
-import '../views/most_important_view.dart';
-import '../views/operational_view.dart';
-import '../views/todo_view.dart';
 import '../widgets/action_editor.dart';
 import '../theme_mode.dart';
 import 'growth_directions_screen.dart';
@@ -31,15 +28,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       label: Text('Current'),
     ),
     NavigationRailDestination(
-      icon: Icon(Icons.bolt),
-      label: Text('Operational'),
-    ),
-    NavigationRailDestination(icon: Icon(Icons.checklist), label: Text('TODO')),
-    NavigationRailDestination(
-      icon: Icon(Icons.star),
-      label: Text('Most Important'),
-    ),
-    NavigationRailDestination(
       icon: Icon(Icons.calendar_view_week),
       label: Text('Calendar'),
     ),
@@ -56,9 +44,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   static const _titles = [
     'Current Actions',
-    'Operational',
-    'TODO',
-    'Most Important to Schedule',
     'Calendar',
     'All Actions',
     'Growth directions',
@@ -67,9 +52,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   static const _views = [
     CurrentActionsView(),
-    OperationalView(),
-    TodoView(),
-    MostImportantView(),
     CalendarView(),
     AllActionsView(),
     GrowthDirectionsScreen(),
@@ -160,10 +142,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           ],
         ),
       ),
-      // Metrics and Templates (last two indices) are their own Scaffolds
-      // with their own FAB for adding a metric/template; only the six action
-      // views (including Current and All) share this one.
-      floatingActionButton: _index < 6
+      // Growth directions and Templates (last two indices) are their own
+      // Scaffolds with their own FAB; only the three action views (Current,
+      // Calendar, All) share this one.
+      floatingActionButton: _index < 3
           ? FloatingActionButton(
               onPressed: () => ActionEditorDialog.show(context),
               tooltip: 'New action',

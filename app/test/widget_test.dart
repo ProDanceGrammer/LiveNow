@@ -27,9 +27,9 @@ void main() {
     // Current Actions is the default view.
     expect(find.text('Current Actions'), findsOneWidget);
     expect(find.text('Current'), findsOneWidget);
-    expect(find.text('Operational'), findsOneWidget);
-    expect(find.text('TODO'), findsOneWidget);
-    expect(find.text('Most Important'), findsOneWidget);
+    expect(find.text('Operational'), findsNothing);
+    expect(find.text('TODO'), findsNothing);
+    expect(find.text('Most Important'), findsNothing);
     expect(find.text('Calendar'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
     expect(find.text('Growth directions'), findsOneWidget);

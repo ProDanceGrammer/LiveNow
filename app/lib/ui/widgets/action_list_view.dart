@@ -6,10 +6,9 @@ import '../../data/queries.dart';
 import '../edit_action.dart';
 import 'action_tile.dart';
 
-/// A plain, tap-to-edit list backed by a live view query. Used by every MVP
-/// view whose only structure is "a sorted/filtered list of actions"
-/// (Operational, TODO, Most Important) — Habits and the calendar have their
-/// own layout and build directly on the provider instead.
+/// A plain, tap-to-edit list backed by a live view query (used by All
+/// Actions). The Current board and the calendar have their own layout and
+/// build directly on the provider instead.
 class ActionListView extends ConsumerWidget {
   final ProviderListenable<AsyncValue<List<ActionListItem>>> provider;
   final String emptyMessage;
