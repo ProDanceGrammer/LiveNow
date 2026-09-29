@@ -15,6 +15,7 @@ part 'database.g.dart';
     ActionMetricsTable,
     ActionTemplatesTable,
     CountableActivitiesTable,
+    MetricDependenciesTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -24,7 +25,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -35,6 +36,26 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(countableActivitiesTable);
         await m.addColumn(actionsTable, actionsTable.sequenceNumber);
         await m.addColumn(actionsTable, actionsTable.countableActivityId);
+      }
+      if (from < 3) {
+        // Metrics become growth directions: new columns (all defaulted, so
+        // old rows become non-main boolean directions), the old `leading` /
+        // `target_interval_days` columns are dropped, and directions get a
+        // dependency graph. alterTable rebuilds the table with foreign keys
+        // switched off by drift, so action_metrics links survive.
+        await m.createTable(metricDependenciesTable);
+        await m.alterTable(
+          TableMigration(
+            metricsTable,
+            newColumns: [
+              metricsTable.kind,
+              metricsTable.timeWindow,
+              metricsTable.target,
+              metricsTable.isMain,
+              metricsTable.importanceLevel,
+            ],
+          ),
+        );
       }
     },
   );

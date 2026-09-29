@@ -12,7 +12,7 @@ import '../views/operational_view.dart';
 import '../views/todo_view.dart';
 import '../widgets/action_editor.dart';
 import '../theme_mode.dart';
-import 'metrics_screen.dart';
+import 'growth_directions_screen.dart';
 import 'templates_screen.dart';
 
 class HomeShell extends ConsumerStatefulWidget {
@@ -46,7 +46,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     NavigationRailDestination(icon: Icon(Icons.list_alt), label: Text('All')),
     NavigationRailDestination(
       icon: Icon(Icons.insights),
-      label: Text('Metrics'),
+      label: Text('Growth directions'),
     ),
     NavigationRailDestination(
       icon: Icon(Icons.dashboard_customize),
@@ -61,7 +61,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     'Most Important to Schedule',
     'Calendar',
     'All Actions',
-    'Metrics',
+    'Growth directions',
     'Templates',
   ];
 
@@ -72,7 +72,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     MostImportantView(),
     CalendarView(),
     AllActionsView(),
-    MetricsScreen(),
+    GrowthDirectionsScreen(),
     TemplatesScreen(),
   ];
 

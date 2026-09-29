@@ -9,6 +9,7 @@ import '../../domain/duration_rules.dart';
 import '../providers.dart';
 import 'action_menu_button.dart';
 import 'date_time_field.dart';
+import 'metric_picker.dart';
 
 const _priorities = [
   'A1',
@@ -99,8 +100,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final metricsAsync = ref.watch(metricsProvider);
-
     return AlertDialog(
       title: Text(_isEditing ? 'Edit action' : 'New action'),
       content: SizedBox(
@@ -248,33 +247,11 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Text(
-                      'Metrics',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    metricsAsync.when(
-                      data: (metrics) => metrics.isEmpty
-                          ? const Text('No metrics yet.')
-                          : Wrap(
-                              spacing: 8,
-                              children: [
-                                for (final m in metrics)
-                                  FilterChip(
-                                    label: Text(m.name),
-                                    selected: _selectedMetricIds.contains(m.id),
-                                    onSelected: (selected) => setState(() {
-                                      if (selected) {
-                                        _selectedMetricIds.add(m.id);
-                                      } else {
-                                        _selectedMetricIds.remove(m.id);
-                                      }
-                                    }),
-                                  ),
-                              ],
-                            ),
-                      loading: () => const LinearProgressIndicator(),
-                      error: (e, _) => Text('Error: $e'),
+                    MetricPicker(
+                      label: 'Growth directions',
+                      selectedIds: _selectedMetricIds,
+                      onChanged: (ids) =>
+                          setState(() => _selectedMetricIds = ids),
                     ),
                   ],
                 ),

@@ -8,6 +8,8 @@ import '../data/queries.dart';
 import '../domain/action_service.dart';
 import '../domain/dependency_service.dart';
 import '../domain/done_rule.dart' as done_rule;
+import '../domain/growth_rules.dart';
+import '../domain/metric_service.dart';
 import 'views/calendar_layout.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -130,6 +132,66 @@ final metricsProvider = StreamProvider.autoDispose<List<Metric>>((ref) {
   final db = ref.watch(databaseProvider);
   return db.select(db.metricsTable).watch();
 });
+
+final metricServiceProvider = Provider<MetricService>(
+  (ref) => MetricService(ref.watch(databaseProvider)),
+);
+
+/// The "depends on" edges between growth directions.
+final metricDependenciesProvider =
+    StreamProvider.autoDispose<List<MetricDependency>>((ref) {
+      final db = ref.watch(databaseProvider);
+      return db.select(db.metricDependenciesTable).watch();
+    });
+
+/// Actions linked to growth directions, as (metric id, action).
+final metricLinkedActionsProvider =
+    StreamProvider.autoDispose<List<(String, ActionRow)>>(
+      (ref) => ref.watch(viewQueriesProvider).watchMetricLinkedActions(),
+    );
+
+/// Ticks once a minute so anything time-dependent (rolling windows, actions
+/// becoming done as their end time passes) is recomputed.
+final minuteTickProvider = StreamProvider.autoDispose<int>(
+  (ref) => Stream.periodic(const Duration(minutes: 1), (i) => i),
+);
+
+/// Progress, weight and urgency of every growth direction, live.
+final growthSnapshotProvider = Provider.autoDispose<AsyncValue<GrowthSnapshot>>(
+  (ref) {
+    ref.watch(minuteTickProvider);
+    final metrics = ref.watch(metricsProvider);
+    final dependencies = ref.watch(metricDependenciesProvider);
+    final linked = ref.watch(metricLinkedActionsProvider);
+
+    for (final v in [metrics, dependencies, linked]) {
+      if (v.hasError) return AsyncValue.error(v.error!, v.stackTrace!);
+    }
+    if (!metrics.hasValue || !dependencies.hasValue || !linked.hasValue) {
+      return const AsyncValue.loading();
+    }
+
+    final graph = GrowthGraph([
+      for (final e in dependencies.requireValue)
+        (metricId: e.metricId, dependsOnId: e.dependsOnId),
+    ]);
+    final growthMetrics = [
+      for (final m in metrics.requireValue) GrowthMetric.fromRow(m),
+    ];
+    final stats = computeStats(
+      metrics: growthMetrics,
+      graph: graph,
+      facts: [
+        for (final (metricId, action) in linked.requireValue)
+          LinkedActionFact.fromAction(metricId, action),
+      ],
+      nowUtc: DateTime.now().toUtc(),
+    );
+    return AsyncValue.data(
+      GrowthSnapshot(metrics: growthMetrics, graph: graph, stats: stats),
+    );
+  },
+);
 
 /// All Countable Activities, for the action editor's activity picker.
 final countableActivitiesProvider =

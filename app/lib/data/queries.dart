@@ -71,6 +71,28 @@ class ViewQueries {
 
   ViewQueries(this.db);
 
+  /// Every action linked to a growth direction, as (metric id, action row).
+  /// An action linked to several directions appears once per link. The
+  /// progress rules (`domain/growth_rules.dart`) decide what counts; this
+  /// only supplies the rows, so it refreshes when a link or an action changes.
+  Stream<List<(String, ActionRow)>> watchMetricLinkedActions() {
+    final query = db.select(db.actionMetricsTable).join([
+      innerJoin(
+        db.actionsTable,
+        db.actionsTable.id.equalsExp(db.actionMetricsTable.actionId),
+      ),
+    ]);
+    return query.watch().map(
+      (rows) => [
+        for (final r in rows)
+          (
+            r.readTable(db.actionMetricsTable).metricId,
+            r.readTable(db.actionsTable),
+          ),
+      ],
+    );
+  }
+
   /// Operational: not done, not all-day, starting today, soonest first.
   Stream<List<ActionListItem>> watchOperational({DateTime? referenceUtc}) {
     final location = tz.getLocation(AppSettings.timeZoneName);

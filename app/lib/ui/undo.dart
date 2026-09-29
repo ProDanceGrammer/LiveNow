@@ -88,6 +88,27 @@ Future<void> runUndoableDelete(
   );
 }
 
+/// Deletes a growth direction right away and offers Undo (same approach as
+/// [runUndoableDelete]: nothing needing `ref`/`context` is touched after the
+/// first await, since the screen showing the direction may be gone by then).
+Future<void> runUndoableDeleteMetric(
+  BuildContext context,
+  WidgetRef ref,
+  String metricId,
+) async {
+  final service = ref.read(metricServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  final undo = await service.deleteMetric(metricId);
+  _offerUndo(
+    messenger,
+    lastUndo,
+    'Deleted "${undo.metric.name}"',
+    () => service.undoDelete(undo),
+  );
+}
+
 void _offerUndo(
   ScaffoldMessengerState messenger,
   StateController<Object?> lastUndo,

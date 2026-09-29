@@ -1953,34 +1953,72 @@ class $MetricsTableTable extends MetricsTable
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
-  static const VerificationMeta _leadingMeta = const VerificationMeta(
-    'leading',
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('boolean'),
+  );
+  static const VerificationMeta _timeWindowMeta = const VerificationMeta(
+    'timeWindow',
   );
   @override
-  late final GeneratedColumn<String> leading = GeneratedColumn<String>(
-    'leading',
+  late final GeneratedColumn<String> timeWindow = GeneratedColumn<String>(
+    'time_window',
     aliasedName,
     true,
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
-  static const VerificationMeta _targetIntervalDaysMeta =
-      const VerificationMeta('targetIntervalDays');
+  static const VerificationMeta _targetMeta = const VerificationMeta('target');
   @override
-  late final GeneratedColumn<int> targetIntervalDays = GeneratedColumn<int>(
-    'target_interval_days',
+  late final GeneratedColumn<double> target = GeneratedColumn<double>(
+    'target',
     aliasedName,
-    true,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _isMainMeta = const VerificationMeta('isMain');
+  @override
+  late final GeneratedColumn<bool> isMain = GeneratedColumn<bool>(
+    'is_main',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_main" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _importanceLevelMeta = const VerificationMeta(
+    'importanceLevel',
+  );
+  @override
+  late final GeneratedColumn<int> importanceLevel = GeneratedColumn<int>(
+    'importance_level',
+    aliasedName,
+    false,
     type: DriftSqlType.int,
     requiredDuringInsert: false,
+    defaultValue: const Constant(0),
   );
   @override
   List<GeneratedColumn> get $columns => [
     id,
     name,
     weight,
-    leading,
-    targetIntervalDays,
+    kind,
+    timeWindow,
+    target,
+    isMain,
+    importanceLevel,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2013,18 +2051,36 @@ class $MetricsTableTable extends MetricsTable
         weight.isAcceptableOrUnknown(data['weight']!, _weightMeta),
       );
     }
-    if (data.containsKey('leading')) {
+    if (data.containsKey('kind')) {
       context.handle(
-        _leadingMeta,
-        leading.isAcceptableOrUnknown(data['leading']!, _leadingMeta),
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
       );
     }
-    if (data.containsKey('target_interval_days')) {
+    if (data.containsKey('time_window')) {
       context.handle(
-        _targetIntervalDaysMeta,
-        targetIntervalDays.isAcceptableOrUnknown(
-          data['target_interval_days']!,
-          _targetIntervalDaysMeta,
+        _timeWindowMeta,
+        timeWindow.isAcceptableOrUnknown(data['time_window']!, _timeWindowMeta),
+      );
+    }
+    if (data.containsKey('target')) {
+      context.handle(
+        _targetMeta,
+        target.isAcceptableOrUnknown(data['target']!, _targetMeta),
+      );
+    }
+    if (data.containsKey('is_main')) {
+      context.handle(
+        _isMainMeta,
+        isMain.isAcceptableOrUnknown(data['is_main']!, _isMainMeta),
+      );
+    }
+    if (data.containsKey('importance_level')) {
+      context.handle(
+        _importanceLevelMeta,
+        importanceLevel.isAcceptableOrUnknown(
+          data['importance_level']!,
+          _importanceLevelMeta,
         ),
       );
     }
@@ -2049,14 +2105,26 @@ class $MetricsTableTable extends MetricsTable
         DriftSqlType.double,
         data['${effectivePrefix}weight'],
       )!,
-      leading: attachedDatabase.typeMapping.read(
+      kind: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
-        data['${effectivePrefix}leading'],
+        data['${effectivePrefix}kind'],
+      )!,
+      timeWindow: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}time_window'],
       ),
-      targetIntervalDays: attachedDatabase.typeMapping.read(
+      target: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}target'],
+      )!,
+      isMain: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_main'],
+      )!,
+      importanceLevel: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
-        data['${effectivePrefix}target_interval_days'],
-      ),
+        data['${effectivePrefix}importance_level'],
+      )!,
     );
   }
 
@@ -2070,14 +2138,20 @@ class Metric extends DataClass implements Insertable<Metric> {
   final String id;
   final String name;
   final double weight;
-  final String? leading;
-  final int? targetIntervalDays;
+  final String kind;
+  final String? timeWindow;
+  final double target;
+  final bool isMain;
+  final int importanceLevel;
   const Metric({
     required this.id,
     required this.name,
     required this.weight,
-    this.leading,
-    this.targetIntervalDays,
+    required this.kind,
+    this.timeWindow,
+    required this.target,
+    required this.isMain,
+    required this.importanceLevel,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2085,12 +2159,13 @@ class Metric extends DataClass implements Insertable<Metric> {
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
     map['weight'] = Variable<double>(weight);
-    if (!nullToAbsent || leading != null) {
-      map['leading'] = Variable<String>(leading);
+    map['kind'] = Variable<String>(kind);
+    if (!nullToAbsent || timeWindow != null) {
+      map['time_window'] = Variable<String>(timeWindow);
     }
-    if (!nullToAbsent || targetIntervalDays != null) {
-      map['target_interval_days'] = Variable<int>(targetIntervalDays);
-    }
+    map['target'] = Variable<double>(target);
+    map['is_main'] = Variable<bool>(isMain);
+    map['importance_level'] = Variable<int>(importanceLevel);
     return map;
   }
 
@@ -2099,12 +2174,13 @@ class Metric extends DataClass implements Insertable<Metric> {
       id: Value(id),
       name: Value(name),
       weight: Value(weight),
-      leading: leading == null && nullToAbsent
+      kind: Value(kind),
+      timeWindow: timeWindow == null && nullToAbsent
           ? const Value.absent()
-          : Value(leading),
-      targetIntervalDays: targetIntervalDays == null && nullToAbsent
-          ? const Value.absent()
-          : Value(targetIntervalDays),
+          : Value(timeWindow),
+      target: Value(target),
+      isMain: Value(isMain),
+      importanceLevel: Value(importanceLevel),
     );
   }
 
@@ -2117,8 +2193,11 @@ class Metric extends DataClass implements Insertable<Metric> {
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       weight: serializer.fromJson<double>(json['weight']),
-      leading: serializer.fromJson<String?>(json['leading']),
-      targetIntervalDays: serializer.fromJson<int?>(json['targetIntervalDays']),
+      kind: serializer.fromJson<String>(json['kind']),
+      timeWindow: serializer.fromJson<String?>(json['timeWindow']),
+      target: serializer.fromJson<double>(json['target']),
+      isMain: serializer.fromJson<bool>(json['isMain']),
+      importanceLevel: serializer.fromJson<int>(json['importanceLevel']),
     );
   }
   @override
@@ -2128,8 +2207,11 @@ class Metric extends DataClass implements Insertable<Metric> {
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'weight': serializer.toJson<double>(weight),
-      'leading': serializer.toJson<String?>(leading),
-      'targetIntervalDays': serializer.toJson<int?>(targetIntervalDays),
+      'kind': serializer.toJson<String>(kind),
+      'timeWindow': serializer.toJson<String?>(timeWindow),
+      'target': serializer.toJson<double>(target),
+      'isMain': serializer.toJson<bool>(isMain),
+      'importanceLevel': serializer.toJson<int>(importanceLevel),
     };
   }
 
@@ -2137,26 +2219,35 @@ class Metric extends DataClass implements Insertable<Metric> {
     String? id,
     String? name,
     double? weight,
-    Value<String?> leading = const Value.absent(),
-    Value<int?> targetIntervalDays = const Value.absent(),
+    String? kind,
+    Value<String?> timeWindow = const Value.absent(),
+    double? target,
+    bool? isMain,
+    int? importanceLevel,
   }) => Metric(
     id: id ?? this.id,
     name: name ?? this.name,
     weight: weight ?? this.weight,
-    leading: leading.present ? leading.value : this.leading,
-    targetIntervalDays: targetIntervalDays.present
-        ? targetIntervalDays.value
-        : this.targetIntervalDays,
+    kind: kind ?? this.kind,
+    timeWindow: timeWindow.present ? timeWindow.value : this.timeWindow,
+    target: target ?? this.target,
+    isMain: isMain ?? this.isMain,
+    importanceLevel: importanceLevel ?? this.importanceLevel,
   );
   Metric copyWithCompanion(MetricsTableCompanion data) {
     return Metric(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       weight: data.weight.present ? data.weight.value : this.weight,
-      leading: data.leading.present ? data.leading.value : this.leading,
-      targetIntervalDays: data.targetIntervalDays.present
-          ? data.targetIntervalDays.value
-          : this.targetIntervalDays,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      timeWindow: data.timeWindow.present
+          ? data.timeWindow.value
+          : this.timeWindow,
+      target: data.target.present ? data.target.value : this.target,
+      isMain: data.isMain.present ? data.isMain.value : this.isMain,
+      importanceLevel: data.importanceLevel.present
+          ? data.importanceLevel.value
+          : this.importanceLevel,
     );
   }
 
@@ -2166,15 +2257,26 @@ class Metric extends DataClass implements Insertable<Metric> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('weight: $weight, ')
-          ..write('leading: $leading, ')
-          ..write('targetIntervalDays: $targetIntervalDays')
+          ..write('kind: $kind, ')
+          ..write('timeWindow: $timeWindow, ')
+          ..write('target: $target, ')
+          ..write('isMain: $isMain, ')
+          ..write('importanceLevel: $importanceLevel')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, weight, leading, targetIntervalDays);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    weight,
+    kind,
+    timeWindow,
+    target,
+    isMain,
+    importanceLevel,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -2182,31 +2284,43 @@ class Metric extends DataClass implements Insertable<Metric> {
           other.id == this.id &&
           other.name == this.name &&
           other.weight == this.weight &&
-          other.leading == this.leading &&
-          other.targetIntervalDays == this.targetIntervalDays);
+          other.kind == this.kind &&
+          other.timeWindow == this.timeWindow &&
+          other.target == this.target &&
+          other.isMain == this.isMain &&
+          other.importanceLevel == this.importanceLevel);
 }
 
 class MetricsTableCompanion extends UpdateCompanion<Metric> {
   final Value<String> id;
   final Value<String> name;
   final Value<double> weight;
-  final Value<String?> leading;
-  final Value<int?> targetIntervalDays;
+  final Value<String> kind;
+  final Value<String?> timeWindow;
+  final Value<double> target;
+  final Value<bool> isMain;
+  final Value<int> importanceLevel;
   final Value<int> rowid;
   const MetricsTableCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.weight = const Value.absent(),
-    this.leading = const Value.absent(),
-    this.targetIntervalDays = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.timeWindow = const Value.absent(),
+    this.target = const Value.absent(),
+    this.isMain = const Value.absent(),
+    this.importanceLevel = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MetricsTableCompanion.insert({
     required String id,
     required String name,
     this.weight = const Value.absent(),
-    this.leading = const Value.absent(),
-    this.targetIntervalDays = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.timeWindow = const Value.absent(),
+    this.target = const Value.absent(),
+    this.isMain = const Value.absent(),
+    this.importanceLevel = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name);
@@ -2214,17 +2328,22 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     Expression<String>? id,
     Expression<String>? name,
     Expression<double>? weight,
-    Expression<String>? leading,
-    Expression<int>? targetIntervalDays,
+    Expression<String>? kind,
+    Expression<String>? timeWindow,
+    Expression<double>? target,
+    Expression<bool>? isMain,
+    Expression<int>? importanceLevel,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (name != null) 'name': name,
       if (weight != null) 'weight': weight,
-      if (leading != null) 'leading': leading,
-      if (targetIntervalDays != null)
-        'target_interval_days': targetIntervalDays,
+      if (kind != null) 'kind': kind,
+      if (timeWindow != null) 'time_window': timeWindow,
+      if (target != null) 'target': target,
+      if (isMain != null) 'is_main': isMain,
+      if (importanceLevel != null) 'importance_level': importanceLevel,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2233,16 +2352,22 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     Value<String>? id,
     Value<String>? name,
     Value<double>? weight,
-    Value<String?>? leading,
-    Value<int?>? targetIntervalDays,
+    Value<String>? kind,
+    Value<String?>? timeWindow,
+    Value<double>? target,
+    Value<bool>? isMain,
+    Value<int>? importanceLevel,
     Value<int>? rowid,
   }) {
     return MetricsTableCompanion(
       id: id ?? this.id,
       name: name ?? this.name,
       weight: weight ?? this.weight,
-      leading: leading ?? this.leading,
-      targetIntervalDays: targetIntervalDays ?? this.targetIntervalDays,
+      kind: kind ?? this.kind,
+      timeWindow: timeWindow ?? this.timeWindow,
+      target: target ?? this.target,
+      isMain: isMain ?? this.isMain,
+      importanceLevel: importanceLevel ?? this.importanceLevel,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2259,11 +2384,20 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     if (weight.present) {
       map['weight'] = Variable<double>(weight.value);
     }
-    if (leading.present) {
-      map['leading'] = Variable<String>(leading.value);
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
     }
-    if (targetIntervalDays.present) {
-      map['target_interval_days'] = Variable<int>(targetIntervalDays.value);
+    if (timeWindow.present) {
+      map['time_window'] = Variable<String>(timeWindow.value);
+    }
+    if (target.present) {
+      map['target'] = Variable<double>(target.value);
+    }
+    if (isMain.present) {
+      map['is_main'] = Variable<bool>(isMain.value);
+    }
+    if (importanceLevel.present) {
+      map['importance_level'] = Variable<int>(importanceLevel.value);
     }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
@@ -2277,8 +2411,11 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('weight: $weight, ')
-          ..write('leading: $leading, ')
-          ..write('targetIntervalDays: $targetIntervalDays, ')
+          ..write('kind: $kind, ')
+          ..write('timeWindow: $timeWindow, ')
+          ..write('target: $target, ')
+          ..write('isMain: $isMain, ')
+          ..write('importanceLevel: $importanceLevel, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2811,6 +2948,283 @@ class ActionTemplatesTableCompanion extends UpdateCompanion<ActionTemplate> {
   }
 }
 
+class $MetricDependenciesTableTable extends MetricDependenciesTable
+    with TableInfo<$MetricDependenciesTableTable, MetricDependency> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MetricDependenciesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _metricIdMeta = const VerificationMeta(
+    'metricId',
+  );
+  @override
+  late final GeneratedColumn<String> metricId = GeneratedColumn<String>(
+    'metric_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES metrics (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _dependsOnIdMeta = const VerificationMeta(
+    'dependsOnId',
+  );
+  @override
+  late final GeneratedColumn<String> dependsOnId = GeneratedColumn<String>(
+    'depends_on_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES metrics (id) ON DELETE CASCADE',
+    ),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, metricId, dependsOnId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'metric_dependencies';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MetricDependency> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('metric_id')) {
+      context.handle(
+        _metricIdMeta,
+        metricId.isAcceptableOrUnknown(data['metric_id']!, _metricIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_metricIdMeta);
+    }
+    if (data.containsKey('depends_on_id')) {
+      context.handle(
+        _dependsOnIdMeta,
+        dependsOnId.isAcceptableOrUnknown(
+          data['depends_on_id']!,
+          _dependsOnIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_dependsOnIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MetricDependency map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MetricDependency(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      metricId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}metric_id'],
+      )!,
+      dependsOnId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}depends_on_id'],
+      )!,
+    );
+  }
+
+  @override
+  $MetricDependenciesTableTable createAlias(String alias) {
+    return $MetricDependenciesTableTable(attachedDatabase, alias);
+  }
+}
+
+class MetricDependency extends DataClass
+    implements Insertable<MetricDependency> {
+  final String id;
+  final String metricId;
+  final String dependsOnId;
+  const MetricDependency({
+    required this.id,
+    required this.metricId,
+    required this.dependsOnId,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['metric_id'] = Variable<String>(metricId);
+    map['depends_on_id'] = Variable<String>(dependsOnId);
+    return map;
+  }
+
+  MetricDependenciesTableCompanion toCompanion(bool nullToAbsent) {
+    return MetricDependenciesTableCompanion(
+      id: Value(id),
+      metricId: Value(metricId),
+      dependsOnId: Value(dependsOnId),
+    );
+  }
+
+  factory MetricDependency.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MetricDependency(
+      id: serializer.fromJson<String>(json['id']),
+      metricId: serializer.fromJson<String>(json['metricId']),
+      dependsOnId: serializer.fromJson<String>(json['dependsOnId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'metricId': serializer.toJson<String>(metricId),
+      'dependsOnId': serializer.toJson<String>(dependsOnId),
+    };
+  }
+
+  MetricDependency copyWith({
+    String? id,
+    String? metricId,
+    String? dependsOnId,
+  }) => MetricDependency(
+    id: id ?? this.id,
+    metricId: metricId ?? this.metricId,
+    dependsOnId: dependsOnId ?? this.dependsOnId,
+  );
+  MetricDependency copyWithCompanion(MetricDependenciesTableCompanion data) {
+    return MetricDependency(
+      id: data.id.present ? data.id.value : this.id,
+      metricId: data.metricId.present ? data.metricId.value : this.metricId,
+      dependsOnId: data.dependsOnId.present
+          ? data.dependsOnId.value
+          : this.dependsOnId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MetricDependency(')
+          ..write('id: $id, ')
+          ..write('metricId: $metricId, ')
+          ..write('dependsOnId: $dependsOnId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, metricId, dependsOnId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MetricDependency &&
+          other.id == this.id &&
+          other.metricId == this.metricId &&
+          other.dependsOnId == this.dependsOnId);
+}
+
+class MetricDependenciesTableCompanion
+    extends UpdateCompanion<MetricDependency> {
+  final Value<String> id;
+  final Value<String> metricId;
+  final Value<String> dependsOnId;
+  final Value<int> rowid;
+  const MetricDependenciesTableCompanion({
+    this.id = const Value.absent(),
+    this.metricId = const Value.absent(),
+    this.dependsOnId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  MetricDependenciesTableCompanion.insert({
+    required String id,
+    required String metricId,
+    required String dependsOnId,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       metricId = Value(metricId),
+       dependsOnId = Value(dependsOnId);
+  static Insertable<MetricDependency> custom({
+    Expression<String>? id,
+    Expression<String>? metricId,
+    Expression<String>? dependsOnId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (metricId != null) 'metric_id': metricId,
+      if (dependsOnId != null) 'depends_on_id': dependsOnId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  MetricDependenciesTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? metricId,
+    Value<String>? dependsOnId,
+    Value<int>? rowid,
+  }) {
+    return MetricDependenciesTableCompanion(
+      id: id ?? this.id,
+      metricId: metricId ?? this.metricId,
+      dependsOnId: dependsOnId ?? this.dependsOnId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (metricId.present) {
+      map['metric_id'] = Variable<String>(metricId.value);
+    }
+    if (dependsOnId.present) {
+      map['depends_on_id'] = Variable<String>(dependsOnId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MetricDependenciesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('metricId: $metricId, ')
+          ..write('dependsOnId: $dependsOnId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2826,6 +3240,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $ActionMetricsTableTable(this);
   late final $ActionTemplatesTableTable actionTemplatesTable =
       $ActionTemplatesTableTable(this);
+  late final $MetricDependenciesTableTable metricDependenciesTable =
+      $MetricDependenciesTableTable(this);
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -2846,6 +3262,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_action_metrics_metric',
     'CREATE INDEX idx_action_metrics_metric ON action_metrics (metric_id)',
   );
+  late final Index idxMetricDepDependsOn = Index(
+    'idx_metric_dep_depends_on',
+    'CREATE INDEX idx_metric_dep_depends_on ON metric_dependencies (depends_on_id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2858,11 +3278,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     metricsTable,
     actionMetricsTable,
     actionTemplatesTable,
+    metricDependenciesTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxDepSuccessor,
     idxOccurrenceAction,
     idxActionMetricsMetric,
+    idxMetricDepDependsOn,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -2907,6 +3329,20 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('action_metrics', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'metrics',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('metric_dependencies', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'metrics',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('metric_dependencies', kind: UpdateKind.delete)],
     ),
   ]);
 }
@@ -4911,8 +5347,11 @@ typedef $$MetricsTableTableCreateCompanionBuilder =
       required String id,
       required String name,
       Value<double> weight,
-      Value<String?> leading,
-      Value<int?> targetIntervalDays,
+      Value<String> kind,
+      Value<String?> timeWindow,
+      Value<double> target,
+      Value<bool> isMain,
+      Value<int> importanceLevel,
       Value<int> rowid,
     });
 typedef $$MetricsTableTableUpdateCompanionBuilder =
@@ -4920,8 +5359,11 @@ typedef $$MetricsTableTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> name,
       Value<double> weight,
-      Value<String?> leading,
-      Value<int?> targetIntervalDays,
+      Value<String> kind,
+      Value<String?> timeWindow,
+      Value<double> target,
+      Value<bool> isMain,
+      Value<int> importanceLevel,
       Value<int> rowid,
     });
 
@@ -4944,6 +5386,54 @@ final class $$MetricsTableTableReferences
 
     final cache = $_typedResult.readTableOrNull(
       _actionMetricsTableRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<
+    $MetricDependenciesTableTable,
+    List<MetricDependency>
+  >
+  _dependentMetricLinksTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.metricDependenciesTable,
+    aliasName: 'metrics__id__metric_dependencies__metric_id',
+  );
+
+  $$MetricDependenciesTableTableProcessedTableManager get dependentMetricLinks {
+    final manager = $$MetricDependenciesTableTableTableManager(
+      $_db,
+      $_db.metricDependenciesTable,
+    ).filter((f) => f.metricId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _dependentMetricLinksTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<
+    $MetricDependenciesTableTable,
+    List<MetricDependency>
+  >
+  _contributingMetricLinksTable(_$AppDatabase db) =>
+      MultiTypedResultKey.fromTable(
+        db.metricDependenciesTable,
+        aliasName: 'metrics__id__metric_dependencies__depends_on_id',
+      );
+
+  $$MetricDependenciesTableTableProcessedTableManager
+  get contributingMetricLinks {
+    final manager = $$MetricDependenciesTableTableTableManager(
+      $_db,
+      $_db.metricDependenciesTable,
+    ).filter((f) => f.dependsOnId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _contributingMetricLinksTable($_db),
     );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
@@ -4975,13 +5465,28 @@ class $$MetricsTableTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<String> get leading => $composableBuilder(
-    column: $table.leading,
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<int> get targetIntervalDays => $composableBuilder(
-    column: $table.targetIntervalDays,
+  ColumnFilters<String> get timeWindow => $composableBuilder(
+    column: $table.timeWindow,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get target => $composableBuilder(
+    column: $table.target,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isMain => $composableBuilder(
+    column: $table.isMain,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get importanceLevel => $composableBuilder(
+    column: $table.importanceLevel,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5007,6 +5512,58 @@ class $$MetricsTableTableFilterComposer
                 $removeJoinBuilderFromRootComposer,
           ),
     );
+    return f(composer);
+  }
+
+  Expression<bool> dependentMetricLinks(
+    Expression<bool> Function($$MetricDependenciesTableTableFilterComposer f) f,
+  ) {
+    final $$MetricDependenciesTableTableFilterComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.metricDependenciesTable,
+          getReferencedColumn: (t) => t.metricId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$MetricDependenciesTableTableFilterComposer(
+                $db: $db,
+                $table: $db.metricDependenciesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
+
+  Expression<bool> contributingMetricLinks(
+    Expression<bool> Function($$MetricDependenciesTableTableFilterComposer f) f,
+  ) {
+    final $$MetricDependenciesTableTableFilterComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.metricDependenciesTable,
+          getReferencedColumn: (t) => t.dependsOnId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$MetricDependenciesTableTableFilterComposer(
+                $db: $db,
+                $table: $db.metricDependenciesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
     return f(composer);
   }
 }
@@ -5035,13 +5592,28 @@ class $$MetricsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get leading => $composableBuilder(
-    column: $table.leading,
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<int> get targetIntervalDays => $composableBuilder(
-    column: $table.targetIntervalDays,
+  ColumnOrderings<String> get timeWindow => $composableBuilder(
+    column: $table.timeWindow,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get target => $composableBuilder(
+    column: $table.target,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isMain => $composableBuilder(
+    column: $table.isMain,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get importanceLevel => $composableBuilder(
+    column: $table.importanceLevel,
     builder: (column) => ColumnOrderings(column),
   );
 }
@@ -5064,11 +5636,22 @@ class $$MetricsTableTableAnnotationComposer
   GeneratedColumn<double> get weight =>
       $composableBuilder(column: $table.weight, builder: (column) => column);
 
-  GeneratedColumn<String> get leading =>
-      $composableBuilder(column: $table.leading, builder: (column) => column);
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
 
-  GeneratedColumn<int> get targetIntervalDays => $composableBuilder(
-    column: $table.targetIntervalDays,
+  GeneratedColumn<String> get timeWindow => $composableBuilder(
+    column: $table.timeWindow,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get target =>
+      $composableBuilder(column: $table.target, builder: (column) => column);
+
+  GeneratedColumn<bool> get isMain =>
+      $composableBuilder(column: $table.isMain, builder: (column) => column);
+
+  GeneratedColumn<int> get importanceLevel => $composableBuilder(
+    column: $table.importanceLevel,
     builder: (column) => column,
   );
 
@@ -5097,6 +5680,60 @@ class $$MetricsTableTableAnnotationComposer
         );
     return f(composer);
   }
+
+  Expression<T> dependentMetricLinks<T extends Object>(
+    Expression<T> Function($$MetricDependenciesTableTableAnnotationComposer a)
+    f,
+  ) {
+    final $$MetricDependenciesTableTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.metricDependenciesTable,
+          getReferencedColumn: (t) => t.metricId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$MetricDependenciesTableTableAnnotationComposer(
+                $db: $db,
+                $table: $db.metricDependenciesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
+
+  Expression<T> contributingMetricLinks<T extends Object>(
+    Expression<T> Function($$MetricDependenciesTableTableAnnotationComposer a)
+    f,
+  ) {
+    final $$MetricDependenciesTableTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.metricDependenciesTable,
+          getReferencedColumn: (t) => t.dependsOnId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$MetricDependenciesTableTableAnnotationComposer(
+                $db: $db,
+                $table: $db.metricDependenciesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
 }
 
 class $$MetricsTableTableTableManager
@@ -5112,7 +5749,11 @@ class $$MetricsTableTableTableManager
           $$MetricsTableTableUpdateCompanionBuilder,
           (Metric, $$MetricsTableTableReferences),
           Metric,
-          PrefetchHooks Function({bool actionMetricsTableRefs})
+          PrefetchHooks Function({
+            bool actionMetricsTableRefs,
+            bool dependentMetricLinks,
+            bool contributingMetricLinks,
+          })
         > {
   $$MetricsTableTableTableManager(_$AppDatabase db, $MetricsTableTable table)
     : super(
@@ -5130,15 +5771,21 @@ class $$MetricsTableTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<double> weight = const Value.absent(),
-                Value<String?> leading = const Value.absent(),
-                Value<int?> targetIntervalDays = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String?> timeWindow = const Value.absent(),
+                Value<double> target = const Value.absent(),
+                Value<bool> isMain = const Value.absent(),
+                Value<int> importanceLevel = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetricsTableCompanion(
                 id: id,
                 name: name,
                 weight: weight,
-                leading: leading,
-                targetIntervalDays: targetIntervalDays,
+                kind: kind,
+                timeWindow: timeWindow,
+                target: target,
+                isMain: isMain,
+                importanceLevel: importanceLevel,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5146,15 +5793,21 @@ class $$MetricsTableTableTableManager
                 required String id,
                 required String name,
                 Value<double> weight = const Value.absent(),
-                Value<String?> leading = const Value.absent(),
-                Value<int?> targetIntervalDays = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String?> timeWindow = const Value.absent(),
+                Value<double> target = const Value.absent(),
+                Value<bool> isMain = const Value.absent(),
+                Value<int> importanceLevel = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetricsTableCompanion.insert(
                 id: id,
                 name: name,
                 weight: weight,
-                leading: leading,
-                targetIntervalDays: targetIntervalDays,
+                kind: kind,
+                timeWindow: timeWindow,
+                target: target,
+                isMain: isMain,
+                importanceLevel: importanceLevel,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -5165,38 +5818,89 @@ class $$MetricsTableTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({actionMetricsTableRefs = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [
-                if (actionMetricsTableRefs) db.actionMetricsTable,
-              ],
-              addJoins: null,
-              getPrefetchedDataCallback: (items) async {
-                return [
-                  if (actionMetricsTableRefs)
-                    await $_getPrefetchedData<
-                      Metric,
-                      $MetricsTableTable,
-                      ActionMetric
-                    >(
-                      currentTable: table,
-                      referencedTable: $$MetricsTableTableReferences
-                          ._actionMetricsTableRefsTable(db),
-                      managerFromTypedResult: (p0) =>
-                          $$MetricsTableTableReferences(
-                            db,
-                            table,
-                            p0,
-                          ).actionMetricsTableRefs,
-                      referencedItemsForCurrentItem: (item, referencedItems) =>
-                          referencedItems.where((e) => e.metricId == item.id),
-                      typedResults: items,
-                    ),
-                ];
+          prefetchHooksCallback:
+              ({
+                actionMetricsTableRefs = false,
+                dependentMetricLinks = false,
+                contributingMetricLinks = false,
+              }) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (actionMetricsTableRefs) db.actionMetricsTable,
+                    if (dependentMetricLinks) db.metricDependenciesTable,
+                    if (contributingMetricLinks) db.metricDependenciesTable,
+                  ],
+                  addJoins: null,
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (actionMetricsTableRefs)
+                        await $_getPrefetchedData<
+                          Metric,
+                          $MetricsTableTable,
+                          ActionMetric
+                        >(
+                          currentTable: table,
+                          referencedTable: $$MetricsTableTableReferences
+                              ._actionMetricsTableRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$MetricsTableTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).actionMetricsTableRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.metricId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (dependentMetricLinks)
+                        await $_getPrefetchedData<
+                          Metric,
+                          $MetricsTableTable,
+                          MetricDependency
+                        >(
+                          currentTable: table,
+                          referencedTable: $$MetricsTableTableReferences
+                              ._dependentMetricLinksTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$MetricsTableTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).dependentMetricLinks,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.metricId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (contributingMetricLinks)
+                        await $_getPrefetchedData<
+                          Metric,
+                          $MetricsTableTable,
+                          MetricDependency
+                        >(
+                          currentTable: table,
+                          referencedTable: $$MetricsTableTableReferences
+                              ._contributingMetricLinksTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$MetricsTableTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).contributingMetricLinks,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.dependsOnId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
+                  },
+                );
               },
-            );
-          },
         ),
       );
 }
@@ -5213,7 +5917,11 @@ typedef $$MetricsTableTableProcessedTableManager =
       $$MetricsTableTableUpdateCompanionBuilder,
       (Metric, $$MetricsTableTableReferences),
       Metric,
-      PrefetchHooks Function({bool actionMetricsTableRefs})
+      PrefetchHooks Function({
+        bool actionMetricsTableRefs,
+        bool dependentMetricLinks,
+        bool contributingMetricLinks,
+      })
     >;
 typedef $$ActionMetricsTableTableCreateCompanionBuilder =
     ActionMetricsTableCompanion Function({
@@ -5775,6 +6483,394 @@ typedef $$ActionTemplatesTableTableProcessedTableManager =
       ActionTemplate,
       PrefetchHooks Function()
     >;
+typedef $$MetricDependenciesTableTableCreateCompanionBuilder =
+    MetricDependenciesTableCompanion Function({
+      required String id,
+      required String metricId,
+      required String dependsOnId,
+      Value<int> rowid,
+    });
+typedef $$MetricDependenciesTableTableUpdateCompanionBuilder =
+    MetricDependenciesTableCompanion Function({
+      Value<String> id,
+      Value<String> metricId,
+      Value<String> dependsOnId,
+      Value<int> rowid,
+    });
+
+final class $$MetricDependenciesTableTableReferences
+    extends
+        BaseReferences<
+          _$AppDatabase,
+          $MetricDependenciesTableTable,
+          MetricDependency
+        > {
+  $$MetricDependenciesTableTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $MetricsTableTable _metricIdTable(_$AppDatabase db) => db.metricsTable
+      .createAlias('metric_dependencies__metric_id__metrics__id');
+
+  $$MetricsTableTableProcessedTableManager get metricId {
+    final $_column = $_itemColumn<String>('metric_id')!;
+
+    final manager = $$MetricsTableTableTableManager(
+      $_db,
+      $_db.metricsTable,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_metricIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $MetricsTableTable _dependsOnIdTable(_$AppDatabase db) => db
+      .metricsTable
+      .createAlias('metric_dependencies__depends_on_id__metrics__id');
+
+  $$MetricsTableTableProcessedTableManager get dependsOnId {
+    final $_column = $_itemColumn<String>('depends_on_id')!;
+
+    final manager = $$MetricsTableTableTableManager(
+      $_db,
+      $_db.metricsTable,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_dependsOnIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$MetricDependenciesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $MetricDependenciesTableTable> {
+  $$MetricDependenciesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$MetricsTableTableFilterComposer get metricId {
+    final $$MetricsTableTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.metricId,
+      referencedTable: $db.metricsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MetricsTableTableFilterComposer(
+            $db: $db,
+            $table: $db.metricsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$MetricsTableTableFilterComposer get dependsOnId {
+    final $$MetricsTableTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.dependsOnId,
+      referencedTable: $db.metricsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MetricsTableTableFilterComposer(
+            $db: $db,
+            $table: $db.metricsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MetricDependenciesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $MetricDependenciesTableTable> {
+  $$MetricDependenciesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$MetricsTableTableOrderingComposer get metricId {
+    final $$MetricsTableTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.metricId,
+      referencedTable: $db.metricsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MetricsTableTableOrderingComposer(
+            $db: $db,
+            $table: $db.metricsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$MetricsTableTableOrderingComposer get dependsOnId {
+    final $$MetricsTableTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.dependsOnId,
+      referencedTable: $db.metricsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MetricsTableTableOrderingComposer(
+            $db: $db,
+            $table: $db.metricsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MetricDependenciesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MetricDependenciesTableTable> {
+  $$MetricDependenciesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  $$MetricsTableTableAnnotationComposer get metricId {
+    final $$MetricsTableTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.metricId,
+      referencedTable: $db.metricsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MetricsTableTableAnnotationComposer(
+            $db: $db,
+            $table: $db.metricsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$MetricsTableTableAnnotationComposer get dependsOnId {
+    final $$MetricsTableTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.dependsOnId,
+      referencedTable: $db.metricsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MetricsTableTableAnnotationComposer(
+            $db: $db,
+            $table: $db.metricsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MetricDependenciesTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MetricDependenciesTableTable,
+          MetricDependency,
+          $$MetricDependenciesTableTableFilterComposer,
+          $$MetricDependenciesTableTableOrderingComposer,
+          $$MetricDependenciesTableTableAnnotationComposer,
+          $$MetricDependenciesTableTableCreateCompanionBuilder,
+          $$MetricDependenciesTableTableUpdateCompanionBuilder,
+          (MetricDependency, $$MetricDependenciesTableTableReferences),
+          MetricDependency,
+          PrefetchHooks Function({bool metricId, bool dependsOnId})
+        > {
+  $$MetricDependenciesTableTableTableManager(
+    _$AppDatabase db,
+    $MetricDependenciesTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MetricDependenciesTableTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$MetricDependenciesTableTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$MetricDependenciesTableTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> metricId = const Value.absent(),
+                Value<String> dependsOnId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => MetricDependenciesTableCompanion(
+                id: id,
+                metricId: metricId,
+                dependsOnId: dependsOnId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String metricId,
+                required String dependsOnId,
+                Value<int> rowid = const Value.absent(),
+              }) => MetricDependenciesTableCompanion.insert(
+                id: id,
+                metricId: metricId,
+                dependsOnId: dependsOnId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$MetricDependenciesTableTable, MetricDependency>(
+                    table,
+                  ),
+                  $$MetricDependenciesTableTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({metricId = false, dependsOnId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (metricId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.metricId,
+                        referencedTable:
+                            $$MetricDependenciesTableTableReferences
+                                ._metricIdTable(db),
+                        referencedColumn:
+                            $$MetricDependenciesTableTableReferences
+                                ._metricIdTable(db)
+                                .id,
+                      ) as T;
+                    }
+                    if (dependsOnId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.dependsOnId,
+                        referencedTable:
+                            $$MetricDependenciesTableTableReferences
+                                ._dependsOnIdTable(db),
+                        referencedColumn:
+                            $$MetricDependenciesTableTableReferences
+                                ._dependsOnIdTable(db)
+                                .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$MetricDependenciesTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MetricDependenciesTableTable,
+      MetricDependency,
+      $$MetricDependenciesTableTableFilterComposer,
+      $$MetricDependenciesTableTableOrderingComposer,
+      $$MetricDependenciesTableTableAnnotationComposer,
+      $$MetricDependenciesTableTableCreateCompanionBuilder,
+      $$MetricDependenciesTableTableUpdateCompanionBuilder,
+      (MetricDependency, $$MetricDependenciesTableTableReferences),
+      MetricDependency,
+      PrefetchHooks Function({bool metricId, bool dependsOnId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -5802,4 +6898,9 @@ class $AppDatabaseManager {
       $$ActionMetricsTableTableTableManager(_db, _db.actionMetricsTable);
   $$ActionTemplatesTableTableTableManager get actionTemplatesTable =>
       $$ActionTemplatesTableTableTableManager(_db, _db.actionTemplatesTable);
+  $$MetricDependenciesTableTableTableManager get metricDependenciesTable =>
+      $$MetricDependenciesTableTableTableManager(
+        _db,
+        _db.metricDependenciesTable,
+      );
 }

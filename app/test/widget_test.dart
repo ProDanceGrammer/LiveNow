@@ -32,7 +32,7 @@ void main() {
     expect(find.text('Most Important'), findsOneWidget);
     expect(find.text('Calendar'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
-    expect(find.text('Metrics'), findsOneWidget);
+    expect(find.text('Growth directions'), findsOneWidget);
     expect(find.text('Templates'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.add));

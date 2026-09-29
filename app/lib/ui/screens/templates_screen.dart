@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ids.dart';
 import '../../data/database.dart';
 import '../providers.dart';
+import '../widgets/metric_picker.dart';
 
 const _priorities = [
   'A1',
@@ -144,8 +145,6 @@ class _TemplateEditorDialogState
 
   @override
   Widget build(BuildContext context) {
-    final metricsAsync = ref.watch(metricsProvider);
-
     return AlertDialog(
       title: Text(widget.existing == null ? 'New template' : 'Edit template'),
       content: SizedBox(
@@ -184,30 +183,10 @@ class _TemplateEditorDialogState
                   onChanged: (v) => setState(() => _isAllDay = v),
                 ),
                 const SizedBox(height: 16),
-                Text('Metrics', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                metricsAsync.when(
-                  data: (metrics) => metrics.isEmpty
-                      ? const Text('No metrics yet.')
-                      : Wrap(
-                          spacing: 8,
-                          children: [
-                            for (final m in metrics)
-                              FilterChip(
-                                label: Text(m.name),
-                                selected: _selectedMetricIds.contains(m.id),
-                                onSelected: (selected) => setState(() {
-                                  if (selected) {
-                                    _selectedMetricIds.add(m.id);
-                                  } else {
-                                    _selectedMetricIds.remove(m.id);
-                                  }
-                                }),
-                              ),
-                          ],
-                        ),
-                  loading: () => const LinearProgressIndicator(),
-                  error: (e, _) => Text('Error: $e'),
+                MetricPicker(
+                  label: 'Growth directions',
+                  selectedIds: _selectedMetricIds,
+                  onChanged: (ids) => setState(() => _selectedMetricIds = ids),
                 ),
               ],
             ),

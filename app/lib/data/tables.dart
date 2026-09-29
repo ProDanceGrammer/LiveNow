@@ -133,7 +133,21 @@ class ActionOccurrencesTable extends Table {
   ];
 }
 
-/// A life-balance metric an action can increment (e.g. health, learning).
+/// A growth direction ("metric"): a personal consistent goal such as "I sleep
+/// enough". Actions increment it (see `action_metrics`); its progress, weight
+/// and urgency are computed by `domain/growth_rules.dart`.
+///
+/// - `kind`: `boolean` (progress is derived from linked actions or from the
+///   directions it depends on), `count` (each finished action counts 1) or
+///   `hours` (finished actions count their duration).
+/// - `time_window`: how far back finished actions count (`week`, `month`,
+///   `year`, `five_years`); null for boolean directions. Named `time_window`
+///   because `window` is a reserved SQL word.
+/// - `target`: the amount that means 100% progress for count/hours.
+/// - `is_main`: a main growth direction, always weighing 1000.
+/// - `weight` and `importance_level` are derived caches, rewritten by
+///   `MetricService.recomputeWeights()` whenever the graph or a main flag
+///   changes (so SQL such as the Most Important ranking can read them).
 @DataClassName('Metric')
 class MetricsTable extends Table {
   @override
@@ -142,11 +156,49 @@ class MetricsTable extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
   RealColumn get weight => real().withDefault(const Constant(0))();
-  TextColumn get leading => text().nullable()();
-  IntColumn get targetIntervalDays => integer().nullable()();
+  TextColumn get kind => text().withDefault(const Constant('boolean'))();
+  TextColumn get timeWindow => text().nullable()();
+  RealColumn get target => real().withDefault(const Constant(1))();
+  BoolColumn get isMain => boolean().withDefault(const Constant(false))();
+  IntColumn get importanceLevel => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (kind IN ('boolean','count','hours'))",
+    "CHECK (time_window IS NULL OR time_window IN "
+        "('week','month','year','five_years'))",
+    "CHECK (kind = 'boolean' OR time_window IS NOT NULL)",
+  ];
+}
+
+/// "[metric_id] depends on [depends_on_id]" — equivalently, depends_on_id
+/// *leads to* metric_id (it is a sub-direction of it). A graph, not a tree:
+/// a direction can lead to several others. Kept acyclic by `MetricService`.
+@DataClassName('MetricDependency')
+@TableIndex(name: 'idx_metric_dep_depends_on', columns: {#dependsOnId})
+class MetricDependenciesTable extends Table {
+  @override
+  String get tableName => 'metric_dependencies';
+
+  TextColumn get id => text()();
+  @ReferenceName('dependentMetricLinks')
+  TextColumn get metricId =>
+      text().references(MetricsTable, #id, onDelete: KeyAction.cascade)();
+  @ReferenceName('contributingMetricLinks')
+  TextColumn get dependsOnId =>
+      text().references(MetricsTable, #id, onDelete: KeyAction.cascade)();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    'UNIQUE (metric_id, depends_on_id)',
+    'CHECK (metric_id <> depends_on_id)',
+  ];
 }
 
 /// Join table: which metrics an action increments.

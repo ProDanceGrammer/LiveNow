@@ -3,6 +3,8 @@ import 'package:timezone/timezone.dart' as tz;
 import '../../core/settings.dart';
 import '../../domain/duration_rules.dart';
 
+export '../../core/local_time.dart' show calendarAddDays, localDayStart;
+
 /// Pixel height of one hour in the time grid; 10 minutes = 8 px.
 const double kHourHeight = 48;
 const double kPxPerMinute = kHourHeight / 60;
@@ -63,18 +65,8 @@ int minutesOfDay(DateTime utc) {
   return l.hour * 60 + l.minute;
 }
 
-/// UTC instant of local midnight [days] days after the local midnight [utcMidnight]
-/// (DST-safe: shifts calendar days, not 24 h blocks).
-DateTime calendarAddDays(DateTime utcMidnight, int days) {
-  final l = tz.TZDateTime.from(utcMidnight, _location);
-  return tz.TZDateTime(_location, l.year, l.month, l.day + days).toUtc();
-}
-
-/// UTC instant of local midnight of the day containing [utc].
-DateTime localDayStart(DateTime utc) {
-  final l = tz.TZDateTime.from(utc, _location);
-  return tz.TZDateTime(_location, l.year, l.month, l.day).toUtc();
-}
+// `calendarAddDays` and `localDayStart` live in core/local_time.dart (the
+// growth-direction rules need them too); re-exported below for the calendar.
 
 /// Zero-based day column of [utc] relative to [rangeStartUtc] (may be
 /// negative or beyond the range).
