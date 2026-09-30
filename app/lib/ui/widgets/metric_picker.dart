@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
 import '../../domain/growth_rules.dart';
+import '../dialog_stack.dart';
 import '../providers.dart';
 
 /// Chips for the chosen growth directions plus an "Add" button that opens a
@@ -16,12 +17,17 @@ class MetricPicker extends ConsumerWidget {
   /// A direction that must not be offered (the one being edited).
   final String? excludeId;
 
+  /// When set, tapping a chip's label opens that direction (the chip's x
+  /// still removes it).
+  final ValueChanged<Metric>? onOpen;
+
   const MetricPicker({
     super.key,
     required this.label,
     required this.selectedIds,
     required this.onChanged,
     this.excludeId,
+    this.onOpen,
   });
 
   @override
@@ -48,7 +54,9 @@ class MetricPicker extends ConsumerWidget {
             children: [
               for (final m in chosen)
                 InputChip(
-                  label: Text(m.name),
+                  label: Text(metricLabel(m.name, m.icon)),
+                  tooltip: onOpen == null ? null : 'Open this direction',
+                  onPressed: onOpen == null ? null : () => onOpen!(m),
                   onDeleted: () => onChanged({...selectedIds}..remove(m.id)),
                 ),
             ],
@@ -57,7 +65,7 @@ class MetricPicker extends ConsumerWidget {
           icon: const Icon(Icons.add),
           label: const Text('Add…'),
           onPressed: () async {
-            final result = await showDialog<Set<String>>(
+            final result = await showStackedDialog<Set<String>>(
               context: context,
               builder: (_) => _MetricSearchDialog(
                 metrics: [
@@ -127,7 +135,7 @@ class _MetricSearchDialogState extends State<_MetricSearchDialog> {
                         return CheckboxListTile(
                           dense: true,
                           value: _selected.contains(m.id),
-                          title: Text(m.name),
+                          title: Text(metricLabel(m.name, m.icon)),
                           subtitle: Text(_subtitle(m)),
                           onChanged: (on) => setState(() {
                             if (on == true) {

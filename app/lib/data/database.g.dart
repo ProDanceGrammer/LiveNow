@@ -441,6 +441,15 @@ class $ActionsTableTable extends ActionsTable
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _completedAtMeta = const VerificationMeta(
     'completedAt',
   );
@@ -512,6 +521,7 @@ class $ActionsTableTable extends ActionsTable
     isAllDay,
     estimatedMinutes,
     resultNote,
+    notes,
     completedAt,
     sequenceNumber,
     countableActivityId,
@@ -601,6 +611,12 @@ class $ActionsTableTable extends ActionsTable
       context.handle(
         _resultNoteMeta,
         resultNote.isAcceptableOrUnknown(data['result_note']!, _resultNoteMeta),
+      );
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
       );
     }
     if (data.containsKey('completed_at')) {
@@ -699,6 +715,10 @@ class $ActionsTableTable extends ActionsTable
         DriftSqlType.string,
         data['${effectivePrefix}result_note'],
       ),
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
       completedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}completed_at'],
@@ -744,6 +764,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   final bool isAllDay;
   final int? estimatedMinutes;
   final String? resultNote;
+
+  /// The action's rich-text description (checklists, bullets, headings…):
+  /// the editor's Document JSON, or null when empty. Written by the notes
+  /// editor in the action dialog; `result_note` stays a separate, unused
+  /// plain "outcome" field.
+  final String? notes;
   final String? completedAt;
 
   /// Position in a "Continue with Same Action" chain (`[#2] Read a Bible`).
@@ -767,6 +793,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     required this.isAllDay,
     this.estimatedMinutes,
     this.resultNote,
+    this.notes,
     this.completedAt,
     this.sequenceNumber,
     this.countableActivityId,
@@ -798,6 +825,9 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     }
     if (!nullToAbsent || resultNote != null) {
       map['result_note'] = Variable<String>(resultNote);
+    }
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
     }
     if (!nullToAbsent || completedAt != null) {
       map['completed_at'] = Variable<String>(completedAt);
@@ -838,6 +868,9 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       resultNote: resultNote == null && nullToAbsent
           ? const Value.absent()
           : Value(resultNote),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
       completedAt: completedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(completedAt),
@@ -869,6 +902,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       isAllDay: serializer.fromJson<bool>(json['isAllDay']),
       estimatedMinutes: serializer.fromJson<int?>(json['estimatedMinutes']),
       resultNote: serializer.fromJson<String?>(json['resultNote']),
+      notes: serializer.fromJson<String?>(json['notes']),
       completedAt: serializer.fromJson<String?>(json['completedAt']),
       sequenceNumber: serializer.fromJson<int?>(json['sequenceNumber']),
       countableActivityId: serializer.fromJson<String?>(
@@ -893,6 +927,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       'isAllDay': serializer.toJson<bool>(isAllDay),
       'estimatedMinutes': serializer.toJson<int?>(estimatedMinutes),
       'resultNote': serializer.toJson<String?>(resultNote),
+      'notes': serializer.toJson<String?>(notes),
       'completedAt': serializer.toJson<String?>(completedAt),
       'sequenceNumber': serializer.toJson<int?>(sequenceNumber),
       'countableActivityId': serializer.toJson<String?>(countableActivityId),
@@ -913,6 +948,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     bool? isAllDay,
     Value<int?> estimatedMinutes = const Value.absent(),
     Value<String?> resultNote = const Value.absent(),
+    Value<String?> notes = const Value.absent(),
     Value<String?> completedAt = const Value.absent(),
     Value<int?> sequenceNumber = const Value.absent(),
     Value<String?> countableActivityId = const Value.absent(),
@@ -932,6 +968,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
         ? estimatedMinutes.value
         : this.estimatedMinutes,
     resultNote: resultNote.present ? resultNote.value : this.resultNote,
+    notes: notes.present ? notes.value : this.notes,
     completedAt: completedAt.present ? completedAt.value : this.completedAt,
     sequenceNumber: sequenceNumber.present
         ? sequenceNumber.value
@@ -963,6 +1000,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       resultNote: data.resultNote.present
           ? data.resultNote.value
           : this.resultNote,
+      notes: data.notes.present ? data.notes.value : this.notes,
       completedAt: data.completedAt.present
           ? data.completedAt.value
           : this.completedAt,
@@ -991,6 +1029,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           ..write('isAllDay: $isAllDay, ')
           ..write('estimatedMinutes: $estimatedMinutes, ')
           ..write('resultNote: $resultNote, ')
+          ..write('notes: $notes, ')
           ..write('completedAt: $completedAt, ')
           ..write('sequenceNumber: $sequenceNumber, ')
           ..write('countableActivityId: $countableActivityId, ')
@@ -1013,6 +1052,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     isAllDay,
     estimatedMinutes,
     resultNote,
+    notes,
     completedAt,
     sequenceNumber,
     countableActivityId,
@@ -1034,6 +1074,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           other.isAllDay == this.isAllDay &&
           other.estimatedMinutes == this.estimatedMinutes &&
           other.resultNote == this.resultNote &&
+          other.notes == this.notes &&
           other.completedAt == this.completedAt &&
           other.sequenceNumber == this.sequenceNumber &&
           other.countableActivityId == this.countableActivityId &&
@@ -1053,6 +1094,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   final Value<bool> isAllDay;
   final Value<int?> estimatedMinutes;
   final Value<String?> resultNote;
+  final Value<String?> notes;
   final Value<String?> completedAt;
   final Value<int?> sequenceNumber;
   final Value<String?> countableActivityId;
@@ -1071,6 +1113,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.isAllDay = const Value.absent(),
     this.estimatedMinutes = const Value.absent(),
     this.resultNote = const Value.absent(),
+    this.notes = const Value.absent(),
     this.completedAt = const Value.absent(),
     this.sequenceNumber = const Value.absent(),
     this.countableActivityId = const Value.absent(),
@@ -1090,6 +1133,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.isAllDay = const Value.absent(),
     this.estimatedMinutes = const Value.absent(),
     this.resultNote = const Value.absent(),
+    this.notes = const Value.absent(),
     this.completedAt = const Value.absent(),
     this.sequenceNumber = const Value.absent(),
     this.countableActivityId = const Value.absent(),
@@ -1112,6 +1156,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Expression<bool>? isAllDay,
     Expression<int>? estimatedMinutes,
     Expression<String>? resultNote,
+    Expression<String>? notes,
     Expression<String>? completedAt,
     Expression<int>? sequenceNumber,
     Expression<String>? countableActivityId,
@@ -1131,6 +1176,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       if (isAllDay != null) 'is_all_day': isAllDay,
       if (estimatedMinutes != null) 'estimated_minutes': estimatedMinutes,
       if (resultNote != null) 'result_note': resultNote,
+      if (notes != null) 'notes': notes,
       if (completedAt != null) 'completed_at': completedAt,
       if (sequenceNumber != null) 'sequence_number': sequenceNumber,
       if (countableActivityId != null)
@@ -1153,6 +1199,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Value<bool>? isAllDay,
     Value<int?>? estimatedMinutes,
     Value<String?>? resultNote,
+    Value<String?>? notes,
     Value<String?>? completedAt,
     Value<int?>? sequenceNumber,
     Value<String?>? countableActivityId,
@@ -1172,6 +1219,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       isAllDay: isAllDay ?? this.isAllDay,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       resultNote: resultNote ?? this.resultNote,
+      notes: notes ?? this.notes,
       completedAt: completedAt ?? this.completedAt,
       sequenceNumber: sequenceNumber ?? this.sequenceNumber,
       countableActivityId: countableActivityId ?? this.countableActivityId,
@@ -1217,6 +1265,9 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     if (resultNote.present) {
       map['result_note'] = Variable<String>(resultNote.value);
     }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
     if (completedAt.present) {
       map['completed_at'] = Variable<String>(completedAt.value);
     }
@@ -1254,6 +1305,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
           ..write('isAllDay: $isAllDay, ')
           ..write('estimatedMinutes: $estimatedMinutes, ')
           ..write('resultNote: $resultNote, ')
+          ..write('notes: $notes, ')
           ..write('completedAt: $completedAt, ')
           ..write('sequenceNumber: $sequenceNumber, ')
           ..write('countableActivityId: $countableActivityId, ')
@@ -2009,6 +2061,33 @@ class $MetricsTableTable extends MetricsTable
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _iconMeta = const VerificationMeta('icon');
+  @override
+  late final GeneratedColumn<String> icon = GeneratedColumn<String>(
+    'icon',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _posXMeta = const VerificationMeta('posX');
+  @override
+  late final GeneratedColumn<double> posX = GeneratedColumn<double>(
+    'pos_x',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _posYMeta = const VerificationMeta('posY');
+  @override
+  late final GeneratedColumn<double> posY = GeneratedColumn<double>(
+    'pos_y',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2019,6 +2098,9 @@ class $MetricsTableTable extends MetricsTable
     target,
     isMain,
     importanceLevel,
+    icon,
+    posX,
+    posY,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2084,6 +2166,24 @@ class $MetricsTableTable extends MetricsTable
         ),
       );
     }
+    if (data.containsKey('icon')) {
+      context.handle(
+        _iconMeta,
+        icon.isAcceptableOrUnknown(data['icon']!, _iconMeta),
+      );
+    }
+    if (data.containsKey('pos_x')) {
+      context.handle(
+        _posXMeta,
+        posX.isAcceptableOrUnknown(data['pos_x']!, _posXMeta),
+      );
+    }
+    if (data.containsKey('pos_y')) {
+      context.handle(
+        _posYMeta,
+        posY.isAcceptableOrUnknown(data['pos_y']!, _posYMeta),
+      );
+    }
     return context;
   }
 
@@ -2125,6 +2225,18 @@ class $MetricsTableTable extends MetricsTable
         DriftSqlType.int,
         data['${effectivePrefix}importance_level'],
       )!,
+      icon: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}icon'],
+      ),
+      posX: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}pos_x'],
+      ),
+      posY: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}pos_y'],
+      ),
     );
   }
 
@@ -2143,6 +2255,11 @@ class Metric extends DataClass implements Insertable<Metric> {
   final double target;
   final bool isMain;
   final int importanceLevel;
+  final String? icon;
+
+  /// Where the node sits on the Mindmap canvas (null = not placed yet).
+  final double? posX;
+  final double? posY;
   const Metric({
     required this.id,
     required this.name,
@@ -2152,6 +2269,9 @@ class Metric extends DataClass implements Insertable<Metric> {
     required this.target,
     required this.isMain,
     required this.importanceLevel,
+    this.icon,
+    this.posX,
+    this.posY,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2166,6 +2286,15 @@ class Metric extends DataClass implements Insertable<Metric> {
     map['target'] = Variable<double>(target);
     map['is_main'] = Variable<bool>(isMain);
     map['importance_level'] = Variable<int>(importanceLevel);
+    if (!nullToAbsent || icon != null) {
+      map['icon'] = Variable<String>(icon);
+    }
+    if (!nullToAbsent || posX != null) {
+      map['pos_x'] = Variable<double>(posX);
+    }
+    if (!nullToAbsent || posY != null) {
+      map['pos_y'] = Variable<double>(posY);
+    }
     return map;
   }
 
@@ -2181,6 +2310,9 @@ class Metric extends DataClass implements Insertable<Metric> {
       target: Value(target),
       isMain: Value(isMain),
       importanceLevel: Value(importanceLevel),
+      icon: icon == null && nullToAbsent ? const Value.absent() : Value(icon),
+      posX: posX == null && nullToAbsent ? const Value.absent() : Value(posX),
+      posY: posY == null && nullToAbsent ? const Value.absent() : Value(posY),
     );
   }
 
@@ -2198,6 +2330,9 @@ class Metric extends DataClass implements Insertable<Metric> {
       target: serializer.fromJson<double>(json['target']),
       isMain: serializer.fromJson<bool>(json['isMain']),
       importanceLevel: serializer.fromJson<int>(json['importanceLevel']),
+      icon: serializer.fromJson<String?>(json['icon']),
+      posX: serializer.fromJson<double?>(json['posX']),
+      posY: serializer.fromJson<double?>(json['posY']),
     );
   }
   @override
@@ -2212,6 +2347,9 @@ class Metric extends DataClass implements Insertable<Metric> {
       'target': serializer.toJson<double>(target),
       'isMain': serializer.toJson<bool>(isMain),
       'importanceLevel': serializer.toJson<int>(importanceLevel),
+      'icon': serializer.toJson<String?>(icon),
+      'posX': serializer.toJson<double?>(posX),
+      'posY': serializer.toJson<double?>(posY),
     };
   }
 
@@ -2224,6 +2362,9 @@ class Metric extends DataClass implements Insertable<Metric> {
     double? target,
     bool? isMain,
     int? importanceLevel,
+    Value<String?> icon = const Value.absent(),
+    Value<double?> posX = const Value.absent(),
+    Value<double?> posY = const Value.absent(),
   }) => Metric(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -2233,6 +2374,9 @@ class Metric extends DataClass implements Insertable<Metric> {
     target: target ?? this.target,
     isMain: isMain ?? this.isMain,
     importanceLevel: importanceLevel ?? this.importanceLevel,
+    icon: icon.present ? icon.value : this.icon,
+    posX: posX.present ? posX.value : this.posX,
+    posY: posY.present ? posY.value : this.posY,
   );
   Metric copyWithCompanion(MetricsTableCompanion data) {
     return Metric(
@@ -2248,6 +2392,9 @@ class Metric extends DataClass implements Insertable<Metric> {
       importanceLevel: data.importanceLevel.present
           ? data.importanceLevel.value
           : this.importanceLevel,
+      icon: data.icon.present ? data.icon.value : this.icon,
+      posX: data.posX.present ? data.posX.value : this.posX,
+      posY: data.posY.present ? data.posY.value : this.posY,
     );
   }
 
@@ -2261,7 +2408,10 @@ class Metric extends DataClass implements Insertable<Metric> {
           ..write('timeWindow: $timeWindow, ')
           ..write('target: $target, ')
           ..write('isMain: $isMain, ')
-          ..write('importanceLevel: $importanceLevel')
+          ..write('importanceLevel: $importanceLevel, ')
+          ..write('icon: $icon, ')
+          ..write('posX: $posX, ')
+          ..write('posY: $posY')
           ..write(')'))
         .toString();
   }
@@ -2276,6 +2426,9 @@ class Metric extends DataClass implements Insertable<Metric> {
     target,
     isMain,
     importanceLevel,
+    icon,
+    posX,
+    posY,
   );
   @override
   bool operator ==(Object other) =>
@@ -2288,7 +2441,10 @@ class Metric extends DataClass implements Insertable<Metric> {
           other.timeWindow == this.timeWindow &&
           other.target == this.target &&
           other.isMain == this.isMain &&
-          other.importanceLevel == this.importanceLevel);
+          other.importanceLevel == this.importanceLevel &&
+          other.icon == this.icon &&
+          other.posX == this.posX &&
+          other.posY == this.posY);
 }
 
 class MetricsTableCompanion extends UpdateCompanion<Metric> {
@@ -2300,6 +2456,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
   final Value<double> target;
   final Value<bool> isMain;
   final Value<int> importanceLevel;
+  final Value<String?> icon;
+  final Value<double?> posX;
+  final Value<double?> posY;
   final Value<int> rowid;
   const MetricsTableCompanion({
     this.id = const Value.absent(),
@@ -2310,6 +2469,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     this.target = const Value.absent(),
     this.isMain = const Value.absent(),
     this.importanceLevel = const Value.absent(),
+    this.icon = const Value.absent(),
+    this.posX = const Value.absent(),
+    this.posY = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MetricsTableCompanion.insert({
@@ -2321,6 +2483,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     this.target = const Value.absent(),
     this.isMain = const Value.absent(),
     this.importanceLevel = const Value.absent(),
+    this.icon = const Value.absent(),
+    this.posX = const Value.absent(),
+    this.posY = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name);
@@ -2333,6 +2498,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     Expression<double>? target,
     Expression<bool>? isMain,
     Expression<int>? importanceLevel,
+    Expression<String>? icon,
+    Expression<double>? posX,
+    Expression<double>? posY,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2344,6 +2512,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
       if (target != null) 'target': target,
       if (isMain != null) 'is_main': isMain,
       if (importanceLevel != null) 'importance_level': importanceLevel,
+      if (icon != null) 'icon': icon,
+      if (posX != null) 'pos_x': posX,
+      if (posY != null) 'pos_y': posY,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2357,6 +2528,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     Value<double>? target,
     Value<bool>? isMain,
     Value<int>? importanceLevel,
+    Value<String?>? icon,
+    Value<double?>? posX,
+    Value<double?>? posY,
     Value<int>? rowid,
   }) {
     return MetricsTableCompanion(
@@ -2368,6 +2542,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
       target: target ?? this.target,
       isMain: isMain ?? this.isMain,
       importanceLevel: importanceLevel ?? this.importanceLevel,
+      icon: icon ?? this.icon,
+      posX: posX ?? this.posX,
+      posY: posY ?? this.posY,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2399,6 +2576,15 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
     if (importanceLevel.present) {
       map['importance_level'] = Variable<int>(importanceLevel.value);
     }
+    if (icon.present) {
+      map['icon'] = Variable<String>(icon.value);
+    }
+    if (posX.present) {
+      map['pos_x'] = Variable<double>(posX.value);
+    }
+    if (posY.present) {
+      map['pos_y'] = Variable<double>(posY.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2416,6 +2602,9 @@ class MetricsTableCompanion extends UpdateCompanion<Metric> {
           ..write('target: $target, ')
           ..write('isMain: $isMain, ')
           ..write('importanceLevel: $importanceLevel, ')
+          ..write('icon: $icon, ')
+          ..write('posX: $posX, ')
+          ..write('posY: $posY, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3668,6 +3857,7 @@ typedef $$ActionsTableTableCreateCompanionBuilder =
       Value<bool> isAllDay,
       Value<int?> estimatedMinutes,
       Value<String?> resultNote,
+      Value<String?> notes,
       Value<String?> completedAt,
       Value<int?> sequenceNumber,
       Value<String?> countableActivityId,
@@ -3688,6 +3878,7 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
       Value<bool> isAllDay,
       Value<int?> estimatedMinutes,
       Value<String?> resultNote,
+      Value<String?> notes,
       Value<String?> completedAt,
       Value<int?> sequenceNumber,
       Value<String?> countableActivityId,
@@ -3879,6 +4070,11 @@ class $$ActionsTableTableFilterComposer
 
   ColumnFilters<String> get resultNote => $composableBuilder(
     column: $table.resultNote,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4094,6 +4290,11 @@ class $$ActionsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get completedAt => $composableBuilder(
     column: $table.completedAt,
     builder: (column) => ColumnOrderings(column),
@@ -4188,6 +4389,9 @@ class $$ActionsTableTableAnnotationComposer
     column: $table.resultNote,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
 
   GeneratedColumn<String> get completedAt => $composableBuilder(
     column: $table.completedAt,
@@ -4381,6 +4585,7 @@ class $$ActionsTableTableTableManager
                 Value<bool> isAllDay = const Value.absent(),
                 Value<int?> estimatedMinutes = const Value.absent(),
                 Value<String?> resultNote = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> sequenceNumber = const Value.absent(),
                 Value<String?> countableActivityId = const Value.absent(),
@@ -4399,6 +4604,7 @@ class $$ActionsTableTableTableManager
                 isAllDay: isAllDay,
                 estimatedMinutes: estimatedMinutes,
                 resultNote: resultNote,
+                notes: notes,
                 completedAt: completedAt,
                 sequenceNumber: sequenceNumber,
                 countableActivityId: countableActivityId,
@@ -4419,6 +4625,7 @@ class $$ActionsTableTableTableManager
                 Value<bool> isAllDay = const Value.absent(),
                 Value<int?> estimatedMinutes = const Value.absent(),
                 Value<String?> resultNote = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> sequenceNumber = const Value.absent(),
                 Value<String?> countableActivityId = const Value.absent(),
@@ -4437,6 +4644,7 @@ class $$ActionsTableTableTableManager
                 isAllDay: isAllDay,
                 estimatedMinutes: estimatedMinutes,
                 resultNote: resultNote,
+                notes: notes,
                 completedAt: completedAt,
                 sequenceNumber: sequenceNumber,
                 countableActivityId: countableActivityId,
@@ -5352,6 +5560,9 @@ typedef $$MetricsTableTableCreateCompanionBuilder =
       Value<double> target,
       Value<bool> isMain,
       Value<int> importanceLevel,
+      Value<String?> icon,
+      Value<double?> posX,
+      Value<double?> posY,
       Value<int> rowid,
     });
 typedef $$MetricsTableTableUpdateCompanionBuilder =
@@ -5364,6 +5575,9 @@ typedef $$MetricsTableTableUpdateCompanionBuilder =
       Value<double> target,
       Value<bool> isMain,
       Value<int> importanceLevel,
+      Value<String?> icon,
+      Value<double?> posX,
+      Value<double?> posY,
       Value<int> rowid,
     });
 
@@ -5487,6 +5701,21 @@ class $$MetricsTableTableFilterComposer
 
   ColumnFilters<int> get importanceLevel => $composableBuilder(
     column: $table.importanceLevel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get posX => $composableBuilder(
+    column: $table.posX,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get posY => $composableBuilder(
+    column: $table.posY,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5616,6 +5845,21 @@ class $$MetricsTableTableOrderingComposer
     column: $table.importanceLevel,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get posX => $composableBuilder(
+    column: $table.posX,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get posY => $composableBuilder(
+    column: $table.posY,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MetricsTableTableAnnotationComposer
@@ -5654,6 +5898,15 @@ class $$MetricsTableTableAnnotationComposer
     column: $table.importanceLevel,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get icon =>
+      $composableBuilder(column: $table.icon, builder: (column) => column);
+
+  GeneratedColumn<double> get posX =>
+      $composableBuilder(column: $table.posX, builder: (column) => column);
+
+  GeneratedColumn<double> get posY =>
+      $composableBuilder(column: $table.posY, builder: (column) => column);
 
   Expression<T> actionMetricsTableRefs<T extends Object>(
     Expression<T> Function($$ActionMetricsTableTableAnnotationComposer a) f,
@@ -5776,6 +6029,9 @@ class $$MetricsTableTableTableManager
                 Value<double> target = const Value.absent(),
                 Value<bool> isMain = const Value.absent(),
                 Value<int> importanceLevel = const Value.absent(),
+                Value<String?> icon = const Value.absent(),
+                Value<double?> posX = const Value.absent(),
+                Value<double?> posY = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetricsTableCompanion(
                 id: id,
@@ -5786,6 +6042,9 @@ class $$MetricsTableTableTableManager
                 target: target,
                 isMain: isMain,
                 importanceLevel: importanceLevel,
+                icon: icon,
+                posX: posX,
+                posY: posY,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5798,6 +6057,9 @@ class $$MetricsTableTableTableManager
                 Value<double> target = const Value.absent(),
                 Value<bool> isMain = const Value.absent(),
                 Value<int> importanceLevel = const Value.absent(),
+                Value<String?> icon = const Value.absent(),
+                Value<double?> posX = const Value.absent(),
+                Value<double?> posY = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MetricsTableCompanion.insert(
                 id: id,
@@ -5808,6 +6070,9 @@ class $$MetricsTableTableTableManager
                 target: target,
                 isMain: isMain,
                 importanceLevel: importanceLevel,
+                icon: icon,
+                posX: posX,
+                posY: posY,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

@@ -3,9 +3,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/growth_rules.dart';
+import '../../domain/notion_icons.dart';
 import '../providers.dart';
 import '../widgets/growth_direction_dialog.dart';
 import '../widgets/metric_picker.dart' show describeDirection;
+import '../widgets/mindmap_view.dart';
+
+/// Asks the user for saved Notion pages (.htm) and returns their texts (empty
+/// = cancelled). Several files are allowed: a saved page only contains the
+/// rows Notion had rendered, so different scroll positions are saved apart.
+/// A provider so tests can replace the native file dialog.
+final notionPagesPickerProvider = Provider<Future<List<String>> Function()>(
+  (ref) => () async {
+    final files = await openFiles(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Saved Notion page or name<TAB>emoji list',
+          extensions: ['htm', 'html', 'tsv', 'txt'],
+        ),
+      ],
+    );
+    return [for (final f in files) await f.readAsString()];
+  },
+);
 
 /// Asks the user for the Notion export and returns its text (null = cancelled).
 /// A provider so tests can replace the native file dialog.
@@ -23,7 +43,7 @@ final growthCsvPickerProvider = Provider<Future<String?> Function()>(
 String _fmt(double v, [int digits = 1]) => v.toStringAsFixed(digits);
 
 /// The growth directions: a Balance Dashboard of what to focus on and what to
-/// ease off, the full list, and the hierarchy under the main directions.
+/// ease off, the full list, and the mindmap of how they lead to each other.
 class GrowthDirectionsScreen extends ConsumerWidget {
   const GrowthDirectionsScreen({super.key});
 
@@ -41,9 +61,14 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                     tabs: [
                       Tab(text: 'Balance'),
                       Tab(text: 'List'),
-                      Tab(text: 'Tree'),
+                      Tab(text: 'Mindmap'),
                     ],
                   ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.emoji_emotions_outlined),
+                  tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
+                  onPressed: () => _importIcons(context, ref),
                 ),
                 IconButton(
                   icon: const Icon(Icons.upload_file),
@@ -54,7 +79,10 @@ class GrowthDirectionsScreen extends ConsumerWidget {
             ),
             const Expanded(
               child: TabBarView(
-                children: [_BalanceTab(), _ListTab(), _TreeTab()],
+                // No swiping between tabs: horizontal drags belong to the
+                // Mindmap (moving boxes, panning).
+                physics: NeverScrollableScrollPhysics(),
+                children: [_BalanceTab(), _ListTab(), MindmapView()],
               ),
             ),
           ],
@@ -63,6 +91,28 @@ class GrowthDirectionsScreen extends ConsumerWidget {
           onPressed: () => GrowthDirectionDialog.show(context),
           tooltip: 'New growth direction',
           child: const Icon(Icons.add),
+        ),
+      ),
+    );
+  }
+
+  /// Sets direction icons from saved Notion pages, matching by name.
+  Future<void> _importIcons(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final pages = await ref.read(notionPagesPickerProvider)();
+    if (pages.isEmpty) return;
+    final icons = <String, String>{};
+    final skipped = <String>[];
+    for (final html in pages) {
+      icons.addAll(parseIconsFile(html, skippedBuiltin: skipped));
+    }
+    final s = await ref.read(metricServiceProvider).applyIcons(icons);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Set ${s.matched} icons'
+          '${s.unmatched.isEmpty ? '' : ' (${s.unmatched.length} not in your directions)'}'
+          '${skipped.isEmpty ? '' : ', ${skipped.length} with an unknown built-in icon skipped'}.',
         ),
       ),
     );
@@ -320,7 +370,11 @@ class _BalanceRowTile extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: Text(m.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+              child: Text(
+                m.label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             SizedBox(
               width: 72,
@@ -535,7 +589,7 @@ class _ListTabState extends ConsumerState<_ListTab> {
                             final s = snapshot.stats[m.id]!;
                             return ListTile(
                               key: ValueKey('direction-${m.id}'),
-                              title: Text(m.name),
+                              title: Text(m.label),
                               subtitle: Text(
                                 '${describeDirection(m)}'
                                 '${m.isMain ? ' · main' : ''}'
@@ -570,94 +624,5 @@ class _ListTabState extends ConsumerState<_ListTab> {
             );
           },
         );
-  }
-}
-
-// ---- Tree -------------------------------------------------------------------
-
-class _TreeTab extends ConsumerWidget {
-  const _TreeTab();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ref
-        .watch(growthSnapshotProvider)
-        .when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: Text('Error: $e')),
-          data: (snapshot) {
-            // Roots: the main directions, plus anything that leads nowhere.
-            final roots =
-                [
-                  for (final m in snapshot.metrics)
-                    if (m.isMain || snapshot.graph.leadsToOf(m.id).isEmpty) m,
-                ]..sort((a, b) {
-                  if (a.isMain != b.isMain) return a.isMain ? -1 : 1;
-                  return a.name.compareTo(b.name);
-                });
-            if (roots.isEmpty) {
-              return const Center(child: Text('No growth directions yet.'));
-            }
-            return ListView(
-              children: [
-                for (final m in roots)
-                  _TreeNode(snapshot: snapshot, metric: m, path: {m.id}),
-              ],
-            );
-          },
-        );
-  }
-}
-
-/// One direction in the hierarchy; its children are the directions it depends
-/// on. A direction that feeds several goals shows under each of them.
-class _TreeNode extends StatelessWidget {
-  final GrowthSnapshot snapshot;
-  final GrowthMetric metric;
-
-  /// Ids from the root down to this node (guards against loops).
-  final Set<String> path;
-
-  const _TreeNode({
-    required this.snapshot,
-    required this.metric,
-    required this.path,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final stat = snapshot.stats[metric.id]!;
-    final title = Row(
-      children: [
-        Expanded(child: Text(metric.name)),
-        const SizedBox(width: 8),
-        SizedBox(width: 90, child: _ProgressBar(progress: stat.progress)),
-        SizedBox(
-          width: 96,
-          child: Text('U ${_fmt(stat.urgency)}', textAlign: TextAlign.right),
-        ),
-      ],
-    );
-    final children = [
-      for (final id in snapshot.graph.dependsOnOf(metric.id))
-        if (!path.contains(id) && snapshot.byId[id] != null) snapshot.byId[id]!,
-    ]..sort((a, b) => a.name.compareTo(b.name));
-
-    if (children.isEmpty) {
-      return ListTile(
-        dense: true,
-        title: title,
-        onTap: () => GrowthDirectionDialog.show(context, existing: metric),
-      );
-    }
-    return ExpansionTile(
-      key: PageStorageKey<String>(path.join('/')),
-      title: title,
-      childrenPadding: const EdgeInsets.only(left: 20),
-      children: [
-        for (final c in children)
-          _TreeNode(snapshot: snapshot, metric: c, path: {...path, c.id}),
-      ],
-    );
   }
 }

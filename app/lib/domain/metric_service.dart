@@ -48,6 +48,13 @@ class ImportSummary {
 
 /// Create/edit/delete growth directions and their relations, keep the derived
 /// weights current, and import the Notion export.
+/// Result of [MetricService.applyIcons].
+class IconApplySummary {
+  final int matched;
+  final List<String> unmatched;
+  const IconApplySummary({required this.matched, required this.unmatched});
+}
+
 class MetricService {
   final AppDatabase db;
 
@@ -65,6 +72,7 @@ class MetricService {
     MetricWindow? window,
     double target = 1,
     bool isMain = false,
+    Value<String?> icon = const Value.absent(),
     List<String> dependsOnIds = const [],
     List<String> leadsToIds = const [],
   }) {
@@ -100,6 +108,7 @@ class MetricService {
               ),
               target: Value(kind == MetricKind.boolean ? 1 : target),
               isMain: Value(isMain),
+              icon: icon,
             ),
           );
 
@@ -235,6 +244,11 @@ class MetricService {
     final parsed = parseGrowthDirectionsCsv(csvText);
 
     return db.transaction(() async {
+      // Icons are set separately (see applyIcons), so carry them over by name.
+      final iconByName = {
+        for (final m in await db.select(db.metricsTable).get())
+          if (m.icon != null) normalizeDirectionName(m.name): m.icon!,
+      };
       await db.delete(db.actionMetricsTable).go();
       await db.delete(db.metricDependenciesTable).go();
       await db.delete(db.metricsTable).go();
@@ -256,6 +270,9 @@ class MetricService {
               timeWindow: Value(parsed.directions[i].window?.dbValue),
               target: Value(parsed.directions[i].target),
               isMain: Value(parsed.directions[i].isMain),
+              icon: Value(
+                iconByName[normalizeDirectionName(parsed.directions[i].name)],
+              ),
             ),
         ]);
       });
@@ -291,6 +308,82 @@ class MetricService {
         unsupported: parsed.unsupported,
         unresolved: unresolved.toList(),
       );
+    });
+  }
+
+  /// Sets the icon of every direction whose (normalized) name is a key of
+  /// [iconsByName]. Returns the names that matched no direction.
+  Future<IconApplySummary> applyIcons(Map<String, String> iconsByName) {
+    return db.transaction(() async {
+      final rows = await db.select(db.metricsTable).get();
+      final byName = {for (final m in rows) normalizeDirectionName(m.name): m};
+      var matched = 0;
+      final unmatched = <String>[];
+      for (final e in iconsByName.entries) {
+        final row = byName[normalizeDirectionName(e.key)];
+        if (row == null) {
+          unmatched.add(e.key);
+          continue;
+        }
+        matched++;
+        await (db.update(db.metricsTable)..where((t) => t.id.equals(row.id)))
+            .write(MetricsTableCompanion(icon: Value(e.value)));
+      }
+      return IconApplySummary(matched: matched, unmatched: unmatched);
+    });
+  }
+
+  /// Stores where nodes sit on the Mindmap ([positions]: id -> (x, y)).
+  Future<void> savePositions(Map<String, (double, double)> positions) {
+    return db.batch((batch) {
+      for (final e in positions.entries) {
+        batch.update(
+          db.metricsTable,
+          MetricsTableCompanion(
+            posX: Value(e.value.$1),
+            posY: Value(e.value.$2),
+          ),
+          where: (t) => t.id.equals(e.key),
+        );
+      }
+    });
+  }
+
+  /// Forgets all Mindmap positions (the next open lays the map out again).
+  Future<void> clearPositions() => db
+      .update(db.metricsTable)
+      .write(const MetricsTableCompanion(posX: Value(null), posY: Value(null)));
+
+  /// [fromId] leads to [toId] (so [toId] depends on [fromId]). A duplicate is
+  /// a no-op; a link that would close a loop throws [MetricCycleException].
+  Future<void> addRelation({required String fromId, required String toId}) {
+    if (fromId == toId) {
+      throw ArgumentError('A direction cannot lead to itself.');
+    }
+    return db.transaction(() async {
+      final existing = await db.select(db.metricDependenciesTable).get();
+      if (existing.any((e) => e.metricId == toId && e.dependsOnId == fromId)) {
+        return;
+      }
+      final graph = GrowthGraph([
+        for (final e in existing)
+          (metricId: e.metricId, dependsOnId: e.dependsOnId),
+        (metricId: toId, dependsOnId: fromId),
+      ]);
+      if (graph.hasCycle) throw const MetricCycleException();
+      await _insertEdge(toId, fromId);
+      await recomputeWeights();
+    });
+  }
+
+  /// Removes "[fromId] leads to [toId]". Undo with [addRelation].
+  Future<void> removeRelation({required String fromId, required String toId}) {
+    return db.transaction(() async {
+      await (db.delete(db.metricDependenciesTable)..where(
+            (t) => t.metricId.equals(toId) & t.dependsOnId.equals(fromId),
+          ))
+          .go();
+      await recomputeWeights();
     });
   }
 

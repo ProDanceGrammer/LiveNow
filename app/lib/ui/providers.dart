@@ -6,6 +6,7 @@ import '../core/time_codec.dart';
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
+import '../domain/action_urgency.dart';
 import '../domain/dependency_service.dart';
 import '../domain/done_rule.dart' as done_rule;
 import '../domain/growth_rules.dart';
@@ -180,6 +181,17 @@ final growthSnapshotProvider = Provider.autoDispose<AsyncValue<GrowthSnapshot>>(
     );
   },
 );
+
+/// "Urgency to Keep in Balance" per action id (sum of its directions'
+/// urgencies), live. Actions with no linked direction are absent.
+final actionUrgencyProvider = Provider.autoDispose<Map<String, double>>((ref) {
+  final snapshot = ref.watch(growthSnapshotProvider).value;
+  final linked = ref.watch(metricLinkedActionsProvider).value;
+  if (snapshot == null || linked == null) return const {};
+  return actionUrgencies([
+    for (final (metricId, action) in linked) (metricId, action.id),
+  ], snapshot.stats);
+});
 
 /// All Countable Activities, for the action editor's activity picker.
 final countableActivitiesProvider =

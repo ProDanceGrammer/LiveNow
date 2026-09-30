@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -25,7 +27,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -53,19 +55,47 @@ class AppDatabase extends _$AppDatabase {
               metricsTable.target,
               metricsTable.isMain,
               metricsTable.importanceLevel,
+              metricsTable.icon,
+              metricsTable.posX,
+              metricsTable.posY,
             ],
           ),
         );
       }
+      if (from < 4) {
+        // Rich-text notes (editor Document JSON) on every action.
+        await m.addColumn(actionsTable, actionsTable.notes);
+      }
+      if (from >= 3 && from < 5) {
+        // An emoji icon on growth directions (older databases already got it
+        // with the v3 table rebuild above).
+        await m.addColumn(metricsTable, metricsTable.icon);
+      }
+      if (from >= 3 && from < 6) {
+        // Mindmap node positions (same: the v3 rebuild covers older ones).
+        await m.addColumn(metricsTable, metricsTable.posX);
+        await m.addColumn(metricsTable, metricsTable.posY);
+      }
     },
   );
+}
+
+/// Where the database file lives: the app-support folder, or — for automated
+/// UI runs that must never touch the real data — the folder named by the
+/// `LIVENOW_DATA_DIR` environment variable.
+Future<Directory> _databaseDirectory() async {
+  final override = Platform.environment['LIVENOW_DATA_DIR'];
+  if (override != null && override.isNotEmpty) {
+    return Directory(override).create(recursive: true);
+  }
+  return getApplicationSupportDirectory();
 }
 
 DatabaseConnection _openConnection() {
   return driftDatabase(
     name: 'livenow',
     native: DriftNativeOptions(
-      databaseDirectory: getApplicationSupportDirectory,
+      databaseDirectory: _databaseDirectory,
       setup: (db) {
         db.execute('PRAGMA foreign_keys = ON;');
         db.execute('PRAGMA journal_mode = WAL;');

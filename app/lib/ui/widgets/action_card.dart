@@ -5,7 +5,8 @@ import '../../data/queries.dart';
 import '../edit_action.dart';
 import '../providers.dart';
 import '../undo.dart';
-import 'action_tile.dart' show formatActionDuration, iconForAction, twoDigits;
+import 'action_tile.dart'
+    show formatActionDuration, formatUrgency, iconForAction, twoDigits;
 import 'quick_action_bar.dart';
 import 'quick_time_edit_dialog.dart';
 
@@ -26,6 +27,9 @@ class ActionCard extends ConsumerWidget {
     final isRunning =
         ref.watch(runningOccurrencesProvider).value?.contains(action.id) ??
         false;
+    final urgency = ref.watch(
+      actionUrgencyProvider.select((m) => m[action.id]),
+    );
     final timeLine = _formatTimeLine(action);
 
     return GestureDetector(
@@ -57,6 +61,15 @@ class ActionCard extends ConsumerWidget {
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                     ),
+                    if (urgency != null)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Text(
+                          'U ${formatUrgency(urgency)}',
+                          key: const ValueKey('actionUrgencyChip'),
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
                   ],
                 ),
                 if (timeLine != null)

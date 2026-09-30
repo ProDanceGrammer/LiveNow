@@ -21,6 +21,7 @@ import '../../domain/postpone_rules.dart';
 import '../edit_action.dart';
 import '../providers.dart';
 import '../undo.dart';
+import '../urgency_colors.dart';
 import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
 import 'calendar_layout.dart';
@@ -451,16 +452,25 @@ class _AllDayChip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final done = item.isDoneBefore;
+    final urgency = done || running
+        ? null
+        : ref.watch(actionUrgencyProvider.select((m) => m[item.id]));
+    final uc = urgency == null
+        ? null
+        : urgencyColors(
+            urgency,
+            dark: Theme.of(context).brightness == Brightness.dark,
+          );
     final bg = running
         ? scheme.primary
         : done
         ? scheme.surfaceContainerHighest
-        : scheme.tertiaryContainer;
+        : uc?.bg ?? scheme.tertiaryContainer;
     final fg = running
         ? scheme.onPrimary
         : done
         ? scheme.onSurfaceVariant
-        : scheme.onTertiaryContainer;
+        : uc?.fg ?? scheme.onTertiaryContainer;
     final selected = ref.watch(
       calendarSelectedActionProvider.select((id) => id == item.id),
     );
@@ -1333,16 +1343,25 @@ class _EventBlock extends ConsumerWidget {
     final scheme = Theme.of(context).colorScheme;
     final item = seg.item;
     final done = item.isDoneBefore;
+    final urgency = done || running
+        ? null
+        : ref.watch(actionUrgencyProvider.select((m) => m[item.id]));
+    final uc = urgency == null
+        ? null
+        : urgencyColors(
+            urgency,
+            dark: Theme.of(context).brightness == Brightness.dark,
+          );
     final bg = running
         ? scheme.primary
         : done
         ? scheme.surfaceContainerHighest
-        : scheme.primaryContainer;
+        : uc?.bg ?? scheme.primaryContainer;
     final fg = running
         ? scheme.onPrimary
         : done
         ? scheme.onSurfaceVariant
-        : scheme.onPrimaryContainer;
+        : uc?.fg ?? scheme.onPrimaryContainer;
     final name = TextStyle(
       fontSize: 12,
       fontWeight: FontWeight.w600,

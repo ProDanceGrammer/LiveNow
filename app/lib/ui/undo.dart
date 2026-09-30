@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart'
     show StateController, StateProvider;
 
+import '../domain/growth_rules.dart' show metricLabel;
 import 'providers.dart';
 
 class _UndoEntry {
@@ -104,8 +105,30 @@ Future<void> runUndoableDeleteMetric(
   _offerUndo(
     messenger,
     lastUndo,
-    'Deleted "${undo.metric.name}"',
+    'Deleted "${metricLabel(undo.metric.name, undo.metric.icon)}"',
     () => service.undoDelete(undo),
+  );
+}
+
+/// Removes the relation "[fromId] leads to [toId]" (a Mindmap edge) and offers
+/// Undo, which adds it back. Reads `ref`/`context` before the first await.
+Future<void> runUndoableRemoveRelation(
+  BuildContext context,
+  WidgetRef ref, {
+  required String fromId,
+  required String toId,
+  required String description,
+}) async {
+  final service = ref.read(metricServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  await service.removeRelation(fromId: fromId, toId: toId);
+  _offerUndo(
+    messenger,
+    lastUndo,
+    description,
+    () => service.addRelation(fromId: fromId, toId: toId),
   );
 }
 

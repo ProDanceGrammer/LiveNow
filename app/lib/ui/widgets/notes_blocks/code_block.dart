@@ -1,0 +1,274 @@
+import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:flutter/material.dart';
+// ignore: depend_on_referenced_packages
+import 'package:provider/provider.dart';
+
+import 'toggle_list_block.dart' show convertToParagraph;
+
+/// Block type string of the code block.
+const String codeBlockType = 'code';
+
+/// Builds a code block node. Node shape (persisted, do not change):
+/// `{type: 'code', attributes: {delta}}` where the delta is the plain code
+/// text (may contain '\n').
+Node codeBlockNode(String text) {
+  return Node(
+    type: codeBlockType,
+    attributes: {blockComponentDelta: (Delta()..insert(text)).toJson()},
+  );
+}
+
+class CodeBlockComponentBuilder extends BlockComponentBuilder {
+  CodeBlockComponentBuilder({super.configuration});
+
+  @override
+  BlockComponentWidget build(BlockComponentContext blockComponentContext) {
+    final node = blockComponentContext.node;
+    return CodeBlockComponentWidget(
+      key: node.key,
+      node: node,
+      configuration: configuration,
+      showActions: showActions(node),
+      actionBuilder: (context, state) =>
+          actionBuilder(blockComponentContext, state),
+      actionTrailingBuilder: (context, state) =>
+          actionTrailingBuilder(blockComponentContext, state),
+    );
+  }
+
+  @override
+  BlockComponentValidate get validate =>
+      (node) => node.delta != null;
+}
+
+class CodeBlockComponentWidget extends BlockComponentStatefulWidget {
+  const CodeBlockComponentWidget({
+    super.key,
+    required super.node,
+    super.showActions,
+    super.actionBuilder,
+    super.actionTrailingBuilder,
+    super.configuration = const BlockComponentConfiguration(),
+  });
+
+  @override
+  State<CodeBlockComponentWidget> createState() =>
+      _CodeBlockComponentWidgetState();
+}
+
+class _CodeBlockComponentWidgetState extends State<CodeBlockComponentWidget>
+    with
+        SelectableMixin,
+        DefaultSelectableMixin,
+        BlockComponentConfigurable,
+        BlockComponentBackgroundColorMixin,
+        BlockComponentTextDirectionMixin,
+        BlockComponentAlignMixin {
+  @override
+  final forwardKey = GlobalKey(debugLabel: 'flowy_rich_text');
+
+  @override
+  GlobalKey<State<StatefulWidget>> get containerKey => widget.node.key;
+
+  @override
+  GlobalKey<State<StatefulWidget>> blockComponentKey = GlobalKey(
+    debugLabel: codeBlockType,
+  );
+
+  @override
+  BlockComponentConfiguration get configuration => widget.configuration;
+
+  @override
+  Node get node => widget.node;
+
+  @override
+  late final editorState = Provider.of<EditorState>(context, listen: false);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textDirection = calculateTextDirection(
+      layoutDirection: Directionality.maybeOf(context),
+    );
+    final bodySize =
+        editorState.editorStyle.textStyleConfiguration.text.fontSize ?? 16;
+    final codeStyle = TextStyle(
+      fontFamily: 'Consolas',
+      fontFamilyFallback: const ['Cascadia Mono', 'Courier New', 'monospace'],
+      fontSize: bodySize - 2,
+      height: 1.5,
+    );
+
+    Widget child = Container(
+      width: double.infinity,
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: AppFlowyRichText(
+        key: forwardKey,
+        delegate: this,
+        node: widget.node,
+        editorState: editorState,
+        textAlign: alignment?.toTextAlign ?? textAlign,
+        placeholderText: placeholderText,
+        textDirection: textDirection,
+        textSpanDecorator: (textSpan) => textSpan
+            .updateTextStyle(textStyleWithTextSpan())
+            .updateTextStyle(codeStyle),
+        placeholderTextSpanDecorator: (textSpan) => textSpan.updateTextStyle(
+          placeholderTextStyleWithTextSpan(textSpan: textSpan),
+        ),
+        cursorColor: editorState.editorStyle.cursorColor,
+        selectionColor: editorState.editorStyle.selectionColor,
+        cursorWidth: editorState.editorStyle.cursorWidth,
+      ),
+    );
+
+    child = Container(key: blockComponentKey, padding: padding, child: child);
+
+    child = BlockSelectionContainer(
+      node: node,
+      delegate: this,
+      listenable: editorState.selectionNotifier,
+      remoteSelection: editorState.remoteSelections,
+      blockColor: editorState.editorStyle.selectionColor,
+      supportTypes: const [BlockSelectionType.block],
+      child: child,
+    );
+
+    if (widget.showActions && widget.actionBuilder != null) {
+      child = BlockComponentActionWrapper(
+        node: node,
+        actionBuilder: widget.actionBuilder!,
+        actionTrailingBuilder: widget.actionTrailingBuilder,
+        child: child,
+      );
+    }
+
+    return Padding(padding: margin, child: child);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shortcuts
+// ---------------------------------------------------------------------------
+
+/// The third backtick typed in an otherwise empty paragraph that already has
+/// two backticks turns it into an empty code block. Must run before
+/// `formatBackquoteToCode` (see `customNotesCharacterShortcuts`).
+final CharacterShortcutEvent formatBackticksToCodeBlock =
+    CharacterShortcutEvent(
+      key: 'format triple backticks to code block',
+      character: '`',
+      handler: (editorState) => formatMarkdownSymbol(
+        editorState,
+        (node) =>
+            node.type == ParagraphBlockKeys.type &&
+            node.children.isEmpty &&
+            node.delta?.toPlainText() == '``',
+        (_, text, selection) => text == '``',
+        (_, node, delta) => [codeBlockNode('')],
+      ),
+    );
+
+/// Enter inside a code block inserts a '\n' in the same block; Enter on an
+/// empty last line removes that line and starts a paragraph after the block.
+final CharacterShortcutEvent insertNewLineInCodeBlock = CharacterShortcutEvent(
+  key: 'insert new line in code block',
+  character: '\n',
+  handler: (editorState) async {
+    var selection = editorState.selection?.normalized;
+    if (selection == null) return false;
+    final startNode = editorState.getNodeAtPath(selection.start.path);
+    if (startNode == null || startNode.type != codeBlockType) return false;
+    if (!selection.isCollapsed) {
+      if (!selection.isSingle) return false;
+      await editorState.deleteSelection(selection);
+      selection = editorState.selection?.normalized;
+      if (selection == null) return false;
+    }
+    final node = editorState.getNodeAtPath(selection.start.path);
+    final delta = node?.delta;
+    if (node == null || node.type != codeBlockType || delta == null) {
+      return false;
+    }
+    final offset = selection.start.offset;
+    final text = delta.toPlainText();
+
+    if (offset == text.length && text.endsWith('\n')) {
+      final next = node.path.next;
+      final transaction = editorState.transaction
+        ..deleteText(node, text.length - 1, 1)
+        ..insertNode(next, paragraphNode())
+        ..afterSelection = Selection.collapsed(Position(path: next));
+      await editorState.apply(transaction);
+      return true;
+    }
+
+    final transaction = editorState.transaction
+      ..insertText(node, offset, '\n')
+      ..afterSelection = Selection.collapsed(
+        Position(path: node.path, offset: offset + 1),
+      );
+    await editorState.apply(transaction);
+    return true;
+  },
+);
+
+/// Tab inside a code block inserts two spaces (never indents the block).
+final CommandShortcutEvent codeBlockTabCommand = CommandShortcutEvent(
+  key: 'code block tab inserts spaces',
+  getDescription: () => 'Insert two spaces in a code block',
+  command: 'tab',
+  handler: (editorState) {
+    final selection = editorState.selection?.normalized;
+    if (selection == null || !selection.isSingle) {
+      return KeyEventResult.ignored;
+    }
+    final node = editorState.getNodeAtPath(selection.start.path);
+    if (node == null || node.type != codeBlockType) {
+      return KeyEventResult.ignored;
+    }
+    final transaction = editorState.transaction;
+    if (!selection.isCollapsed) {
+      transaction.deleteText(
+        node,
+        selection.startIndex,
+        selection.endIndex - selection.startIndex,
+      );
+    }
+    transaction
+      ..insertText(node, selection.startIndex, '  ')
+      ..afterSelection = Selection.collapsed(
+        Position(path: node.path, offset: selection.startIndex + 2),
+      );
+    editorState.apply(transaction);
+    return KeyEventResult.handled;
+  },
+);
+
+/// Backspace in an empty code block turns it into a paragraph.
+final CommandShortcutEvent codeBlockBackspaceCommand = CommandShortcutEvent(
+  key: 'empty code block backspace to paragraph',
+  getDescription: () => 'Convert empty code block to paragraph',
+  command: 'backspace',
+  handler: (editorState) {
+    final selection = editorState.selection;
+    if (selection == null || !selection.isCollapsed) {
+      return KeyEventResult.ignored;
+    }
+    final node = editorState.getNodeAtPath(selection.end.path);
+    final delta = node?.delta;
+    if (node == null ||
+        node.type != codeBlockType ||
+        delta == null ||
+        delta.isNotEmpty) {
+      return KeyEventResult.ignored;
+    }
+    convertToParagraph(editorState, node);
+    return KeyEventResult.handled;
+  },
+);

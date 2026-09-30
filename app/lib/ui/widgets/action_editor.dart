@@ -1,15 +1,22 @@
+import 'dart:math' as math;
+
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
+import '../../domain/action_urgency.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/done_rule.dart';
 import '../../domain/duration_rules.dart';
+import '../dialog_stack.dart';
 import '../providers.dart';
 import 'action_menu_button.dart';
+import 'action_tile.dart' show formatUrgency;
 import 'date_time_field.dart';
 import 'metric_picker.dart';
+import 'notes_editor.dart';
 
 const _priorities = [
   'A1',
@@ -49,7 +56,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     DateTime? initialStart,
     DateTime? initialEnd,
   }) {
-    return showDialog<void>(
+    return showStackedDialog<void>(
       context: context,
       builder: (_) => ActionEditorDialog(
         existing: existing,
@@ -76,6 +83,9 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   Set<String> _selectedMetricIds = {};
   String? _countableActivityId;
   int _activityFieldEpoch = 0;
+  String? _notes;
+  bool _notesExpanded = false;
+  final _notesKey = GlobalKey();
 
   bool get _isEditing => widget.existing != null;
 
@@ -84,6 +94,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     super.initState();
     final existing = widget.existing;
     _nameController = TextEditingController(text: existing?.name ?? '');
+    _notes = existing?.notes;
     _startAt = widget.initialStart;
     _endAt = widget.initialEnd;
 
@@ -121,10 +132,16 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final expanded = _notesExpanded;
+    final width = expanded
+        ? math.min(1100.0, screen.width - 48)
+        : math.min(720.0, screen.width - 80);
+    final notesHeight = expanded ? math.max(320.0, screen.height - 260) : 320.0;
     return AlertDialog(
       title: Text(_isEditing ? 'Edit action' : 'New action'),
       content: SizedBox(
-        width: 480,
+        width: math.max(280.0, width),
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
@@ -142,155 +159,29 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
-                if (_isEditing) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Text(
-                        isDoneBefore(
-                              startAt: dateTimeFromDb(widget.existing!.startAt),
-                              endAt: dateTimeFromDb(widget.existing!.endAt),
-                              isAllDay: widget.existing!.isAllDay,
-                              done: widget.existing!.done,
-                            )
-                            ? 'Done'
-                            : 'Open',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const Spacer(),
-                      ActionMenuButton(actionId: widget.existing!.id),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  _TimeTrackingSection(
-                    actionId: widget.existing!.id,
-                    scheduledStart: _startAt,
-                  ),
-                ],
-                const SizedBox(height: 12),
-                ExpansionTile(
-                  title: const Text('Manual parameters'),
-                  // Opened when a schedule came with the dialog (dragged out
-                  // on the calendar), so the chosen time is visible.
-                  initiallyExpanded: widget.initialStart != null,
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(bottom: 8),
-                  children: [
-                    DropdownButtonFormField<String?>(
-                      initialValue: _priority,
-                      decoration: const InputDecoration(labelText: 'Priority'),
-                      items: [
-                        const DropdownMenuItem(
-                          value: null,
-                          child: Text('None'),
-                        ),
-                        for (final p in _priorities)
-                          DropdownMenuItem(value: p, child: Text(p)),
-                      ],
-                      onChanged: (v) => setState(() => _priority = v),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _postponeFlex,
-                            decoration: const InputDecoration(
-                              labelText: 'Postpone flexibility',
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'flexible',
-                                child: Text('Flexible'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'hard',
-                                child: Text('Hard'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'impossible',
-                                child: Text('Impossible'),
-                              ),
-                            ],
-                            onChanged: (v) =>
-                                setState(() => _postponeFlex = v!),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: DropdownButtonFormField<String?>(
-                            initialValue: _depthLevel,
-                            decoration: const InputDecoration(
-                              labelText: 'Depth (learning)',
-                            ),
-                            items: const [
-                              DropdownMenuItem(value: null, child: Text('N/A')),
-                              DropdownMenuItem(
-                                value: 'easy',
-                                child: Text('Easy'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'medium',
-                                child: Text('Medium'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'deep',
-                                child: Text('Deep'),
-                              ),
-                            ],
-                            onChanged: (v) => setState(() => _depthLevel = v),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _buildCountableActivityField(),
-                    const SizedBox(height: 8),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('All day'),
-                      value: _isAllDay,
-                      onChanged: (v) => setState(() => _isAllDay = v),
-                    ),
-                    DateTimeField(
-                      label: 'Scheduled start',
-                      value: _startAt,
-                      includeTime: !_isAllDay,
-                      onChanged: (v) => setState(() => _startAt = v),
-                    ),
-                    const SizedBox(height: 4),
-                    DateTimeField(
-                      label: 'Scheduled end',
-                      value: _endAt,
-                      includeTime: !_isAllDay,
-                      onChanged: (v) => setState(() => _endAt = v),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Duration: ${formatDuration(computeActionDuration(startAt: _startAt, endAt: _endAt, legacyEstimatedMinutes: widget.existing?.estimatedMinutes))}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    MetricPicker(
-                      label: 'Growth directions',
-                      selectedIds: _selectedMetricIds,
-                      onChanged: (ids) =>
-                          setState(() => _selectedMetricIds = ids),
-                    ),
-                  ],
-                ),
                 if (_isEditing)
-                  ExpansionTile(
-                    title: const Text('Connected actions'),
-                    tilePadding: EdgeInsets.zero,
-                    initiallyExpanded: true,
-                    children: [
-                      _DependencySection(actionId: widget.existing!.id),
-                    ],
+                  Visibility(
+                    visible: !expanded,
+                    maintainState: true,
+                    child: _buildStatusAndTracking(context),
                   ),
+                const SizedBox(height: 12),
+                Text('Notes', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                NotesEditor(
+                  key: _notesKey,
+                  initialJson: widget.existing?.notes,
+                  onChanged: (json) => _notes = json,
+                  height: notesHeight,
+                  expanded: expanded,
+                  onToggleExpand: () =>
+                      setState(() => _notesExpanded = !_notesExpanded),
+                ),
+                Visibility(
+                  visible: !expanded,
+                  maintainState: true,
+                  child: _buildFormSections(context),
+                ),
               ],
             ),
           ),
@@ -303,6 +194,169 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         ),
         FilledButton(onPressed: _save, child: const Text('Save')),
       ],
+    );
+  }
+
+  Widget _buildStatusAndTracking(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Text(
+              isDoneBefore(
+                    startAt: dateTimeFromDb(widget.existing!.startAt),
+                    endAt: dateTimeFromDb(widget.existing!.endAt),
+                    isAllDay: widget.existing!.isAllDay,
+                    done: widget.existing!.done,
+                  )
+                  ? 'Done'
+                  : 'Open',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const Spacer(),
+            ActionMenuButton(actionId: widget.existing!.id),
+          ],
+        ),
+        const SizedBox(height: 4),
+        _TimeTrackingSection(
+          actionId: widget.existing!.id,
+          scheduledStart: _startAt,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFormSections(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        ExpansionTile(
+          title: const Text('Manual parameters'),
+          // Opened when a schedule came with the dialog (dragged out
+          // on the calendar), so the chosen time is visible.
+          initiallyExpanded: widget.initialStart != null,
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          children: [
+            DropdownButtonFormField<String?>(
+              initialValue: _priority,
+              decoration: const InputDecoration(labelText: 'Priority'),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('None')),
+                for (final p in _priorities)
+                  DropdownMenuItem(value: p, child: Text(p)),
+              ],
+              onChanged: (v) => setState(() => _priority = v),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _postponeFlex,
+                    decoration: const InputDecoration(
+                      labelText: 'Postpone flexibility',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'flexible',
+                        child: Text('Flexible'),
+                      ),
+                      DropdownMenuItem(value: 'hard', child: Text('Hard')),
+                      DropdownMenuItem(
+                        value: 'impossible',
+                        child: Text('Impossible'),
+                      ),
+                    ],
+                    onChanged: (v) => setState(() => _postponeFlex = v!),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButtonFormField<String?>(
+                    initialValue: _depthLevel,
+                    decoration: const InputDecoration(
+                      labelText: 'Depth (learning)',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: null, child: Text('N/A')),
+                      DropdownMenuItem(value: 'easy', child: Text('Easy')),
+                      DropdownMenuItem(value: 'medium', child: Text('Medium')),
+                      DropdownMenuItem(value: 'deep', child: Text('Deep')),
+                    ],
+                    onChanged: (v) => setState(() => _depthLevel = v),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildCountableActivityField(),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('All day'),
+              value: _isAllDay,
+              onChanged: (v) => setState(() => _isAllDay = v),
+            ),
+            DateTimeField(
+              label: 'Scheduled start',
+              value: _startAt,
+              includeTime: !_isAllDay,
+              onChanged: (v) => setState(() => _startAt = v),
+            ),
+            const SizedBox(height: 4),
+            DateTimeField(
+              label: 'Scheduled end',
+              value: _endAt,
+              includeTime: !_isAllDay,
+              onChanged: (v) => setState(() => _endAt = v),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Duration: ${formatDuration(computeActionDuration(startAt: _startAt, endAt: _endAt, legacyEstimatedMinutes: widget.existing?.estimatedMinutes))}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            const SizedBox(height: 16),
+            MetricPicker(
+              label: 'Growth directions',
+              selectedIds: _selectedMetricIds,
+              onChanged: (ids) => setState(() => _selectedMetricIds = ids),
+            ),
+            _buildUrgencyLine(),
+          ],
+        ),
+        if (_isEditing)
+          ExpansionTile(
+            title: const Text('Connected actions'),
+            tilePadding: EdgeInsets.zero,
+            initiallyExpanded: true,
+            children: [_DependencySection(actionId: widget.existing!.id)],
+          ),
+      ],
+    );
+  }
+
+  /// Read-only "Urgency to Keep in Balance": computed live from the directions
+  /// currently selected (saved or not), so it follows the picker. Hidden when
+  /// none is selected.
+  Widget _buildUrgencyLine() {
+    final stats = ref.watch(growthSnapshotProvider).value?.stats;
+    if (stats == null) return const SizedBox.shrink();
+    final urgency = actionUrgency(_selectedMetricIds, stats);
+    if (urgency == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(
+        'Urgency to Keep in Balance: ${formatUrgency(urgency)}',
+        key: const ValueKey('actionUrgencyLine'),
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
     );
   }
 
@@ -355,7 +409,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
 
   Future<String?> _askActivityName() {
     final controller = TextEditingController();
-    return showDialog<String>(
+    return showStackedDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('New countable activity'),
@@ -396,6 +450,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         startAt: _startAt,
         endAt: _endAt,
         isAllDay: _isAllDay,
+        notes: Value(_notes),
       );
       await service.setMetrics(id, _selectedMetricIds.toList());
       await service.setCountableActivity(id, _countableActivityId);
@@ -410,6 +465,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         isAllDay: _isAllDay,
         countableActivityId: _countableActivityId,
         metricIds: _selectedMetricIds.toList(),
+        notes: _notes,
       );
     }
 
@@ -566,7 +622,7 @@ class _DependencySection extends ConsumerWidget {
     WidgetRef ref, {
     required bool asPredecessor,
   }) async {
-    final chosen = await showDialog<ActionRow>(
+    final chosen = await showStackedDialog<ActionRow>(
       context: context,
       builder: (_) => _ActionPickerDialog(excludeId: actionId),
     );

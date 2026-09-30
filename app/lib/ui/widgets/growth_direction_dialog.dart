@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/database.dart' show Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
+import '../dialog_stack.dart';
 import '../providers.dart';
 import '../undo.dart';
 import 'metric_picker.dart';
@@ -19,7 +22,7 @@ class GrowthDirectionDialog extends ConsumerStatefulWidget {
   const GrowthDirectionDialog({super.key, this.existing});
 
   static Future<void> show(BuildContext context, {GrowthMetric? existing}) {
-    return showDialog<void>(
+    return showStackedDialog<void>(
       context: context,
       builder: (_) => GrowthDirectionDialog(existing: existing),
     );
@@ -34,6 +37,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _target;
+  late final TextEditingController _icon;
 
   late MetricKind _kind;
   late MetricWindow _window;
@@ -53,6 +57,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
     _kind = m?.kind ?? MetricKind.count;
     _window = m?.window ?? MetricWindow.week;
     _target = TextEditingController(text: _formatTarget(m?.target ?? 1));
+    _icon = TextEditingController(text: m?.icon ?? '');
     _isMain = m?.isMain ?? false;
 
     if (m == null) {
@@ -76,6 +81,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
   void dispose() {
     _name.dispose();
     _target.dispose();
+    _icon.dispose();
     super.dispose();
   }
 
@@ -113,6 +119,17 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                   },
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _icon,
+                  decoration: const InputDecoration(
+                    labelText: 'Icon (an emoji, optional)',
+                  ),
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) {
+                    if (_relationsLoaded) _save();
+                  },
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<MetricKind>(
@@ -218,6 +235,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                     label: 'Depends on (sub-directions that build it)',
                     selectedIds: _dependsOn,
                     excludeId: widget.existing?.id,
+                    onOpen: _openRelated,
                     onChanged: (ids) => setState(() => _dependsOn = ids),
                   ),
                   const SizedBox(height: 8),
@@ -225,6 +243,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                     label: 'Leads to (larger goals it feeds)',
                     selectedIds: _leadsTo,
                     excludeId: widget.existing?.id,
+                    onOpen: _openRelated,
                     onChanged: (ids) => setState(() => _leadsTo = ids),
                   ),
                 ],
@@ -264,6 +283,12 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
     );
   }
 
+  /// Stacked on top (not replacing) so unsaved edits here aren't lost;
+  /// closing it returns here (same as the action editor's connected chips).
+  void _openRelated(Metric row) {
+    GrowthDirectionDialog.show(context, existing: GrowthMetric.fromRow(row));
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final numeric = _kind != MetricKind.boolean;
@@ -280,6 +305,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
             window: numeric ? _window : null,
             target: target,
             isMain: _isMain,
+            icon: Value(_icon.text.trim().isEmpty ? null : _icon.text.trim()),
             dependsOnIds: _dependsOn.toList(),
             leadsToIds: _leadsTo.toList(),
           );

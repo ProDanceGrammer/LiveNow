@@ -39,6 +39,10 @@ enum MetricWindow {
 }
 
 /// A [Metric] row without the database types, the shape the rules work on.
+/// A direction's name as shown in lists: `🚓 Name`, or the bare name.
+String metricLabel(String name, String? icon) =>
+    icon == null || icon.isEmpty ? name : '$icon $name';
+
 class GrowthMetric {
   final String id;
   final String name;
@@ -49,6 +53,13 @@ class GrowthMetric {
   final double weight;
   final int importanceLevel;
 
+  /// An emoji shown before the name, or null.
+  final String? icon;
+
+  /// Mindmap position, or null when the node has not been placed yet.
+  final double? posX;
+  final double? posY;
+
   const GrowthMetric({
     required this.id,
     required this.name,
@@ -58,7 +69,13 @@ class GrowthMetric {
     this.isMain = false,
     this.weight = 0,
     this.importanceLevel = 0,
+    this.icon,
+    this.posX,
+    this.posY,
   });
+
+  /// The name as shown in lists: `🚓 Name`, or just the name without an icon.
+  String get label => metricLabel(name, icon);
 
   factory GrowthMetric.fromRow(Metric row) => GrowthMetric(
     id: row.id,
@@ -69,6 +86,9 @@ class GrowthMetric {
     isMain: row.isMain,
     weight: row.weight,
     importanceLevel: row.importanceLevel,
+    icon: row.icon,
+    posX: row.posX,
+    posY: row.posY,
   );
 }
 

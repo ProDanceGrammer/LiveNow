@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ids.dart';
 import '../../data/database.dart';
+import '../dialog_stack.dart';
 import '../providers.dart';
 import '../widgets/metric_picker.dart';
 
@@ -82,7 +83,7 @@ class TemplatesScreen extends ConsumerWidget {
   }
 
   Future<void> _showEditor(BuildContext context, {ActionTemplate? existing}) {
-    return showDialog<void>(
+    return showStackedDialog<void>(
       context: context,
       builder: (_) => _TemplateEditorDialog(existing: existing),
     );

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
@@ -193,6 +194,77 @@ void main() {
     );
   });
 
+  group('icons', () {
+    test('saveMetric sets, keeps (absent) and clears the icon', () async {
+      final id = await service.saveMetric(
+        name: 'Sleep',
+        kind: MetricKind.boolean,
+        icon: const Value('😴'),
+      );
+      expect((await row(id)).icon, '😴');
+
+      // Editing without mentioning the icon leaves it alone.
+      await service.saveMetric(
+        id: id,
+        name: 'Sleep well',
+        kind: MetricKind.boolean,
+      );
+      expect((await row(id)).icon, '😴');
+
+      await service.saveMetric(
+        id: id,
+        name: 'Sleep well',
+        kind: MetricKind.boolean,
+        icon: const Value(null),
+      );
+      expect((await row(id)).icon, isNull);
+    });
+
+    test(
+      'applyIcons matches by normalized name and reports the rest',
+      () async {
+        final id = await service.saveMetric(
+          name: 'Мама має здоров’я',
+          kind: MetricKind.boolean,
+        );
+        final other = await service.saveMetric(
+          name: 'Other',
+          kind: MetricKind.boolean,
+        );
+        final s = await service.applyIcons({
+          "Мама має здоров'я": '💪🏻', // straight apostrophe vs ’ in the DB
+          'Nope': '🚫',
+        });
+        expect(s.matched, 1);
+        expect(s.unmatched, ['Nope']);
+        expect((await row(id)).icon, '💪🏻');
+        expect((await row(other)).icon, isNull);
+      },
+    );
+
+    test(
+      'a CSV re-import keeps the icons of directions still present',
+      () async {
+        String csv(List<String> rows) => [
+          'page_id,objective_name,metric_data_type,numerical_objective,depends_on,improves_count',
+          ...rows,
+        ].join('\r\n');
+        await service.importGrowthDirections(
+          csv(['p1,Alpha,Boolean,1,[],0', 'p2,Beta,Boolean,1,[],0']),
+        );
+        await service.applyIcons({'Alpha': 'A', 'Beta': 'B'});
+        await service.importGrowthDirections(
+          csv(['p1,Alpha,Boolean,1,[],0', 'p3,Gamma,Boolean,1,[],0']),
+        );
+        final icons = {
+          for (final m in await db.select(db.metricsTable).get())
+            m.name: m.icon,
+        };
+        expect(icons, {'Alpha': 'A', 'Gamma': null});
+      },
+    );
+  });
+
   group('importGrowthDirections', () {
     // Mirrors the quirks of the real export: BOM, CRLF, quoted cells with
     // commas and doubled quotes, ’ vs ', an empty template row, an unknown
@@ -278,6 +350,152 @@ void main() {
       );
       final names = (await db.select(db.metricsTable).get()).map((m) => m.name);
       expect(names, ['Keep me']);
+    });
+  });
+
+  Future<String> make(String name, {bool main = false}) =>
+      service.saveMetric(name: name, kind: MetricKind.boolean, isMain: main);
+
+  group('mindmap positions', () {
+    test('savePositions stores positions and leaves others null', () async {
+      final a = await make('A');
+      final b = await make('B');
+      final c = await make('C');
+      await service.savePositions({a: (10.5, -20), b: (0, 300.25)});
+
+      expect(((await row(a)).posX, (await row(a)).posY), (10.5, -20));
+      expect(((await row(b)).posX, (await row(b)).posY), (0, 300.25));
+      expect(((await row(c)).posX, (await row(c)).posY), (null, null));
+
+      // Saving again overwrites; unknown ids are ignored.
+      await service.savePositions({a: (1, 2), 'nope': (5, 5)});
+      expect(((await row(a)).posX, (await row(a)).posY), (1, 2));
+      expect((await row(b)).posX, 0);
+    });
+
+    test('clearPositions resets every position', () async {
+      final a = await make('A');
+      final b = await make('B');
+      await service.savePositions({a: (1, 2), b: (3, 4)});
+      await service.clearPositions();
+      for (final id in [a, b]) {
+        final r = await row(id);
+        expect((r.posX, r.posY), (null, null));
+      }
+    });
+  });
+
+  group('relations', () {
+    test('addRelation: to depends on from; weights recompute', () async {
+      final main = await make('Main', main: true);
+      final sub = await make('Sub');
+      expect((await row(sub)).weight, 0);
+
+      await service.addRelation(fromId: sub, toId: main);
+
+      // Sub leads to Main, so the edge row is metricId=Main (to) depends on
+      // dependsOnId=Sub (from).
+      expect(await edges(), {(main, sub)});
+      final rel = await service.relationsOf(sub);
+      expect(rel.leadsTo, {main});
+      expect(rel.dependsOn, isEmpty);
+      final relMain = await service.relationsOf(main);
+      expect(relMain.dependsOn, {sub});
+      expect(relMain.leadsTo, isEmpty);
+
+      // Weight semantics: sub leads to a main -> level 9, weight 9 x 10.
+      final s = await row(sub);
+      expect((s.weight, s.importanceLevel), (90, 9));
+      expect((await row(main)).weight, 1000);
+    });
+
+    test('a duplicate addRelation is a no-op', () async {
+      final a = await make('A');
+      final b = await make('B');
+      await service.addRelation(fromId: a, toId: b);
+      await service.addRelation(fromId: a, toId: b);
+      expect(await edges(), {(b, a)});
+      expect(await db.select(db.metricDependenciesTable).get(), hasLength(1));
+    });
+
+    test('a direct loop throws and changes nothing', () async {
+      final a = await make('A');
+      final b = await make('B');
+      await service.addRelation(fromId: a, toId: b);
+      await expectLater(
+        service.addRelation(fromId: b, toId: a),
+        throwsA(isA<MetricCycleException>()),
+      );
+      expect(await edges(), {(b, a)});
+    });
+
+    test('a longer loop throws and changes nothing', () async {
+      final main = await make('Main', main: true);
+      final a = await make('A');
+      final b = await make('B');
+      final c = await make('C');
+      await service.addRelation(fromId: a, toId: b);
+      await service.addRelation(fromId: b, toId: c);
+      await service.addRelation(fromId: c, toId: main);
+      final before = await edges();
+      final weightsBefore = {
+        for (final m in await db.select(db.metricsTable).get()) m.id: m.weight,
+      };
+
+      // C already (transitively) leads from A; C leads to A closes the loop.
+      await expectLater(
+        service.addRelation(fromId: c, toId: a),
+        throwsA(isA<MetricCycleException>()),
+      );
+      await expectLater(
+        service.addRelation(fromId: main, toId: a),
+        throwsA(isA<MetricCycleException>()),
+      );
+      expect(await edges(), before);
+      expect({
+        for (final m in await db.select(db.metricsTable).get()) m.id: m.weight,
+      }, weightsBefore);
+    });
+
+    test('a self link throws', () async {
+      final a = await make('A');
+      expect(
+        () => service.addRelation(fromId: a, toId: a),
+        throwsArgumentError,
+      );
+      expect(await edges(), isEmpty);
+    });
+
+    test('removeRelation removes it; addRelation restores it', () async {
+      final main = await make('Main', main: true);
+      final sub = await make('Sub');
+      await service.addRelation(fromId: sub, toId: main);
+      expect((await row(sub)).weight, 90);
+
+      await service.removeRelation(fromId: sub, toId: main);
+      expect(await edges(), isEmpty);
+      final s = await row(sub);
+      expect((s.weight, s.importanceLevel), (0, 0));
+
+      // Removing a missing relation is harmless.
+      await service.removeRelation(fromId: sub, toId: main);
+
+      await service.addRelation(fromId: sub, toId: main);
+      expect(await edges(), {(main, sub)});
+      expect((await row(sub)).weight, 90);
+    });
+
+    test('removing the middle link cuts the path for the far end', () async {
+      final main = await make('Main', main: true);
+      final mid = await make('Mid');
+      final leaf = await make('Leaf');
+      await service.addRelation(fromId: mid, toId: main);
+      await service.addRelation(fromId: leaf, toId: mid);
+      expect((await row(leaf)).weight, greaterThan(0));
+
+      await service.removeRelation(fromId: mid, toId: main);
+      expect((await row(mid)).weight, 0);
+      expect((await row(leaf)).weight, 0);
     });
   });
 

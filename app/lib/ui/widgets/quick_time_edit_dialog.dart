@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../dialog_stack.dart';
 import '../providers.dart';
 import 'date_time_field.dart';
 
@@ -27,7 +28,7 @@ class QuickTimeEditDialog extends ConsumerStatefulWidget {
     DateTime? initialStart,
     DateTime? initialEnd,
   }) {
-    return showDialog<void>(
+    return showStackedDialog<void>(
       context: context,
       builder: (_) => QuickTimeEditDialog(
         actionId: actionId,

@@ -20,6 +20,10 @@ class ActionTile extends ConsumerWidget {
         ref.watch(runningOccurrencesProvider).value?.contains(action.id) ??
         false;
 
+    final urgency = ref.watch(
+      actionUrgencyProvider.select((m) => m[action.id]),
+    );
+
     final subtitleParts = <String>[
       if (action.isDoneBefore) 'Done',
       if (action.priority != null) action.priority!,
@@ -35,7 +39,14 @@ class ActionTile extends ConsumerWidget {
         color: isRunning ? Theme.of(context).colorScheme.primary : null,
       ),
       title: Text(action.name),
-      subtitle: subtitleParts.isEmpty ? null : Text(subtitleParts.join(' · ')),
+      subtitle: subtitleParts.isEmpty && urgency == null
+          ? null
+          : Text(
+              [
+                ...subtitleParts,
+                if (urgency != null) 'U ${formatUrgency(urgency)}',
+              ].join(' · '),
+            ),
       onTap: onTap,
       trailing: ActionMenuButton(actionId: action.id),
     );
@@ -44,7 +55,8 @@ class ActionTile extends ConsumerWidget {
 
 String formatScheduledWhen(ActionListItem a) {
   final start = a.startAt!.toLocal();
-  final date = '${start.year}-${twoDigits(start.month)}-${twoDigits(start.day)}';
+  final date =
+      '${start.year}-${twoDigits(start.month)}-${twoDigits(start.day)}';
   if (a.isAllDay) return date;
   return '$date ${twoDigits(start.hour)}:${twoDigits(start.minute)}';
 }
@@ -62,6 +74,9 @@ String formatActionDuration(ActionListItem a) => formatDuration(
     legacyEstimatedMinutes: a.estimatedMinutes,
   ),
 );
+
+/// Urgency rounded to a whole number, e.g. 910 or -90.
+String formatUrgency(double u) => u.round().toString();
 
 String twoDigits(int n) => n.toString().padLeft(2, '0');
 

@@ -84,6 +84,7 @@ class ActionService {
     bool isAllDay = false,
     int? estimatedMinutes,
     String? countableActivityId,
+    String? notes,
     List<String> metricIds = const [],
   }) async {
     final id = newId();
@@ -104,6 +105,7 @@ class ActionService {
               isAllDay: Value(isAllDay),
               estimatedMinutes: Value(estimatedMinutes),
               countableActivityId: Value(countableActivityId),
+              notes: Value(notes),
               createdAt: nowText,
               updatedAt: nowText,
             ),
@@ -135,6 +137,9 @@ class ActionService {
     DateTime? startAt,
     DateTime? endAt,
     required bool isAllDay,
+    // Absent = leave the notes as they are (a caller that doesn't know about
+    // notes must not wipe them); `Value(null)` clears them.
+    Value<String?> notes = const Value.absent(),
   }) {
     final nowText = dateTimeToDb(DateTime.now())!;
     return (db.update(
@@ -148,6 +153,7 @@ class ActionService {
         startAt: Value(dateTimeToDb(startAt)),
         endAt: Value(dateTimeToDb(endAt)),
         isAllDay: Value(isAllDay),
+        notes: notes,
         updatedAt: Value(nowText),
       ),
     );
@@ -501,6 +507,8 @@ class ActionService {
               estimatedMinutes: Value(source.estimatedMinutes),
               sequenceNumber: Value(sequence + 1),
               countableActivityId: Value(source.countableActivityId),
+              // The whole description carries over as it is (ticks kept).
+              notes: Value(source.notes),
               createdAt: nowText,
               updatedAt: nowText,
             ),

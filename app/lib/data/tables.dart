@@ -35,6 +35,12 @@ class ActionsTable extends Table {
   BoolColumn get isAllDay => boolean().withDefault(const Constant(false))();
   IntColumn get estimatedMinutes => integer().nullable()();
   TextColumn get resultNote => text().nullable()();
+
+  /// The action's rich-text description (checklists, bullets, headings…):
+  /// the editor's Document JSON, or null when empty. Written by the notes
+  /// editor in the action dialog; `result_note` stays a separate, unused
+  /// plain "outcome" field.
+  TextColumn get notes => text().nullable()();
   TextColumn get completedAt => text().nullable()();
 
   /// Position in a "Continue with Same Action" chain (`[#2] Read a Bible`).
@@ -145,6 +151,8 @@ class ActionOccurrencesTable extends Table {
 ///   because `window` is a reserved SQL word.
 /// - `target`: the amount that means 100% progress for count/hours.
 /// - `is_main`: a main growth direction, always weighing 1000.
+/// - `icon`: an emoji shown before the name (null = none).
+/// - `pos_x`/`pos_y`: the node's position on the Mindmap (null = auto layout).
 /// - `weight` and `importance_level` are derived caches, rewritten by
 ///   `MetricService.recomputeWeights()` whenever the graph or a main flag
 ///   changes (so SQL can read them without re-walking the graph).
@@ -161,6 +169,11 @@ class MetricsTable extends Table {
   RealColumn get target => real().withDefault(const Constant(1))();
   BoolColumn get isMain => boolean().withDefault(const Constant(false))();
   IntColumn get importanceLevel => integer().withDefault(const Constant(0))();
+  TextColumn get icon => text().nullable()();
+
+  /// Where the node sits on the Mindmap canvas (null = not placed yet).
+  RealColumn get posX => real().nullable()();
+  RealColumn get posY => real().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

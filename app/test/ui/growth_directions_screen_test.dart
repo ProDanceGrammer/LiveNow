@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -166,17 +167,15 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('Tree tab nests directions under the ones they feed', (
+  testWidgets('Mindmap tab replaces the Tree tab and shows the directions', (
     tester,
   ) async {
     await pumpScreen(tester, seed: (m, a) => seedWeekly(m, a, [('Alpha', 0)]));
-    await tester.tap(find.text('Tree'));
+    expect(find.text('Tree'), findsNothing);
+    await tester.tap(find.text('Mindmap'));
     await animate(tester);
+    await settle(tester);
     expect(find.text('Main'), findsOneWidget);
-    expect(find.text('Alpha'), findsNothing, reason: 'collapsed');
-
-    await tester.tap(find.text('Main'));
-    await animate(tester);
     expect(find.text('Alpha'), findsOneWidget);
     await unmount(tester);
   });
@@ -269,6 +268,67 @@ void main() {
     });
     await tester.pump(const Duration(seconds: 6));
     await settle(tester);
+    await unmount(tester);
+  });
+
+  testWidgets('importing saved Notion pages sets icons shown in the list', (
+    tester,
+  ) async {
+    const html =
+        '<div class="notion-selectable notion-page-block notion-collection-item">'
+        '<div data-col-index="0" style="x"><div><img class="notion-emoji" alt="P"></div>'
+        '<div>Small step</div></div><div data-col-index="1" style="x"></div></div>';
+    await pumpScreen(
+      tester,
+      seed: (m, a) async {
+        await m.saveMetric(name: 'Small step', kind: MetricKind.boolean);
+      },
+      overrides: [
+        notionPagesPickerProvider.overrideWithValue(() async => [html]),
+      ],
+    );
+
+    await tester.tap(
+      find.byTooltip(
+        'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
+      ),
+    );
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('Set 1 icons'), findsOneWidget);
+    expect((await allMetrics(tester)).single.icon, 'P');
+    await tester.pump(const Duration(seconds: 6));
+    await settle(tester);
+    await unmount(tester);
+  });
+
+  testWidgets('a direction icon shows on the Balance board and in the List', (
+    tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      seed: (m, a) async {
+        await m.saveMetric(
+          name: 'Focus me',
+          kind: MetricKind.count,
+          window: MetricWindow.week,
+          target: 3,
+          isMain: true,
+          icon: const Value('🚓'),
+        );
+      },
+    );
+    await settle(tester);
+    expect(find.textContaining('🚓 Focus me'), findsWidgets);
+
+    await tester.tap(find.text('List'));
+    await animate(tester);
+    await settle(tester);
+    expect(find.textContaining('🚓 Focus me'), findsWidgets);
     await unmount(tester);
   });
 
