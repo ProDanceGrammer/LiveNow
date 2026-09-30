@@ -132,6 +132,28 @@ Future<void> runUndoableRemoveRelation(
   );
 }
 
+/// Runs a Mindmap layout ([apply]) and offers Undo, which writes [previous]
+/// (the positions as stored before, nulls included) back. [afterUndo] lets the
+/// view refit itself; it may run after the view is gone, so it must check.
+Future<void> runUndoableLayout(
+  BuildContext context,
+  WidgetRef ref, {
+  required String description,
+  required Future<void> Function() apply,
+  required Map<String, (double?, double?)> previous,
+  VoidCallback? afterUndo,
+}) async {
+  final service = ref.read(metricServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  await apply();
+  _offerUndo(messenger, lastUndo, description, () async {
+    await service.restorePositions(previous);
+    afterUndo?.call();
+  });
+}
+
 void _offerUndo(
   ScaffoldMessengerState messenger,
   StateController<Object?> lastUndo,

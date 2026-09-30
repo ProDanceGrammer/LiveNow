@@ -228,4 +228,126 @@ void main() {
       expect(r.values.every((v) => v.$1 >= 0 && v.$2 >= 0), isTrue);
     },
   );
+
+  group('treeLayout', () {
+    // g(parent, child): parent depends on child, i.e. child leads to parent.
+    test('empty, and goals stand to the right of what builds them', () {
+      expect(treeLayout(g([]), []), isEmpty);
+      final p = treeLayout(g([('goal', 'a'), ('a', 'b')]), [
+        m('goal', main: true),
+        m('a'),
+        m('b'),
+      ]);
+      expect(p['goal']!.$1, greaterThan(p['a']!.$1));
+      expect(p['a']!.$1, greaterThan(p['b']!.$1));
+      expect(p['goal']!.$2, p['a']!.$2); // a chain sits on one row
+      expectNoOverlap(p);
+    });
+
+    test('a parent is centred on its children, branches stay grouped', () {
+      final p = treeLayout(
+        g([('P', 'k1'), ('P', 'k2'), ('P', 'k3'), ('Q', 'q1')]),
+        [
+          m('P', main: true),
+          m('Q', main: true),
+          m('k1'),
+          m('k2'),
+          m('k3'),
+          m('q1'),
+        ],
+      );
+      expect(p['P']!.$2, closeTo(p['k2']!.$2, 1e-9)); // middle of k1..k3
+      // Q's whole branch is below P's (no interleaving).
+      expect(p['q1']!.$2, greaterThan(p['k3']!.$2));
+      expect(p['Q']!.$2, greaterThan(p['P']!.$2));
+      expectNoOverlap(p);
+    });
+
+    test('a shared direction stands under the parent nearest to a main', () {
+      // M (main) <- P1 ; M <- X <- P2 ; N feeds both P1 and P2.
+      final p = treeLayout(
+        g([('M', 'P1'), ('M', 'X'), ('X', 'P2'), ('P1', 'N'), ('P2', 'N')]),
+        [m('M', main: true), m('P1'), m('X'), m('P2'), m('N')],
+      );
+      // N is P1's only child -> P1 sits on N's row; P2 is a childless leaf.
+      expect(p['P1']!.$2, closeTo(p['N']!.$2, 1e-9));
+      expect(p['P2']!.$2, isNot(closeTo(p['N']!.$2, 1e-9)));
+      // Every arrow still points right (children left of all their parents).
+      expect(p['N']!.$1, lessThan(p['P1']!.$1));
+      expect(p['N']!.$1, lessThan(p['P2']!.$1));
+      expectNoOverlap(p);
+    });
+
+    test('siblings and roots follow the order hint, else the name', () {
+      final metrics = [m('R', main: true), m('a'), m('b'), m('c')];
+      final graph = g([('R', 'a'), ('R', 'b'), ('R', 'c')]);
+      final byName = treeLayout(graph, metrics);
+      expect(byName['a']!.$2, lessThan(byName['b']!.$2));
+      expect(byName['b']!.$2, lessThan(byName['c']!.$2));
+      final hinted = treeLayout(
+        graph,
+        metrics,
+        orderHint: {'c': 0, 'a': 10, 'b': 20},
+      );
+      expect(hinted['c']!.$2, lessThan(hinted['a']!.$2));
+      expect(hinted['a']!.$2, lessThan(hinted['b']!.$2));
+    });
+
+    test('rootId lays out only the root and what builds it', () {
+      final metrics = [m('G', main: true), m('a'), m('b'), m('other'), m('x')];
+      final p = treeLayout(
+        g([('G', 'a'), ('a', 'b'), ('other', 'x')]),
+        metrics,
+        rootId: 'a',
+      );
+      expect(p.keys.toSet(), {'a', 'b'});
+      expect(p['a']!.$1, greaterThan(p['b']!.$1));
+      expect(treeLayout(g([]), metrics, rootId: 'missing'), isEmpty);
+    });
+
+    test('unconnected directions form a block below the trees', () {
+      final p = treeLayout(g([('R', 'a')]), [
+        m('R', main: true),
+        m('a'),
+        m('solo1'),
+        m('solo2'),
+      ]);
+      final treeBottom = max(p['R']!.$2, p['a']!.$2);
+      expect(p['solo1']!.$2, greaterThan(treeBottom));
+      expect(p['solo2']!.$2, greaterThan(treeBottom));
+      expectNoOverlap(p);
+    });
+
+    test(
+      '210 nodes: no overlaps, arrows all point right, fast, deterministic',
+      () {
+        final d = randomDag(210);
+        final sw = Stopwatch()..start();
+        final p = treeLayout(d.graph, d.metrics);
+        expect(sw.elapsedMilliseconds, lessThan(200));
+        expect(p.length, 210);
+        expectNoOverlap(p);
+        for (final mm in d.metrics) {
+          for (final parent in d.graph.leadsToOf(mm.id)) {
+            expect(
+              p[mm.id]!.$1,
+              lessThan(p[parent]!.$1),
+              reason: '${mm.id} -> $parent',
+            );
+          }
+        }
+        expect(treeLayout(d.graph, d.metrics), p);
+      },
+    );
+
+    test('a cycle does not hang and still places everything', () {
+      final p = treeLayout(g([('a', 'b'), ('b', 'c'), ('c', 'a')]), [
+        m('a'),
+        m('b'),
+        m('c'),
+      ]);
+      expect(p.keys.toSet(), {'a', 'b', 'c'});
+      expectNoOverlap(p);
+    });
+  });
 }

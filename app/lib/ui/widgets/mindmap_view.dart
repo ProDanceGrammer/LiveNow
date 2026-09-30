@@ -15,7 +15,8 @@ import '../../domain/mindmap_layout.dart'
         shiftIntoView,
         mindmapNodeHeight,
         mindmapNodeWidth,
-        radialLayout;
+        radialLayout,
+        treeLayout;
 import '../providers.dart';
 import '../undo.dart';
 import '../urgency_colors.dart';
@@ -78,6 +79,9 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   Size _viewport = Size.zero;
   Size _canvas = const Size(2000, 1500);
   bool _fitPending = true;
+
+  /// When set, the next automatic fit frames only these nodes.
+  Set<String>? _fitOnly;
   bool _syncScheduled = false;
 
   @override
@@ -167,7 +171,9 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
         _version.value++;
         if (_fitPending && _viewport != Size.zero && snap.metrics.isNotEmpty) {
           _fitPending = false;
-          _fitAll();
+          final only = _fitOnly;
+          _fitOnly = null;
+          _fitAll(only: only);
         }
       });
     }
@@ -193,11 +199,13 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
         _controller.value;
   }
 
-  void _fitAll() {
+  void _fitAll({Set<String>? only}) {
     if (_viewport == Size.zero || _pos.isEmpty) return;
     var minX = double.infinity, minY = double.infinity;
     var maxX = -double.infinity, maxY = -double.infinity;
-    for (final n in _pos.values) {
+    for (final e in _pos.entries) {
+      if (only != null && !only.contains(e.key)) continue;
+      final n = e.value;
       minX = math.min(minX, n.value.dx);
       minY = math.min(minY, n.value.dy);
       maxX = math.max(maxX, n.value.dx + mindmapNodeWidth);
@@ -217,23 +225,99 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
         Matrix4.diagonal3Values(s, s, 1);
   }
 
-  Future<void> _autoLayout(GrowthSnapshot s) async {
-    final service = ref.read(metricServiceProvider);
-    final positions = layeredLayout(s.graph, s.metrics);
-    _layout = positions;
-    _layoutSignature = '';
-    _fitPending = true;
-    await service.clearPositions();
-    await service.savePositions(positions);
+  /// Runs a layout with Undo: remembers the positions as stored now.
+  Future<void> _runLayout(
+    GrowthSnapshot s,
+    String description,
+    Future<void> Function() apply,
+  ) {
+    return runUndoableLayout(
+      context,
+      ref,
+      description: description,
+      previous: {for (final m in s.metrics) m.id: (m.posX, m.posY)},
+      apply: apply,
+      afterUndo: () {
+        if (!mounted) return;
+        _fitPending = true;
+        _fitOnly = null;
+      },
+    );
   }
 
-  Future<void> _radial(GrowthSnapshot s) async {
-    if (_selected.length != 1) return;
+  /// Every node's current canvas y, so layouts keep the order on screen.
+  Map<String, double> get _orderHint => {
+    for (final e in _pos.entries) e.key: e.value.value.dy,
+  };
+
+  Future<void> _autoLayout(GrowthSnapshot s) {
+    final service = ref.read(metricServiceProvider);
+    return _runLayout(s, 'Applied auto layout', () async {
+      final positions = layeredLayout(s.graph, s.metrics);
+      _layout = positions;
+      _layoutSignature = '';
+      _fitPending = true;
+      _fitOnly = null;
+      await service.clearPositions();
+      await service.savePositions(positions);
+    });
+  }
+
+  Future<void> _radial(GrowthSnapshot s) {
+    if (_selected.length != 1) return Future.value();
     final id = _selected.single;
-    _fitPending = true;
-    await ref
-        .read(metricServiceProvider)
-        .savePositions(shiftIntoView(radialLayout(s.graph, s.metrics, id)));
+    final service = ref.read(metricServiceProvider);
+    return _runLayout(s, 'Applied radial layout', () {
+      _fitPending = true;
+      _fitOnly = null;
+      return service.savePositions(
+        shiftIntoView(radialLayout(s.graph, s.metrics, id)),
+      );
+    });
+  }
+
+  Future<void> _tree(GrowthSnapshot s) {
+    final service = ref.read(metricServiceProvider);
+    return _runLayout(s, 'Applied tree layout', () {
+      _fitPending = true;
+      _fitOnly = null;
+      return service.savePositions(
+        shiftIntoView(treeLayout(s.graph, s.metrics, orderHint: _orderHint)),
+      );
+    });
+  }
+
+  /// The tree of the selected direction, placed below everything else; only
+  /// its nodes move.
+  Future<void> _treeOfSelected(GrowthSnapshot s) {
+    if (_selected.length != 1) return Future.value();
+    final tree = treeLayout(
+      s.graph,
+      s.metrics,
+      rootId: _selected.single,
+      orderHint: _orderHint,
+    );
+    if (tree.isEmpty) return Future.value();
+    var left = double.infinity, bottom = -double.infinity;
+    for (final e in _pos.entries) {
+      if (tree.containsKey(e.key)) continue;
+      left = math.min(left, e.value.value.dx);
+      bottom = math.max(bottom, e.value.value.dy + mindmapNodeHeight);
+    }
+    final originX = left.isFinite ? left : 100.0;
+    final originY = bottom.isFinite ? bottom + 120 : 100.0;
+    final minX = tree.values.map((p) => p.$1).reduce(math.min);
+    final minY = tree.values.map((p) => p.$2).reduce(math.min);
+    final moved = {
+      for (final e in tree.entries)
+        e.key: (e.value.$1 - minX + originX, e.value.$2 - minY + originY),
+    };
+    final service = ref.read(metricServiceProvider);
+    return _runLayout(s, 'Applied tree of the selected direction', () {
+      _fitPending = true;
+      _fitOnly = moved.keys.toSet();
+      return service.savePositions(moved);
+    });
   }
 
   // ---- nodes ----------------------------------------------------------------
@@ -526,23 +610,50 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: Row(
               children: [
-                TextButton.icon(
-                  onPressed: () => _autoLayout(s),
-                  icon: const Icon(Icons.auto_awesome_mosaic_outlined),
-                  label: const Text('Auto layout'),
-                ),
-                const SizedBox(width: 8),
-                Tooltip(
-                  message: _selected.length == 1
-                      ? 'Lay the map out in rings around the selected direction'
-                      : 'Select exactly one direction first',
-                  child: TextButton.icon(
-                    onPressed: _selected.length == 1 ? () => _radial(s) : null,
-                    icon: const Icon(Icons.radar),
-                    label: const Text('Radial around selected'),
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => _autoLayout(s),
+                        icon: const Icon(Icons.auto_awesome_mosaic_outlined),
+                        label: const Text('Auto layout'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _tree(s),
+                        icon: const Icon(Icons.account_tree),
+                        label: const Text('Tree layout'),
+                      ),
+                      Tooltip(
+                        message: _selected.length == 1
+                            ? 'Lay the map out in rings around the selected '
+                                  'direction'
+                            : 'Select exactly one direction first',
+                        child: TextButton.icon(
+                          onPressed: _selected.length == 1
+                              ? () => _radial(s)
+                              : null,
+                          icon: const Icon(Icons.radar),
+                          label: const Text('Radial around selected'),
+                        ),
+                      ),
+                      Tooltip(
+                        message: _selected.length == 1
+                            ? 'Lay out the selected direction and everything '
+                                  'leading into it as a tree below the map'
+                            : 'Select exactly one direction first',
+                        child: TextButton.icon(
+                          onPressed: _selected.length == 1
+                              ? () => _treeOfSelected(s)
+                              : null,
+                          icon: const Icon(Icons.account_tree_outlined),
+                          label: const Text('Tree of selected'),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const Spacer(),
                 const Tooltip(
                   message:
                       'Drag on empty space to select; right/middle-drag or '

@@ -8,7 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/growth_rules.dart';
 import 'package:livenow/domain/metric_service.dart';
-import 'package:livenow/domain/mindmap_layout.dart' show mindmapNodeWidth;
+import 'package:livenow/domain/mindmap_layout.dart'
+    show mindmapNodeHeight, mindmapNodeWidth;
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/mindmap_view.dart'
@@ -328,6 +329,32 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('the wheel and the buttons zoom a node to over 1000 px wide', (
+    tester,
+  ) async {
+    // Guards the zoom ceiling: at maximum zoom a 190 px node must fill most
+    // of the screen (about 6x), so a single direction is easy to read.
+    await pumpMap(tester);
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(node(alphaId))),
+    );
+    for (var i = 0; i < 80; i++) {
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, -120)));
+      await tester.pump();
+    }
+    expect(shownWidth(tester), greaterThan(1000));
+
+    await tester.tap(find.byTooltip('Fit all'));
+    await tester.pump();
+    for (var i = 0; i < 30; i++) {
+      await tester.tap(find.byTooltip('Zoom in'));
+      await tester.pump();
+    }
+    expect(shownWidth(tester), greaterThan(1000));
+    await unmount(tester);
+  });
+
   // ---- drag follows the mouse at any zoom -----------------------------------
 
   for (final zoom in [(-3, 'zoomed out'), (0, 'at 100%'), (5, 'zoomed in')]) {
@@ -601,4 +628,99 @@ void main() {
       0.15,
     );
   });
+
+  // ---- layout buttons: persist + Undo -----------------------------------------
+
+  Future<Map<String, (double?, double?)>> stored(WidgetTester tester) async {
+    final rows = await tester.runAsync(() => db.select(db.metricsTable).get());
+    return {for (final r in rows!) r.id: (r.posX, r.posY)};
+  }
+
+  Future<void> selectOnly(WidgetTester tester, List<String> ids) async {
+    final r = around(tester, ids);
+    await marquee(tester, r.topLeft - const Offset(20, 20), r.bottomRight);
+  }
+
+  Future<void> undoSnack(WidgetTester tester) async {
+    await animate(tester);
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await tester.pumpAndSettle(const Duration(seconds: 1));
+    await settle(tester);
+  }
+
+  for (final b in [
+    ('Auto layout', false),
+    ('Tree layout', false),
+    ('Radial around selected', true),
+    ('Tree of selected', true),
+  ]) {
+    testWidgets('${b.$1} persists positions and Undo restores them', (
+      tester,
+    ) async {
+      await pumpMap(tester);
+      if (b.$2) await selectOnly(tester, [mainId]);
+      final before = await stored(tester);
+
+      await tester.tap(find.widgetWithText(TextButton, b.$1));
+      await pause(tester);
+      await tester.pump();
+      final after = await stored(tester);
+      expect(after, isNot(before));
+
+      await undoSnack(tester);
+      expect(await stored(tester), before);
+      await unmount(tester);
+    });
+  }
+
+  testWidgets('Undo of a layout on an unplaced map restores the nulls', (
+    tester,
+  ) async {
+    await pumpMap(tester, placed: false);
+    final before = await stored(tester);
+    expect(before.values.every((p) => p == (null, null)), isTrue);
+    await tester.tap(find.text('Tree layout'));
+    await pause(tester);
+    await tester.pump();
+    expect((await stored(tester)).values.every((p) => p.$1 != null), isTrue);
+
+    await undoSnack(tester);
+    expect(await stored(tester), before);
+    await unmount(tester);
+  });
+
+  testWidgets(
+    'Tree of selected needs exactly one node and moves only the tree',
+    (tester) async {
+      await pumpMap(tester);
+      final button = find.widgetWithText(TextButton, 'Tree of selected');
+      expect(tester.widget<TextButton>(button).onPressed, isNull);
+      await selectOnly(tester, [mainId, alphaId]);
+      expect(tester.widget<TextButton>(button).onPressed, isNull);
+
+      await selectOnly(tester, [mainId]);
+      expect(tester.widget<TextButton>(button).onPressed, isNotNull);
+      final before = await stored(tester);
+      await tester.tap(button);
+      await pause(tester);
+      await tester.pump();
+      final after = await stored(tester);
+
+      // Beta is not part of Main's tree: untouched. Main and Alpha moved below it.
+      expect(after[betaId], before[betaId]);
+      for (final id in [mainId, alphaId]) {
+        expect(
+          after[id]!.$2,
+          greaterThanOrEqualTo(400 + mindmapNodeHeight + 120),
+        );
+      }
+      expect(after[mainId]!.$1, greaterThanOrEqualTo(500));
+      await tester.pump(const Duration(seconds: 6));
+      await unmount(tester);
+    },
+  );
 }

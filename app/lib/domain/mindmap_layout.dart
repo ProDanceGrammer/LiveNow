@@ -307,3 +307,171 @@ class _Box {
   double get right => left + width;
   double get bottom => top + height;
 }
+
+/// Left-to-right tree, goals on the RIGHT: a direction's sub-directions
+/// stand in the column(s) to its left, each branch grouped so arrows stay
+/// short, parents vertically centred on their branch. [rootId] null lays out
+/// the whole graph (every direction that leads to nothing is a root, stacked
+/// top to bottom); otherwise only [rootId] and everything that (transitively)
+/// leads into it. A direction feeding several goals stands under the parent
+/// nearest to a main direction (fewest hops up; ties by name) and its other
+/// arrows stay long. Column = longest path to a root, so every arrow points
+/// right. Roots and siblings are stacked in the order of [orderHint] (a node's
+/// current y; unknown ids go last, by name). Unconnected directions (no
+/// relations) form a row below. Positions start at (0, 0); no two overlap.
+MindmapPositions treeLayout(
+  GrowthGraph graph,
+  List<GrowthMetric> metrics, {
+  String? rootId,
+  Map<String, double> orderHint = const {},
+}) {
+  const w = mindmapNodeWidth, h = mindmapNodeHeight;
+  const rowH = h + mindmapGapY;
+  const colW = w + 80.0;
+  final byId = {for (final m in metrics) m.id: m};
+  if (rootId != null && !byId.containsKey(rootId)) return {};
+
+  // Nodes in scope: everything, or the root and all it (transitively) builds.
+  final scope = <String>{};
+  if (rootId == null) {
+    scope.addAll(byId.keys);
+  } else {
+    final queue = [rootId];
+    while (queue.isNotEmpty) {
+      final id = queue.removeLast();
+      if (!scope.add(id)) continue;
+      queue.addAll(graph.dependsOnOf(id).where(byId.containsKey));
+    }
+  }
+  List<String> parentsOf(String id) => [
+    for (final p in graph.leadsToOf(id))
+      if (scope.contains(p) && byId.containsKey(p)) p,
+  ];
+  List<String> childrenOf(String id) => [
+    for (final c in graph.dependsOnOf(id))
+      if (scope.contains(c) && byId.containsKey(c)) c,
+  ];
+
+  int byOrder(String a, String b) {
+    final ha = orderHint[a], hb = orderHint[b];
+    if (ha != null && hb != null && ha != hb) return ha.compareTo(hb);
+    if ((ha == null) != (hb == null)) return ha == null ? 1 : -1;
+    return _byName(byId[a]!, byId[b]!);
+  }
+
+  // Hops down from the nearest main (or from the root), for choosing the
+  // parent a shared direction stands under.
+  final dist = <String, int>{};
+  final sources = rootId != null
+      ? [rootId]
+      : [
+          for (final id in scope)
+            if (byId[id]!.isMain) id,
+        ];
+  var front = [...sources];
+  for (final id in front) {
+    dist[id] = 0;
+  }
+  while (front.isNotEmpty) {
+    final next = <String>[];
+    for (final id in front) {
+      for (final c in childrenOf(id)) {
+        if (!dist.containsKey(c)) {
+          dist[c] = dist[id]! + 1;
+          next.add(c);
+        }
+      }
+    }
+    front = next;
+  }
+  const far = 1 << 30;
+
+  // Column = longest path down from a root (cycles are ignored).
+  final col = <String, int>{};
+  final onStack = <String>{};
+  int columnOf(String id) {
+    final known = col[id];
+    if (known != null) return known;
+    onStack.add(id);
+    var c = 0;
+    for (final p in parentsOf(id)) {
+      if (!onStack.contains(p)) c = math.max(c, columnOf(p) + 1);
+    }
+    onStack.remove(id);
+    return col[id] = c;
+  }
+
+  // Each node stands under ONE parent: the nearest to a main direction.
+  final kids = <String, List<String>>{};
+  final roots = <String>[];
+  final isolated = <String>[];
+  for (final id in scope) {
+    if (!byId.containsKey(id)) continue;
+    final parents = parentsOf(id);
+    if (parents.isEmpty) {
+      if (rootId == id || childrenOf(id).isNotEmpty) {
+        roots.add(id);
+      } else {
+        isolated.add(id);
+      }
+      continue;
+    }
+    parents.sort((a, b) {
+      final c = (dist[a] ?? far).compareTo(dist[b] ?? far);
+      return c != 0 ? c : _byName(byId[a]!, byId[b]!);
+    });
+    (kids[parents.first] ??= []).add(id);
+  }
+  roots.sort(byOrder);
+  for (final list in kids.values) {
+    list.sort(byOrder);
+  }
+
+  // Rows: leaves take consecutive rows, a parent is centred on its children.
+  final row = <String, double>{};
+  var nextRow = 0.0;
+  final visited = <String>{};
+  double place(String id) {
+    visited.add(id);
+    final children = [
+      for (final c in kids[id] ?? const <String>[])
+        if (!visited.contains(c)) c,
+    ];
+    double y;
+    if (children.isEmpty) {
+      y = nextRow;
+      nextRow += 1;
+    } else {
+      final ys = [for (final c in children) place(c)];
+      y = (ys.first + ys.last) / 2;
+    }
+    return row[id] = y;
+  }
+
+  for (final r in roots) {
+    if (visited.contains(r)) continue;
+    place(r);
+    nextRow += 0.5; // a little air between separate trees
+  }
+  // Members of a loop that no root reaches: treated like unconnected ones.
+  for (final id in scope) {
+    if (byId.containsKey(id) &&
+        !visited.contains(id) &&
+        !isolated.contains(id)) {
+      isolated.add(id);
+    }
+  }
+
+  final maxCol = row.keys.fold<int>(0, (m, id) => math.max(m, columnOf(id)));
+  final result = <String, (double, double)>{
+    for (final e in row.entries)
+      e.key: ((maxCol - columnOf(e.key)) * colW, e.value * rowH),
+  };
+
+  isolated.sort(byOrder);
+  final startRow = row.isEmpty ? 0.0 : nextRow + 0.5;
+  for (var i = 0; i < isolated.length; i++) {
+    result[isolated[i]] = ((i % 5) * colW, (startRow + i ~/ 5) * rowH);
+  }
+  return result;
+}

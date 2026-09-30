@@ -349,6 +349,23 @@ class MetricService {
     });
   }
 
+  /// Puts positions back exactly as they were ([savePositions] can't write
+  /// the nulls of nodes that had not been placed yet). One batch.
+  Future<void> restorePositions(Map<String, (double?, double?)> positions) {
+    return db.batch((batch) {
+      for (final e in positions.entries) {
+        batch.update(
+          db.metricsTable,
+          MetricsTableCompanion(
+            posX: Value<double?>(e.value.$1),
+            posY: Value<double?>(e.value.$2),
+          ),
+          where: (t) => t.id.equals(e.key),
+        );
+      }
+    });
+  }
+
   /// Forgets all Mindmap positions (the next open lays the map out again).
   Future<void> clearPositions() => db
       .update(db.metricsTable)

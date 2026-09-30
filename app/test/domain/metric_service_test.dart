@@ -385,6 +385,19 @@ void main() {
     });
   });
 
+  test('restorePositions writes exact values, nulls included', () async {
+    final a = await make('A');
+    final b = await make('B');
+    await service.savePositions({a: (1, 2)});
+    await service.restorePositions({
+      a: (null, null),
+      b: (7.5, 8),
+      'nope': (1, 1),
+    });
+    expect(((await row(a)).posX, (await row(a)).posY), (null, null));
+    expect(((await row(b)).posX, (await row(b)).posY), (7.5, 8));
+  });
+
   group('relations', () {
     test('addRelation: to depends on from; weights recompute', () async {
       final main = await make('Main', main: true);
