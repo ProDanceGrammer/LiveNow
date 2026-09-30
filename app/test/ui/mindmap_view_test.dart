@@ -329,11 +329,11 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('the wheel and the buttons zoom a node to over 1000 px wide', (
+  testWidgets('the wheel and the buttons zoom a node to over 2000 px wide', (
     tester,
   ) async {
     // Guards the zoom ceiling: at maximum zoom a 190 px node must fill most
-    // of the screen (about 6x), so a single direction is easy to read.
+    // of the screen (about 12x), so a single direction is easy to read.
     await pumpMap(tester);
     final pointer = TestPointer(1, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(
@@ -343,7 +343,7 @@ void main() {
       await tester.sendEventToBinding(pointer.scroll(const Offset(0, -120)));
       await tester.pump();
     }
-    expect(shownWidth(tester), greaterThan(1000));
+    expect(shownWidth(tester), greaterThan(2000));
 
     await tester.tap(find.byTooltip('Fit all'));
     await tester.pump();
@@ -351,7 +351,7 @@ void main() {
       await tester.tap(find.byTooltip('Zoom in'));
       await tester.pump();
     }
-    expect(shownWidth(tester), greaterThan(1000));
+    expect(shownWidth(tester), greaterThan(2000));
     await unmount(tester);
   });
 

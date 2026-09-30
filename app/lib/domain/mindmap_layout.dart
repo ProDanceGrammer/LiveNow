@@ -308,6 +308,13 @@ class _Box {
   double get bottom => top + height;
 }
 
+bool _sameOrder(List<String> a, List<String> b) {
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
 /// Left-to-right tree, goals on the RIGHT: a direction's sub-directions
 /// stand in the column(s) to its left, each branch grouped so arrows stay
 /// short, parents vertically centred on their branch. [rootId] null lays out
@@ -326,8 +333,8 @@ MindmapPositions treeLayout(
   Map<String, double> orderHint = const {},
 }) {
   const w = mindmapNodeWidth, h = mindmapNodeHeight;
-  const rowH = h + mindmapGapY;
-  const colW = w + 80.0;
+  const rowH = h + 12.0;
+  const colW = w + 50.0;
   final byId = {for (final m in metrics) m.id: m};
   if (rootId != null && !byId.containsKey(rootId)) return {};
 
@@ -448,10 +455,73 @@ MindmapPositions treeLayout(
     return row[id] = y;
   }
 
-  for (final r in roots) {
-    if (visited.contains(r)) continue;
-    place(r);
-    nextRow += 0.5; // a little air between separate trees
+  void layoutRows() {
+    row.clear();
+    visited.clear();
+    nextRow = 0.0;
+    for (final r in roots) {
+      if (visited.contains(r)) continue;
+      place(r);
+      nextRow += 0.5; // a little air between separate trees
+    }
+  }
+
+  // Shorten the arrows that leave a branch (a direction feeding several
+  // goals only stands under one): re-order siblings, and roots, by the mean
+  // height of everything their subtree is connected to outside itself
+  // (barycenter sweeps). Branches with no outside links keep their order.
+  final treeParent = <String, String>{
+    for (final e in kids.entries)
+      for (final c in e.value) c: e.key,
+  };
+  Set<String> subtreeOf(String id, Set<String> into) {
+    if (!into.add(id)) return into;
+    for (final c in kids[id] ?? const <String>[]) {
+      subtreeOf(c, into);
+    }
+    return into;
+  }
+
+  double keyOf(String id) {
+    final members = subtreeOf(id, <String>{});
+    final ys = <double>[];
+    for (final m in members) {
+      for (final o in [...parentsOf(m), ...childrenOf(m)]) {
+        if (members.contains(o) || !row.containsKey(o)) continue;
+        if (m == id && o == treeParent[id]) continue; // shared by siblings
+        ys.add(row[o]!);
+      }
+    }
+    return ys.isEmpty
+        ? row[id]!
+        : ys.fold<double>(0, (a, b) => a + b) / ys.length;
+  }
+
+  layoutRows();
+  for (var pass = 0; pass < 8; pass++) {
+    var changed = false;
+    void reorder(List<String> group) {
+      if (group.length < 2) return;
+      final keys = {for (final id in group) id: keyOf(id)};
+      final before = [...group];
+      // Stable: equal keys keep their current order.
+      final indexed = [for (var i = 0; i < group.length; i++) (i, group[i])]
+        ..sort((x, y) {
+          final c = keys[x.$2]!.compareTo(keys[y.$2]!);
+          return c != 0 ? c : x.$1.compareTo(y.$1);
+        });
+      group
+        ..clear()
+        ..addAll(indexed.map((e) => e.$2));
+      if (!_sameOrder(before, group)) changed = true;
+    }
+
+    reorder(roots);
+    for (final list in kids.values) {
+      reorder(list);
+    }
+    if (!changed) break;
+    layoutRows();
   }
   // Members of a loop that no root reaches: treated like unconnected ones.
   for (final id in scope) {

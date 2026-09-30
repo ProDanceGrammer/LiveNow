@@ -25,7 +25,7 @@ import 'growth_direction_dialog.dart';
 const double _handleSize = 16;
 const double _edgeHitDistance = 8;
 const double _minScale = 0.04;
-const double _maxScale = 6;
+const double _maxScale = 12;
 const double _canvasPadding = 600;
 
 typedef _Edge = ({String from, String to});
