@@ -12,7 +12,11 @@ import 'package:livenow/domain/mindmap_layout.dart' show mindmapNodeWidth;
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/mindmap_view.dart'
-    show mindmapEdgeMidpoint, mindmapEdgeOpacity;
+    show
+        MindmapEdgeRole,
+        mindmapEdgeMidpoint,
+        mindmapEdgeOpacity,
+        mindmapEdgeRole;
 import 'package:livenow/ui/screens/growth_directions_screen.dart';
 import 'package:livenow/ui/urgency_colors.dart';
 
@@ -86,6 +90,8 @@ void main() {
   }
 
   Future<void> unmount(WidgetTester tester) async {
+    // A node's tap waits 300 ms for a possible second tap (double-click).
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(milliseconds: 1));
   }
@@ -145,13 +151,14 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('tapping a node opens its dialog', (tester) async {
-    await pumpMap(tester);
-    await tester.tap(node(alphaId));
-    await animate(tester);
-    expect(find.byType(AlertDialog), findsOneWidget);
-    await settle(tester);
-    await unmount(tester);
+  test('arrow roles: green into the selection, blue out of it', () {
+    // Edge = from (sub-direction) -> to (the direction it leads to).
+    expect(mindmapEdgeRole({'x'}, 'a', 'x'), MindmapEdgeRole.intoSelected);
+    expect(mindmapEdgeRole({'x'}, 'x', 'b'), MindmapEdgeRole.outOfSelected);
+    expect(mindmapEdgeRole({'x'}, 'a', 'b'), MindmapEdgeRole.none);
+    expect(mindmapEdgeRole({}, 'a', 'b'), MindmapEdgeRole.none);
+    // Both ends selected: it points into a selected node.
+    expect(mindmapEdgeRole({'x', 'y'}, 'x', 'y'), MindmapEdgeRole.intoSelected);
   });
 
   testWidgets('dragging a node stores its new position', (tester) async {
@@ -409,18 +416,37 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('a single click only selects; a double click opens the dialog', (
+    tester,
+  ) async {
+    await pumpMap(tester);
+    await tester.tap(node(alphaId));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(selectedIds(tester), {alphaId});
+    expect(find.byType(AlertDialog), findsNothing);
+
+    await tester.tap(node(betaId));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(node(betaId));
+    await animate(tester);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(selectedIds(tester), {betaId});
+    await settle(tester);
+    await unmount(tester);
+  });
+
   testWidgets('Ctrl+click toggles a node without opening its dialog', (
     tester,
   ) async {
     await pumpMap(tester);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.tap(node(alphaId));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(node(betaId));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(selectedIds(tester), {alphaId, betaId});
     await tester.tap(node(alphaId));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     expect(selectedIds(tester), {betaId});
     expect(find.byType(AlertDialog), findsNothing);

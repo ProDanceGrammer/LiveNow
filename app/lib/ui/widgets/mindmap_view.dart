@@ -546,7 +546,10 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
                 const Tooltip(
                   message:
                       'Drag on empty space to select; right/middle-drag or '
-                      'Space+drag to pan; Ctrl+click adds to selection',
+                      'Space+drag to pan; Ctrl+click adds to selection; '
+                      'double-click opens a direction. '
+                      'Green arrows lead INTO the selected direction, blue '
+                      'arrows go to the directions it leads to',
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 8),
                     child: Icon(Icons.info_outline, size: 20),
@@ -614,6 +617,12 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
                                         selected: selectedEdge,
                                         selectedNodes: {..._selected},
                                         highlight: theme.colorScheme.primary,
+                                        intoColor: dark
+                                            ? Colors.greenAccent.shade400
+                                            : Colors.green.shade700,
+                                        outOfColor: dark
+                                            ? Colors.lightBlueAccent
+                                            : Colors.blue.shade700,
                                         color:
                                             theme.colorScheme.onSurfaceVariant,
                                         repaint: Listenable.merge([
@@ -638,11 +647,15 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
                                 ),
                                 progress: s.stats[m.id]?.progress ?? 0,
                                 selected: _selected.contains(m.id),
-                                onOpen: () {
+                                onTap: () {
+                                  _focus.requestFocus();
                                   if (_addModifier) {
                                     _toggleNode(m.id);
-                                    return;
+                                  } else {
+                                    _selectNode(m.id);
                                   }
+                                },
+                                onOpen: () {
                                   _selectNode(m.id);
                                   GrowthDirectionDialog.show(
                                     context,
@@ -806,6 +819,20 @@ _Curve? _edgeCurve(Offset? from, Offset? to) {
 Offset mindmapEdgeMidpoint(Offset fromTopLeft, Offset toTopLeft) =>
     _edgeCurve(fromTopLeft, toTopLeft)!.at(0.5);
 
+/// How an arrow relates to the selected nodes.
+enum MindmapEdgeRole { none, intoSelected, outOfSelected }
+
+/// An arrow runs from a sub-direction ([from]) to the direction it leads to
+/// ([to]). Pointing INTO a selected node it is one of that direction's
+/// sub-directions; leaving a selected node it points at a direction the
+/// selected one leads to. Into wins when both ends are selected.
+@visibleForTesting
+MindmapEdgeRole mindmapEdgeRole(Set<String> selected, String from, String to) {
+  if (selected.contains(to)) return MindmapEdgeRole.intoSelected;
+  if (selected.contains(from)) return MindmapEdgeRole.outOfSelected;
+  return MindmapEdgeRole.none;
+}
+
 /// How opaque an arrow is drawn: see [_EdgePainter].
 @visibleForTesting
 double mindmapEdgeOpacity({
@@ -835,6 +862,8 @@ class _EdgePainter extends CustomPainter {
   final Set<String> selectedNodes;
   final Color color;
   final Color highlight;
+  final Color intoColor;
+  final Color outOfColor;
   final ValueNotifier<({String from, Offset to})?> rubber;
 
   _EdgePainter({
@@ -844,6 +873,8 @@ class _EdgePainter extends CustomPainter {
     required this.selectedNodes,
     required this.color,
     required this.highlight,
+    required this.intoColor,
+    required this.outOfColor,
     required this.rubber,
     required Listenable repaint,
   }) : super(repaint: repaint);
@@ -851,7 +882,8 @@ class _EdgePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final anyNode = selectedNodes.isNotEmpty;
-    final hot = <_Curve>[];
+    final hotInto = <_Curve>[];
+    final hotOut = <_Curve>[];
     _Curve? chosen;
     final plain = Paint()
       ..color = color.withValues(
@@ -870,9 +902,12 @@ class _EdgePainter extends CustomPainter {
       if (curve == null) continue;
       if (e == selected) {
         chosen = curve;
-      } else if (selectedNodes.contains(e.from) ||
-          selectedNodes.contains(e.to)) {
-        hot.add(curve);
+      } else if (mindmapEdgeRole(selectedNodes, e.from, e.to) ==
+          MindmapEdgeRole.intoSelected) {
+        hotInto.add(curve);
+      } else if (mindmapEdgeRole(selectedNodes, e.from, e.to) ==
+          MindmapEdgeRole.outOfSelected) {
+        hotOut.add(curve);
       } else {
         _curveArrow(canvas, curve, plain, 8);
       }
@@ -881,8 +916,17 @@ class _EdgePainter extends CustomPainter {
       ..color = highlight
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
-    for (final c in hot) {
-      _curveArrow(canvas, c, hotPaint, 10);
+    for (final (curves, colour) in [
+      (hotOut, outOfColor),
+      (hotInto, intoColor),
+    ]) {
+      final paint = Paint()
+        ..color = colour
+        ..strokeWidth = 2.5
+        ..style = PaintingStyle.stroke;
+      for (final c in curves) {
+        _curveArrow(canvas, c, paint, 10);
+      }
     }
     if (chosen != null) {
       _curveArrow(
@@ -938,7 +982,9 @@ class _EdgePainter extends CustomPainter {
       old.selected != selected ||
       !setEquals(old.selectedNodes, selectedNodes) ||
       old.color != color ||
-      old.highlight != highlight;
+      old.highlight != highlight ||
+      old.intoColor != intoColor ||
+      old.outOfColor != outOfColor;
 }
 
 // ---- a node -----------------------------------------------------------------
@@ -949,6 +995,7 @@ class _MindNode extends StatelessWidget {
   final ({Color bg, Color fg}) colors;
   final double progress;
   final bool selected;
+  final VoidCallback onTap;
   final VoidCallback onOpen;
   final VoidCallback onSelect;
   final void Function(Offset delta) onDrag;
@@ -964,6 +1011,7 @@ class _MindNode extends StatelessWidget {
     required this.colors,
     required this.progress,
     required this.selected,
+    required this.onTap,
     required this.onOpen,
     required this.onSelect,
     required this.onDrag,
@@ -989,7 +1037,8 @@ class _MindNode extends StatelessWidget {
             width: mindmapNodeWidth,
             height: mindmapNodeHeight,
             child: GestureDetector(
-              onTap: onOpen,
+              onTap: onTap,
+              onDoubleTap: onOpen,
               onPanDown: (_) => onSelect(),
               onPanUpdate: (d) => onDrag(d.delta),
               onPanEnd: (_) => onDragEnd(),
