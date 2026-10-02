@@ -5,6 +5,10 @@
 /// Finish/Postpone/quick-edit all recompute it just by moving `endAt`); a
 /// scheduled, all-day action mirrors the manual flag too, since a whole-day
 /// window doesn't have a meaningful "is it over yet" answer.
+///
+/// The list queries filter in SQL with the same rule — keep `doneBeforeSql()`
+/// in `data/queries.dart` in sync (`test/data/list_queries_test.dart` checks
+/// that they agree).
 bool isDoneBefore({
   required DateTime? startAt,
   required DateTime? endAt,

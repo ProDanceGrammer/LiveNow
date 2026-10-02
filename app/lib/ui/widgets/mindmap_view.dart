@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/foundation.dart' show listEquals, setEquals;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,8 +18,10 @@ import '../../domain/mindmap_layout.dart'
         radialLayout,
         treeLayout;
 import '../providers.dart';
+import '../theme/glass_theme.dart';
 import '../undo.dart';
 import '../urgency_colors.dart';
+import 'glass.dart';
 import 'growth_direction_dialog.dart';
 
 const double _handleSize = 16;
@@ -28,7 +30,23 @@ const double _minScale = 0.04;
 const double _maxScale = 12;
 const double _canvasPadding = 600;
 
+/// Below this zoom a node's text is unreadable, so a node is drawn as a plain
+/// coloured box (no text, progress bar or link handle).
+const double mindmapLodScale = 0.35;
+
+/// Ordinary (not highlighted) arrows lose their arrowhead below this zoom.
+const double _arrowHeadScale = 0.25;
+
+/// Nodes up to this many viewports beyond each viewport edge are still built,
+/// so panning does not make boxes pop in.
+const double _cullMargin = 0.5;
+
 typedef _Edge = ({String from, String to});
+
+/// [c] with its HSL lightness set to [lightness]: the pastel glass accents,
+/// darkened (or lifted) until they read on a coloured node / the glass panel.
+Color _shade(Color c, double lightness) =>
+    HSLColor.fromColor(c).withLightness(lightness).toColor();
 
 /// The relations between growth directions as a mindmap: every direction is a
 /// box on one big pannable/zoomable canvas, an arrow runs from a
@@ -61,7 +79,27 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   final _rubber = ValueNotifier<({String from, Offset to})?>(null);
 
   MindmapPositions _layout = const {};
-  String _layoutSignature = '';
+
+  /// Hash of the graph the cached [_layout] was computed for (0 = none).
+  int _layoutSignature = 0;
+
+  /// The snapshot [_edgeList] / positions were derived from: all of that is
+  /// redone only when a new snapshot arrives, not on every rebuild.
+  GrowthSnapshot? _snapshot;
+  List<_Edge> _edgeList = const [];
+
+  /// The nodes that currently exist as widgets (the rest are culled: they only
+  /// live in [_pos]) and whether they are drawn as lite boxes. Changed only
+  /// by [_refreshView].
+  Set<String> _visible = const {};
+  bool _lod = false;
+
+  /// True until the first fit-all ran: nodes are not built before that, as the
+  /// first frame would draw them all at the wrong zoom.
+  bool _firstFit = true;
+
+  /// The node whose drag is running; kept built even if it leaves the view.
+  String? _dragId;
 
   /// The selected nodes (a selected edge and selected nodes exclude each other).
   final Set<String> _selected = {};
@@ -85,7 +123,14 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   bool _syncScheduled = false;
 
   @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onTransform);
+  }
+
+  @override
   void dispose() {
+    _controller.removeListener(_onTransform);
     _controller.dispose();
     _focus.dispose();
     _version.dispose();
@@ -97,18 +142,20 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
     super.dispose();
   }
 
-  double get _scale => _controller.value.getMaxScaleOnAxis();
+  // The x scale: getMaxScaleOnAxis would include the z axis (always 1) and
+  // report 1 for every zoom-out.
+  double get _scale => _controller.value.storage[0];
 
   // ---- data -> positions ----------------------------------------------------
 
   /// Recomputes the automatic layout when the graph changed (only needed while
   /// some node has no saved position).
-  void _ensureLayout(GrowthSnapshot s) {
+  void _ensureLayout(GrowthSnapshot s, List<_Edge> edges) {
     if (s.metrics.every((m) => m.posX != null && m.posY != null)) return;
-    final signature =
-        '${s.metrics.map((m) => m.id).join(',')}|'
-        '${[for (final m in s.metrics)
-          for (final d in s.graph.dependsOnOf(m.id)) '$d>${m.id}'].join(',')}';
+    final signature = Object.hash(
+      Object.hashAll([for (final m in s.metrics) m.id]),
+      Object.hashAll(edges),
+    );
     if (signature == _layoutSignature) return;
     _layoutSignature = signature;
     _layout = layeredLayout(s.graph, s.metrics);
@@ -134,6 +181,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       _applied.remove(id);
     }
     var changed = false;
+    var maxX = 0.0, maxY = 0.0;
     for (final m in s.metrics) {
       final t = _target(m);
       final n = _pos[m.id];
@@ -143,10 +191,6 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       } else if (_applied[m.id] != t) {
         changed = true;
       }
-    }
-    var maxX = 0.0, maxY = 0.0;
-    for (final m in s.metrics) {
-      final t = _target(m);
       maxX = math.max(maxX, t.dx);
       maxY = math.max(maxY, t.dy);
     }
@@ -154,29 +198,36 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       math.max(2000, maxX + mindmapNodeWidth + _canvasPadding),
       math.max(1500, maxY + mindmapNodeHeight + _canvasPadding),
     );
-    if ((changed || _fitPending) && !_syncScheduled) {
-      _syncScheduled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _syncScheduled = false;
-        if (!mounted) return;
-        final snap = ref.read(growthSnapshotProvider).value;
-        if (snap == null) return;
-        for (final m in snap.metrics) {
-          final t = _target(m);
-          if (_applied[m.id] != t) {
-            _applied[m.id] = t;
-            _pos[m.id]?.value = t;
-          }
+    if (changed || _fitPending) _scheduleSync();
+  }
+
+  /// After this frame: moves the notifiers to the saved/laid-out positions and
+  /// runs a pending fit-all.
+  void _scheduleSync() {
+    if (_syncScheduled) return;
+    _syncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncScheduled = false;
+      if (!mounted) return;
+      final snap = ref.read(growthSnapshotProvider).value;
+      if (snap == null) return;
+      for (final m in snap.metrics) {
+        final t = _target(m);
+        if (_applied[m.id] != t) {
+          _applied[m.id] = t;
+          _pos[m.id]?.value = t;
         }
-        _version.value++;
-        if (_fitPending && _viewport != Size.zero && snap.metrics.isNotEmpty) {
-          _fitPending = false;
-          final only = _fitOnly;
-          _fitOnly = null;
-          _fitAll(only: only);
-        }
-      });
-    }
+      }
+      _version.value++;
+      if (_fitPending && _viewport != Size.zero && snap.metrics.isNotEmpty) {
+        _fitPending = false;
+        _firstFit = false;
+        final only = _fitOnly;
+        _fitOnly = null;
+        _fitAll(only: only);
+      }
+      if (_refreshView()) setState(() {});
+    });
   }
 
   List<_Edge> _edges(GrowthSnapshot s) => [
@@ -184,6 +235,59 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       for (final d in s.graph.dependsOnOf(m.id))
         if (s.byId.containsKey(d)) (from: d, to: m.id),
   ];
+
+  // ---- culling and level of detail ----------------------------------------------
+
+  void _onTransform() {
+    if (mounted && _refreshView()) setState(() {});
+  }
+
+  /// Recomputes which nodes need a widget and the level of detail from the
+  /// current zoom/pan and positions. Returns whether either changed, so the
+  /// caller only rebuilds when it must (never per pointer-move frame).
+  bool _refreshView() {
+    final lod = _scale < mindmapLodScale;
+    final ids = _visibleIds();
+    final changed = lod != _lod || !setEquals(ids, _visible);
+    _lod = lod;
+    if (changed) _visible = ids;
+    return changed;
+  }
+
+  Set<String> _visibleIds() {
+    if (_firstFit && _fitPending) return const {};
+    final inv = Matrix4.tryInvert(_controller.value);
+    Rect? area;
+    if (_viewport != Size.zero && inv != null) {
+      final view = MatrixUtils.transformRect(inv, Offset.zero & _viewport);
+      area = Rect.fromLTRB(
+        view.left - view.width * _cullMargin,
+        view.top - view.height * _cullMargin,
+        view.right + view.width * _cullMargin,
+        view.bottom + view.height * _cullMargin,
+      );
+    }
+    final ids = <String>{};
+    for (final e in _pos.entries) {
+      final p = e.value.value;
+      if (area == null ||
+          area.overlaps(
+            Rect.fromLTWH(
+              p.dx,
+              p.dy,
+              mindmapNodeWidth + _handleSize / 2,
+              mindmapNodeHeight,
+            ),
+          )) {
+        ids.add(e.key);
+      }
+    }
+    // A gesture in flight must not lose its widget.
+    final drag = _dragId, link = _rubber.value?.from;
+    if (drag != null && _pos.containsKey(drag)) ids.add(drag);
+    if (link != null && _pos.containsKey(link)) ids.add(link);
+    return ids;
+  }
 
   // ---- toolbar --------------------------------------------------------------
 
@@ -255,7 +359,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
     return _runLayout(s, 'Applied auto layout', () async {
       final positions = layeredLayout(s.graph, s.metrics);
       _layout = positions;
-      _layoutSignature = '';
+      _layoutSignature = 0;
       _fitPending = true;
       _fitOnly = null;
       await service.clearPositions();
@@ -387,9 +491,13 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       n.value = n.value + Offset(dx, dy);
     }
     _version.value++;
+    _dragId = id;
+    // Culled members of a dragged selection may arrive in view.
+    if (_refreshView()) setState(() {});
   }
 
   void _endDrag(String id) {
+    _dragId = null;
     if (_panPointer != null) return;
     ref.read(metricServiceProvider).savePositions({
       for (final g in _dragGroup(id))
@@ -585,9 +693,17 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
               return const Center(child: Text('No growth directions yet.'));
             }
             _selected.removeWhere((id) => !s.byId.containsKey(id));
-            _ensureLayout(s);
-            _syncPositions(s);
-            final edges = _edges(s);
+            if (!identical(s, _snapshot)) {
+              // Everything derived from the data is redone per snapshot only.
+              _snapshot = s;
+              final fresh = _edges(s);
+              if (!listEquals(fresh, _edgeList)) _edgeList = fresh;
+              _ensureLayout(s, _edgeList);
+              _syncPositions(s);
+            } else if (_fitPending) {
+              _scheduleSync();
+            }
+            final edges = _edgeList;
             if (_selectedEdge != null && !edges.contains(_selectedEdge)) {
               _selectedEdge = null;
             }
@@ -600,6 +716,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     final selectedEdge = _selectedEdge;
+    final glass = context.glass;
 
     return Focus(
       focusNode: _focus,
@@ -607,254 +724,299 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Wrap(
-                    spacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      TextButton.icon(
-                        onPressed: () => _autoLayout(s),
-                        icon: const Icon(Icons.auto_awesome_mosaic_outlined),
-                        label: const Text('Auto layout'),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: GlassSurface(
+              radius: 20,
+              shadow: false,
+              blurWindow: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          TextButton.icon(
+                            onPressed: () => _autoLayout(s),
+                            icon: const Icon(
+                              Icons.auto_awesome_mosaic_outlined,
+                            ),
+                            label: const Text('Auto layout'),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => _tree(s),
+                            icon: const Icon(Icons.account_tree),
+                            label: const Text('Tree layout'),
+                          ),
+                          Tooltip(
+                            message: _selected.length == 1
+                                ? 'Lay the map out in rings around the selected '
+                                      'direction'
+                                : 'Select exactly one direction first',
+                            child: TextButton.icon(
+                              onPressed: _selected.length == 1
+                                  ? () => _radial(s)
+                                  : null,
+                              icon: const Icon(Icons.radar),
+                              label: const Text('Radial around selected'),
+                            ),
+                          ),
+                          Tooltip(
+                            message: _selected.length == 1
+                                ? 'Lay out the selected direction and everything '
+                                      'leading into it as a tree below the map'
+                                : 'Select exactly one direction first',
+                            child: TextButton.icon(
+                              onPressed: _selected.length == 1
+                                  ? () => _treeOfSelected(s)
+                                  : null,
+                              icon: const Icon(Icons.account_tree_outlined),
+                              label: const Text('Tree of selected'),
+                            ),
+                          ),
+                        ],
                       ),
-                      TextButton.icon(
-                        onPressed: () => _tree(s),
-                        icon: const Icon(Icons.account_tree),
-                        label: const Text('Tree layout'),
+                    ),
+                    const Tooltip(
+                      message:
+                          'Drag on empty space to select; right/middle-drag or '
+                          'Space+drag to pan; Ctrl+click adds to selection; '
+                          'double-click opens a direction. '
+                          'Green arrows lead INTO the selected direction, blue '
+                          'arrows go to the directions it leads to',
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Icon(Icons.info_outline, size: 20),
                       ),
-                      Tooltip(
-                        message: _selected.length == 1
-                            ? 'Lay the map out in rings around the selected '
-                                  'direction'
-                            : 'Select exactly one direction first',
-                        child: TextButton.icon(
-                          onPressed: _selected.length == 1
-                              ? () => _radial(s)
-                              : null,
-                          icon: const Icon(Icons.radar),
-                          label: const Text('Radial around selected'),
-                        ),
-                      ),
-                      Tooltip(
-                        message: _selected.length == 1
-                            ? 'Lay out the selected direction and everything '
-                                  'leading into it as a tree below the map'
-                            : 'Select exactly one direction first',
-                        child: TextButton.icon(
-                          onPressed: _selected.length == 1
-                              ? () => _treeOfSelected(s)
-                              : null,
-                          icon: const Icon(Icons.account_tree_outlined),
-                          label: const Text('Tree of selected'),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.zoom_out),
+                      tooltip: 'Zoom out',
+                      onPressed: () => _zoomBy(1 / 1.25),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.zoom_in),
+                      tooltip: 'Zoom in',
+                      onPressed: () => _zoomBy(1.25),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.fit_screen),
+                      tooltip: 'Fit all',
+                      onPressed: _fitAll,
+                    ),
+                  ],
                 ),
-                const Tooltip(
-                  message:
-                      'Drag on empty space to select; right/middle-drag or '
-                      'Space+drag to pan; Ctrl+click adds to selection; '
-                      'double-click opens a direction. '
-                      'Green arrows lead INTO the selected direction, blue '
-                      'arrows go to the directions it leads to',
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Icon(Icons.info_outline, size: 20),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.zoom_out),
-                  tooltip: 'Zoom out',
-                  onPressed: () => _zoomBy(1 / 1.25),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.zoom_in),
-                  tooltip: 'Zoom in',
-                  onPressed: () => _zoomBy(1.25),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.fit_screen),
-                  tooltip: 'Fit all',
-                  onPressed: _fitAll,
-                ),
-              ],
+              ),
             ),
           ),
-          const Divider(height: 1),
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, box) {
-                _viewport = box.biggest;
-                return Listener(
-                  onPointerDown: _viewportDown,
-                  onPointerMove: _viewportMove,
-                  onPointerUp: _viewportUp,
-                  onPointerCancel: _viewportUp,
-                  child: ClipRect(
-                    child: InteractiveViewer(
-                      transformationController: _controller,
-                      panEnabled: false,
-                      constrained: false,
-                      minScale: _minScale,
-                      maxScale: _maxScale,
-                      boundaryMargin: const EdgeInsets.all(1500),
-                      child: SizedBox(
-                        key: const ValueKey('mindmapCanvas'),
-                        width: _canvas.width,
-                        height: _canvas.height,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Positioned.fill(
-                              child: Listener(
-                                behavior: HitTestBehavior.opaque,
-                                onPointerDown: _backgroundDown,
-                                onPointerMove: _backgroundMove,
-                                onPointerUp: _backgroundUp,
-                                onPointerCancel: _backgroundUp,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTapUp: (d) =>
-                                      _tapCanvas(d.localPosition, edges),
-                                  child: RepaintBoundary(
-                                    child: CustomPaint(
-                                      painter: _EdgePainter(
-                                        edges: edges,
-                                        positions: _pos,
-                                        selected: selectedEdge,
-                                        selectedNodes: {..._selected},
-                                        highlight: theme.colorScheme.primary,
-                                        intoColor: dark
-                                            ? Colors.greenAccent.shade400
-                                            : Colors.green.shade700,
-                                        outOfColor: dark
-                                            ? Colors.lightBlueAccent
-                                            : Colors.blue.shade700,
-                                        color:
-                                            theme.colorScheme.onSurfaceVariant,
-                                        repaint: Listenable.merge([
-                                          _version,
-                                          _rubber,
-                                        ]),
-                                        rubber: _rubber,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: GlassSurface(
+                radius: GlassTheme.radiusPanel,
+                shadow: false,
+                blurWindow: false,
+                child: LayoutBuilder(
+                  builder: (context, box) {
+                    _viewport = box.biggest;
+                    _refreshView();
+                    if (_fitPending) _scheduleSync();
+                    return Listener(
+                      onPointerDown: _viewportDown,
+                      onPointerMove: _viewportMove,
+                      onPointerUp: _viewportUp,
+                      onPointerCancel: _viewportUp,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(
+                          GlassTheme.radiusPanel,
+                        ),
+                        child: InteractiveViewer(
+                          transformationController: _controller,
+                          panEnabled: false,
+                          constrained: false,
+                          minScale: _minScale,
+                          maxScale: _maxScale,
+                          boundaryMargin: const EdgeInsets.all(1500),
+                          child: SizedBox(
+                            key: const ValueKey('mindmapCanvas'),
+                            width: _canvas.width,
+                            height: _canvas.height,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                Positioned.fill(
+                                  child: Listener(
+                                    behavior: HitTestBehavior.opaque,
+                                    onPointerDown: _backgroundDown,
+                                    onPointerMove: _backgroundMove,
+                                    onPointerUp: _backgroundUp,
+                                    onPointerCancel: _backgroundUp,
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTapUp: (d) =>
+                                          _tapCanvas(d.localPosition, edges),
+                                      child: RepaintBoundary(
+                                        child: CustomPaint(
+                                          painter: _EdgePainter(
+                                            edges: edges,
+                                            positions: _pos,
+                                            selected: selectedEdge,
+                                            selectedNodes: {..._selected},
+                                            highlight:
+                                                theme.colorScheme.primary,
+                                            intoColor: _shade(
+                                              glass.green,
+                                              dark ? 0.62 : 0.30,
+                                            ),
+                                            outOfColor: _shade(
+                                              glass.blue,
+                                              dark ? 0.66 : 0.42,
+                                            ),
+                                            color: Color.lerp(
+                                              theme
+                                                  .colorScheme
+                                                  .onSurfaceVariant,
+                                              glass.blue,
+                                              0.35,
+                                            )!,
+                                            repaint: Listenable.merge([
+                                              _version,
+                                              _rubber,
+                                              _controller,
+                                            ]),
+                                            rubber: _rubber,
+                                            controller: _controller,
+                                            viewport: _viewport,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ),
-                            for (final m in s.metrics)
-                              _MindNode(
-                                key: ValueKey('mindmapNode-${m.id}'),
-                                metric: m,
-                                position: _pos[m.id]!,
-                                colors: urgencyColors(
-                                  s.stats[m.id]?.urgency ?? 0,
-                                  dark: dark,
-                                ),
-                                progress: s.stats[m.id]?.progress ?? 0,
-                                selected: _selected.contains(m.id),
-                                onTap: () {
-                                  _focus.requestFocus();
-                                  if (_addModifier) {
-                                    _toggleNode(m.id);
-                                  } else {
-                                    _selectNode(m.id);
-                                  }
-                                },
-                                onOpen: () {
-                                  _selectNode(m.id);
-                                  GrowthDirectionDialog.show(
-                                    context,
-                                    existing: m,
-                                  );
-                                },
-                                onSelect: () => _pressNode(m.id),
-                                onDrag: (d) => _dragNodes(m.id, d),
-                                onDragEnd: () => _endDrag(m.id),
-                                onLinkStart: () => _startLink(m.id),
-                                onLinkMove: _moveLink,
-                                onLinkEnd: _endLink,
-                              ),
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: ValueListenableBuilder<Rect?>(
-                                  valueListenable: _marquee,
-                                  builder: (context, r, _) => r == null
-                                      ? const SizedBox()
-                                      : Stack(
-                                          children: [
-                                            Positioned.fromRect(
-                                              rect: r,
-                                              child: DecoratedBox(
-                                                decoration: BoxDecoration(
-                                                  color: theme
-                                                      .colorScheme
-                                                      .primary
-                                                      .withValues(alpha: 0.15),
-                                                  border: Border.all(
-                                                    color: theme
-                                                        .colorScheme
-                                                        .primary,
+                                for (final m in s.metrics)
+                                  if (_visible.contains(m.id))
+                                    _MindNode(
+                                      key: ValueKey('mindmapNode-${m.id}'),
+                                      lite: _lod,
+                                      metric: m,
+                                      position: _pos[m.id]!,
+                                      colors: urgencyColors(
+                                        s.stats[m.id]?.urgency ?? 0,
+                                        dark: dark,
+                                      ),
+                                      progress: s.stats[m.id]?.progress ?? 0,
+                                      selected: _selected.contains(m.id),
+                                      onTap: () {
+                                        _focus.requestFocus();
+                                        if (_addModifier) {
+                                          _toggleNode(m.id);
+                                        } else {
+                                          _selectNode(m.id);
+                                        }
+                                      },
+                                      onOpen: () {
+                                        _selectNode(m.id);
+                                        GrowthDirectionDialog.show(
+                                          context,
+                                          existing: m,
+                                        );
+                                      },
+                                      onSelect: () => _pressNode(m.id),
+                                      onDrag: (d) => _dragNodes(m.id, d),
+                                      onDragEnd: () => _endDrag(m.id),
+                                      onLinkStart: () => _startLink(m.id),
+                                      onLinkMove: _moveLink,
+                                      onLinkEnd: _endLink,
+                                    ),
+                                Positioned.fill(
+                                  child: IgnorePointer(
+                                    child: ValueListenableBuilder<Rect?>(
+                                      valueListenable: _marquee,
+                                      builder: (context, r, _) => r == null
+                                          ? const SizedBox()
+                                          : Stack(
+                                              children: [
+                                                Positioned.fromRect(
+                                                  rect: r,
+                                                  child: DecoratedBox(
+                                                    decoration: BoxDecoration(
+                                                      color: theme
+                                                          .colorScheme
+                                                          .primary
+                                                          .withValues(
+                                                            alpha: 0.15,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: theme
+                                                            .colorScheme
+                                                            .primary
+                                                            .withValues(
+                                                              alpha: 0.8,
+                                                            ),
+                                                      ),
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
+                                              ],
                                             ),
-                                          ],
-                                        ),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            if (selectedEdge != null)
-                              ListenableBuilder(
-                                listenable: _version,
-                                builder: (context, _) {
-                                  final curve = _edgeCurve(
-                                    _pos[selectedEdge.from]?.value,
-                                    _pos[selectedEdge.to]?.value,
-                                  );
-                                  if (curve == null) return const SizedBox();
-                                  final mid = curve.at(0.5);
-                                  return Positioned(
-                                    left: mid.dx - 11,
-                                    top: mid.dy - 11,
-                                    child: SizedBox(
-                                      width: 22,
-                                      height: 22,
-                                      child: Material(
-                                        color: theme.colorScheme.errorContainer,
-                                        shape: const CircleBorder(),
-                                        child: InkWell(
-                                          key: const ValueKey(
-                                            'mindmapEdgeDelete',
-                                          ),
-                                          customBorder: const CircleBorder(),
-                                          onTap: () =>
-                                              _deleteEdge(selectedEdge),
-                                          child: Icon(
-                                            Icons.close,
-                                            size: 14,
+                                if (selectedEdge != null)
+                                  ListenableBuilder(
+                                    listenable: _version,
+                                    builder: (context, _) {
+                                      final curve = _edgeCurve(
+                                        _pos[selectedEdge.from]?.value,
+                                        _pos[selectedEdge.to]?.value,
+                                      );
+                                      if (curve == null) {
+                                        return const SizedBox();
+                                      }
+                                      final mid = curve.at(0.5);
+                                      return Positioned(
+                                        left: mid.dx - 11,
+                                        top: mid.dy - 11,
+                                        child: SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: Material(
                                             color: theme
                                                 .colorScheme
-                                                .onErrorContainer,
+                                                .errorContainer,
+                                            shape: const CircleBorder(),
+                                            child: InkWell(
+                                              key: const ValueKey(
+                                                'mindmapEdgeDelete',
+                                              ),
+                                              customBorder:
+                                                  const CircleBorder(),
+                                              onTap: () =>
+                                                  _deleteEdge(selectedEdge),
+                                              child: Icon(
+                                                Icons.close,
+                                                size: 14,
+                                                color: theme
+                                                    .colorScheme
+                                                    .onErrorContainer,
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                          ],
+                                      );
+                                    },
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                );
-              },
+                    );
+                  },
+                ),
+              ),
             ),
           ),
         ],
@@ -964,8 +1126,23 @@ double _distanceToSegment(Offset p, Offset a, Offset b) {
 
 // ---- painting ---------------------------------------------------------------
 
+/// The control polygon's bounds (a Bezier stays inside its convex hull),
+/// grown for the stroke and arrowhead.
+Rect _curveBounds(_Curve c) {
+  final xs = [c.p0.dx, c.c1.dx, c.c2.dx, c.p3.dx];
+  final ys = [c.p0.dy, c.c1.dy, c.c2.dy, c.p3.dy];
+  return Rect.fromLTRB(
+    xs.reduce(math.min),
+    ys.reduce(math.min),
+    xs.reduce(math.max),
+    ys.reduce(math.max),
+  ).inflate(16);
+}
+
 /// All arrows (and the rubber band) in one painter. Arrows touching a selected
-/// node are drawn last in the highlight colour; the others fade.
+/// node are drawn last in the highlight colour; the others fade. Each style
+/// (ordinary, into, out of, selected) is ONE path and one drawPath, and arrows
+/// outside the visible part of the canvas are skipped.
 class _EdgePainter extends CustomPainter {
   final List<_Edge> edges;
   final Map<String, ValueNotifier<Offset>> positions;
@@ -976,6 +1153,8 @@ class _EdgePainter extends CustomPainter {
   final Color intoColor;
   final Color outOfColor;
   final ValueNotifier<({String from, Offset to})?> rubber;
+  final TransformationController controller;
+  final Size viewport;
 
   _EdgePainter({
     required this.edges,
@@ -987,93 +1166,115 @@ class _EdgePainter extends CustomPainter {
     required this.intoColor,
     required this.outOfColor,
     required this.rubber,
+    required this.controller,
+    required this.viewport,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
+  /// The visible canvas area (null = everything), a little inflated.
+  Rect? _visibleArea() {
+    final inv = Matrix4.tryInvert(controller.value);
+    if (inv == null || viewport == Size.zero) return null;
+    return MatrixUtils.transformRect(inv, Offset.zero & viewport).inflate(40);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
+    final scale = controller.value.storage[0];
+    final area = _visibleArea();
     final anyNode = selectedNodes.isNotEmpty;
-    final hotInto = <_Curve>[];
-    final hotOut = <_Curve>[];
-    _Curve? chosen;
-    final plain = Paint()
-      ..color = color.withValues(
-        alpha: mindmapEdgeOpacity(
-          anyNodeSelected: anyNode,
-          touchesSelected: false,
-        ),
-      )
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
+    final plainCurves = Path(), plainHeads = Path();
+    final intoCurves = Path(), intoHeads = Path();
+    final outCurves = Path(), outHeads = Path();
+    final chosenCurves = Path(), chosenHeads = Path();
+    var drawnPlain = false, drawnInto = false, drawnOut = false;
+    var drawnChosen = false;
+    final plainHeadsOn = scale >= _arrowHeadScale;
     for (final e in edges) {
       final curve = _edgeCurve(
         positions[e.from]?.value,
         positions[e.to]?.value,
       );
       if (curve == null) continue;
+      if (area != null && !area.overlaps(_curveBounds(curve))) continue;
       if (e == selected) {
-        chosen = curve;
-      } else if (mindmapEdgeRole(selectedNodes, e.from, e.to) ==
-          MindmapEdgeRole.intoSelected) {
-        hotInto.add(curve);
-      } else if (mindmapEdgeRole(selectedNodes, e.from, e.to) ==
-          MindmapEdgeRole.outOfSelected) {
-        hotOut.add(curve);
-      } else {
-        _curveArrow(canvas, curve, plain, 8);
+        _addCurve(chosenCurves, chosenHeads, curve, 12);
+        drawnChosen = true;
+        continue;
+      }
+      switch (mindmapEdgeRole(selectedNodes, e.from, e.to)) {
+        case MindmapEdgeRole.intoSelected:
+          _addCurve(intoCurves, intoHeads, curve, 10);
+          drawnInto = true;
+        case MindmapEdgeRole.outOfSelected:
+          _addCurve(outCurves, outHeads, curve, 10);
+          drawnOut = true;
+        case MindmapEdgeRole.none:
+          _addCurve(plainCurves, plainHeads, curve, 8, withHead: plainHeadsOn);
+          drawnPlain = true;
       }
     }
-    final hotPaint = Paint()
-      ..color = highlight
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-    for (final (curves, colour) in [
-      (hotOut, outOfColor),
-      (hotInto, intoColor),
-    ]) {
-      final paint = Paint()
-        ..color = colour
-        ..strokeWidth = 2.5
-        ..style = PaintingStyle.stroke;
-      for (final c in curves) {
-        _curveArrow(canvas, c, paint, 10);
-      }
-    }
-    if (chosen != null) {
-      _curveArrow(
-        canvas,
-        chosen,
-        Paint()
-          ..color = highlight
-          ..strokeWidth = 3
-          ..style = PaintingStyle.stroke,
-        12,
+    if (drawnPlain) {
+      final c = color.withValues(
+        alpha: mindmapEdgeOpacity(
+          anyNodeSelected: anyNode,
+          touchesSelected: false,
+        ),
       );
+      _flush(canvas, plainCurves, plainHeads, c, 1);
+    }
+    if (drawnOut) _flush(canvas, outCurves, outHeads, outOfColor, 2.5);
+    if (drawnInto) _flush(canvas, intoCurves, intoHeads, intoColor, 2.5);
+    if (drawnChosen) {
+      _flush(canvas, chosenCurves, chosenHeads, highlight, 3);
     }
     final r = rubber.value;
     final from = r == null ? null : positions[r.from]?.value;
     if (r != null && from != null) {
       final start =
           from + const Offset(mindmapNodeWidth, mindmapNodeHeight / 2);
-      canvas.drawLine(start, r.to, hotPaint);
-      _head(canvas, r.to, r.to - start, hotPaint.color, 10);
+      final heads = Path();
+      _addHead(heads, r.to, r.to - start, 10);
+      canvas.drawLine(
+        start,
+        r.to,
+        Paint()
+          ..color = highlight
+          ..strokeWidth = 2
+          ..style = PaintingStyle.stroke,
+      );
+      canvas.drawPath(heads, Paint()..color = highlight);
     }
   }
 
-  void _curveArrow(Canvas canvas, _Curve c, Paint paint, double head) {
+  void _flush(Canvas canvas, Path curves, Path heads, Color c, double width) {
     canvas.drawPath(
-      Path()
-        ..moveTo(c.p0.dx, c.p0.dy)
-        ..cubicTo(c.c1.dx, c.c1.dy, c.c2.dx, c.c2.dy, c.p3.dx, c.p3.dy),
-      paint,
+      curves,
+      Paint()
+        ..color = c
+        ..strokeWidth = width
+        ..style = PaintingStyle.stroke,
     );
-    _head(canvas, c.p3, c.endTangent, paint.color, head);
+    canvas.drawPath(heads, Paint()..color = c);
   }
 
-  void _head(Canvas canvas, Offset tip, Offset dir, Color color, double head) {
+  void _addCurve(
+    Path curves,
+    Path heads,
+    _Curve c,
+    double size, {
+    bool withHead = true,
+  }) {
+    curves
+      ..moveTo(c.p0.dx, c.p0.dy)
+      ..cubicTo(c.c1.dx, c.c1.dy, c.c2.dx, c.c2.dy, c.p3.dx, c.p3.dy);
+    if (withHead) _addHead(heads, c.p3, c.endTangent, size);
+  }
+
+  void _addHead(Path path, Offset tip, Offset dir, double head) {
     if (dir.distance < 1) return;
     final angle = math.atan2(dir.dy, dir.dx);
-    final path = Path()
+    path
       ..moveTo(tip.dx, tip.dy)
       ..lineTo(
         tip.dx - head * math.cos(angle - 0.4),
@@ -1084,13 +1285,13 @@ class _EdgePainter extends CustomPainter {
         tip.dy - head * math.sin(angle + 0.4),
       )
       ..close();
-    canvas.drawPath(path, Paint()..color = color);
   }
 
   @override
   bool shouldRepaint(_EdgePainter old) =>
       old.edges != edges ||
       old.selected != selected ||
+      old.viewport != viewport ||
       !setEquals(old.selectedNodes, selectedNodes) ||
       old.color != color ||
       old.highlight != highlight ||
@@ -1102,6 +1303,9 @@ class _EdgePainter extends CustomPainter {
 
 class _MindNode extends StatelessWidget {
   final GrowthMetric metric;
+
+  /// Far zoomed out: just a coloured box, no text, progress bar or handle.
+  final bool lite;
   final ValueNotifier<Offset> position;
   final ({Color bg, Color fg}) colors;
   final double progress;
@@ -1118,6 +1322,7 @@ class _MindNode extends StatelessWidget {
   const _MindNode({
     super.key,
     required this.metric,
+    required this.lite,
     required this.position,
     required this.colors,
     required this.progress,
@@ -1132,9 +1337,21 @@ class _MindNode extends StatelessWidget {
     required this.onLinkEnd,
   });
 
+  GestureDetector _gestures(Widget child) => GestureDetector(
+    onTap: onTap,
+    onDoubleTap: onOpen,
+    onPanDown: (_) => onSelect(),
+    onPanUpdate: (d) => onDrag(d.delta),
+    onPanEnd: (_) => onDragEnd(),
+    onPanCancel: () {},
+    child: child,
+  );
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final glass = context.glass;
+    if (lite) return _buildLite(theme, glass);
     final fraction = (progress / 100).clamp(0.0, 1.0);
     final content = SizedBox(
       width: mindmapNodeWidth + _handleSize / 2,
@@ -1147,21 +1364,15 @@ class _MindNode extends StatelessWidget {
             top: 0,
             width: mindmapNodeWidth,
             height: mindmapNodeHeight,
-            child: GestureDetector(
-              onTap: onTap,
-              onDoubleTap: onOpen,
-              onPanDown: (_) => onSelect(),
-              onPanUpdate: (d) => onDrag(d.delta),
-              onPanEnd: (_) => onDragEnd(),
-              onPanCancel: () {},
-              child: Container(
+            child: _gestures(
+              Container(
                 decoration: BoxDecoration(
                   color: colors.bg,
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: selected
                         ? theme.colorScheme.onSurface
-                        : Colors.black26,
+                        : glass.border,
                     width: selected ? 2 : 1,
                   ),
                 ),
@@ -1190,14 +1401,19 @@ class _MindNode extends StatelessWidget {
                       bottom: 0,
                       height: 4,
                       child: ColoredBox(
-                        color: Colors.grey.withValues(alpha: 0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
                             key: ValueKey('mindmapProgress-${metric.id}'),
                             widthFactor: fraction,
                             heightFactor: 1,
-                            child: const ColoredBox(color: Color(0xFF2E9E44)),
+                            child: ColoredBox(
+                              color: _shade(
+                                glass.green,
+                                glass.dark ? 0.5 : 0.4,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -1220,9 +1436,9 @@ class _MindNode extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: theme.colorScheme.surface,
+                  color: Colors.white,
                   border: Border.all(
-                    color: theme.colorScheme.onSurface,
+                    color: theme.colorScheme.primary.withValues(alpha: 0.7),
                     width: 1.5,
                   ),
                 ),
@@ -1237,6 +1453,32 @@ class _MindNode extends StatelessWidget {
       child: content,
       builder: (context, p, child) =>
           Positioned(left: p.dx, top: p.dy, child: child!),
+    );
+  }
+
+  /// The cheap variant: one DecoratedBox, same gestures.
+  Widget _buildLite(ThemeData theme, GlassTheme glass) {
+    final box = _gestures(
+      DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.bg,
+          border: Border.all(
+            color: selected ? theme.colorScheme.onSurface : glass.border,
+            width: selected ? 2 : 1,
+          ),
+        ),
+      ),
+    );
+    return ValueListenableBuilder<Offset>(
+      valueListenable: position,
+      child: box,
+      builder: (context, p, child) => Positioned(
+        left: p.dx,
+        top: p.dy,
+        width: mindmapNodeWidth,
+        height: mindmapNodeHeight,
+        child: child!,
+      ),
     );
   }
 }

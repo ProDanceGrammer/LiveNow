@@ -7,6 +7,7 @@ import 'package:livenow/data/database.dart';
 import 'package:livenow/data/queries.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/action_card.dart';
+import 'package:livenow/ui/widgets/glass_icon_tile.dart';
 
 void main() {
   late AppDatabase db;
@@ -39,6 +40,20 @@ void main() {
     );
   }
 
+  /// Moves a mouse pointer onto the card (a real hover move, which is what
+  /// shows its toolbar). The caller keeps the gesture to move it further.
+  Future<TestGesture> hoverCard(WidgetTester tester) async {
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: const Offset(2, 2));
+    addTearDown(g.removePointer);
+    await g.moveTo(tester.getCenter(find.text('Read a Bible')));
+    await tester.pump();
+    return g;
+  }
+
+  int tiles(WidgetTester tester) =>
+      tester.widgetList(find.byType(GlassIconTile)).length;
+
   Future<bool> exists(WidgetTester tester) async => (await tester.runAsync(
     () =>
         (db.select(db.actionsTable)..where((t) => t.id.equals(actionId))).get(),
@@ -67,6 +82,7 @@ void main() {
     tester,
   ) async {
     await pumpCard(tester);
+    await hoverCard(tester);
 
     await tester.tap(find.byTooltip('Delete'));
     await afterDelete(tester);
@@ -105,6 +121,181 @@ void main() {
     await afterDelete(tester);
     expect(await exists(tester), isFalse);
     expect(find.text('Deleted "Read a Bible"'), findsOneWidget);
+    await unmount(tester);
+  });
+
+  testWidgets('quick action bar keeps every button, in order', (tester) async {
+    await pumpCard(tester);
+    await hoverCard(tester);
+    final tips = tester
+        .widgetList<Tooltip>(find.byType(Tooltip))
+        .map((t) => t.message)
+        .toList();
+    expect(tips, [
+      'Start',
+      'Finish',
+      'Continue with same action',
+      'Prolong 30 min',
+      'Postpone +1 hour',
+      'Postpone +5 hours',
+      'Postpone: after work (18:00)',
+      'Postpone: tomorrow morning',
+      'Postpone: next working morning',
+      'Postpone: next week',
+      'Postpone: next Monday morning',
+      'Delete',
+    ]);
+    await unmount(tester);
+  });
+
+  testWidgets('Start and Finish buttons call the service', (tester) async {
+    await pumpCard(tester);
+    await hoverCard(tester);
+    Future<ActionRow> row() async => (await tester.runAsync(
+      () => (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle(),
+    ))!;
+
+    expect((await row()).startAt, isNull);
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Start'));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump(const Duration(milliseconds: 400));
+    expect((await row()).startAt, isNotNull);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Finish'));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump(const Duration(milliseconds: 400));
+    expect((await row()).done, isTrue);
+    await unmount(tester);
+  });
+
+  testWidgets('nothing hovered builds no buttons; hover shows the toolbar', (
+    tester,
+  ) async {
+    await pumpCard(tester);
+    expect(tiles(tester), 0);
+    expect(find.byType(Tooltip), findsNothing);
+
+    final g = await hoverCard(tester);
+    expect(tiles(tester), 12);
+
+    // Onto the toolbar itself: it stays.
+    await g.moveTo(tester.getCenter(find.byTooltip('Finish')));
+    await tester.pump();
+    expect(tiles(tester), 12);
+
+    // Away from both: it goes.
+    await g.moveTo(const Offset(2, 700));
+    await tester.pump();
+    expect(tiles(tester), 0);
+    await unmount(tester);
+  });
+
+  testWidgets('the card is compact: no button row inside it', (tester) async {
+    await pumpCard(tester);
+    expect(tester.getSize(find.byType(ActionCard)).height, lessThan(70));
+    await unmount(tester);
+  });
+
+  testWidgets('a bare enter without a hover move does not show it', (
+    tester,
+  ) async {
+    await pumpCard(tester);
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(g.removePointer);
+    await g.addPointer(location: tester.getCenter(find.text('Read a Bible')));
+    await tester.pump();
+    expect(tiles(tester), 0);
+    await g.moveBy(const Offset(3, 0));
+    await tester.pump();
+    expect(tiles(tester), 12);
+    await unmount(tester);
+  });
+
+  testWidgets('pressing on the card hides the toolbar until the next move', (
+    tester,
+  ) async {
+    await pumpCard(tester);
+    final g = await hoverCard(tester);
+    expect(tiles(tester), 12);
+    // Ctrl-less press on the time-less card body opens the editor dialog in
+    // the real app; here we only check the toolbar goes away on press.
+    await g.down(tester.getCenter(find.text('Read a Bible')));
+    await tester.pump();
+    expect(tiles(tester), 0);
+    await g.up();
+    await tester.pump(const Duration(milliseconds: 400));
+    await unmount(tester);
+  });
+
+  testWidgets('Continue works from the toolbar', (tester) async {
+    await pumpCard(tester);
+    await hoverCard(tester);
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Continue with same action'));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump(const Duration(milliseconds: 400));
+    final names = (await tester.runAsync(
+      () => db.select(db.actionsTable).get(),
+    ))!.map((a) => a.name).toList()..sort();
+    expect(names, ['[#1] Read a Bible', '[#2] Read a Bible']);
+    await unmount(tester);
+  });
+
+  testWidgets('only one toolbar when moving between two cards', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    late List<ActionListItem> items;
+    await tester.runAsync(() async {
+      final c = ProviderContainer(
+        overrides: [databaseProvider.overrideWithValue(db)],
+      );
+      final svc = c.read(actionServiceProvider);
+      await svc.createAction(name: 'First');
+      await svc.createAction(name: 'Second');
+      items = [
+        for (final r in await db.select(db.actionsTable).get())
+          ActionListItem.fromRow(r),
+      ]..sort((a, b) => a.name.compareTo(b.name));
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                // Room above the first card so its toolbar sits above it.
+                const SizedBox(height: 100),
+                for (final i in items)
+                  ActionCard(key: ValueKey(i.id), action: i),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: const Offset(2, 2));
+    addTearDown(g.removePointer);
+    await g.moveTo(tester.getCenter(find.text('First')));
+    await tester.pump();
+    expect(tiles(tester), 12);
+    await g.moveTo(tester.getCenter(find.text('Second')));
+    await tester.pump();
+    expect(tiles(tester), 12);
+    await g.moveTo(const Offset(2, 700));
+    await tester.pump();
+    expect(tiles(tester), 0);
     await unmount(tester);
   });
 }

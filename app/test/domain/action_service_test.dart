@@ -567,7 +567,7 @@ void main() {
             name: 'Prepare for interview',
             payload: jsonEncode({
               'name': 'Prepare for interview',
-              'priority': 'B1',
+              'postponeFlex': 'hard',
             }),
           ),
         );
@@ -579,7 +579,7 @@ void main() {
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).getSingle();
     expect(action.name, 'Prepare for interview');
-    expect(action.priority, 'B1');
+    expect(action.postponeFlex, 'hard');
   });
 
   test('deleteAction removes the action and everything hanging off it', () async {

@@ -5,11 +5,18 @@ import 'package:flutter/gestures.dart'
     show
         DragStartBehavior,
         GestureBinding,
+        PointerCancelEvent,
+        PointerDownEvent,
+        PointerEvent,
+        PointerMoveEvent,
         PointerScrollEvent,
-        PointerSignalEvent;
+        PointerSignalEvent,
+        PointerUpEvent,
+        kPrimaryButton;
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show HardwareKeyboard, LogicalKeyboardKey;
+    show HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -18,12 +25,16 @@ import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
 import '../../domain/postpone_rules.dart';
+import '../calendar_selection.dart';
 import '../edit_action.dart';
 import '../providers.dart';
 import '../undo.dart';
+import '../theme/glass_theme.dart';
 import '../urgency_colors.dart';
 import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
+import '../widgets/glass.dart';
+import '../widgets/glass_icon_tile.dart';
 import 'calendar_layout.dart';
 
 const double _kGutter = 56;
@@ -32,8 +43,12 @@ const double _kHandle = 6;
 /// A block is never drawn shorter than this, however far the grid is zoomed
 /// out, so a 10-minute event stays easy to grab.
 const double _kMinBlockHeight = 8;
-const double _kToolbarWidth = 165;
-const double _kToolbarHeight = 24;
+// Hover toolbar: 5 icon tiles (24 px + 2 px hit slop), a 9 px divider, 2 px padding.
+const double _kToolTile = 24;
+const double _kToolHit = 2;
+const double _kToolPad = 2;
+const double _kToolbarWidth = 5 * (_kToolTile + _kToolHit) + 9 + 2 * _kToolPad;
+const double _kToolbarHeight = _kToolTile + _kToolHit + 2 * _kToolPad;
 
 /// The smallest hour height the grid is drawn with, so a tiny window at the
 /// 24-hour zoom stays usable (the grid then scrolls a little).
@@ -44,6 +59,32 @@ const _monthNames = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
+
+/// Build/layout counters so a test can prove that selection, hover, drag and
+/// clock ticks only rebuild what they must.
+@visibleForTesting
+class CalendarPerfCounters {
+  static int blockBuilds = 0;
+  static int chipBuilds = 0;
+  static int layoutRuns = 0;
+
+  static void reset() {
+    blockBuilds = 0;
+    chipBuilds = 0;
+    layoutRuns = 0;
+  }
+}
+
+/// Faint hour/day lines on the glass panel (derived from the scheme).
+Color _softLine(BuildContext context) {
+  final g = context.glass;
+  return Theme.of(context).colorScheme.outlineVariant
+      .withValues(alpha: g.dark ? 0.3 : 0.55);
+}
+
+/// The thin bright edge of event blocks and all-day chips.
+Color _brightEdge(GlassTheme g) =>
+    g.border.withValues(alpha: g.dark ? 0.25 : 0.7);
 
 tz.TZDateTime _local(DateTime utc) =>
     tz.TZDateTime.from(utc, tz.getLocation(AppSettings.timeZoneName));
@@ -65,6 +106,39 @@ DateTime _effectiveEnd(ActionListItem a) {
   return start.add(d < min ? min : d);
 }
 
+// Selection by pointer. A press is handled the moment the button goes down
+// (the tap recognizers wait out the double-tap timeout, by which time Shift
+// may be released): Shift/Ctrl toggles the event, a plain press on an
+// unselected event selects only it. A plain press on an event that is already
+// part of a multi-selection keeps the selection (so the group can be dragged)
+// and collapses to that event only on release, if nothing was dragged. Only
+// one pointer is ever pressed, so this lives in two top-level variables.
+String? _pressCollapseId;
+bool _pressDragged = false;
+
+void _onPress(WidgetRef ref, String id, PointerDownEvent e) {
+  _pressCollapseId = null;
+  _pressDragged = false;
+  if ((e.buttons & kPrimaryButton) == 0) return;
+  final sel = ref.read(calendarSelectionProvider);
+  if (isAdditiveCalendarClick()) {
+    toggleCalendarEvent(ref, id);
+  } else if (!sel.contains(id)) {
+    selectOnlyCalendarEvent(ref, id);
+  } else if (sel.length > 1) {
+    _pressCollapseId = id;
+    ref.read(calendarSelectedActionProvider.notifier).state = id;
+  } else {
+    ref.read(calendarSelectedActionProvider.notifier).state = id;
+  }
+}
+
+void _onRelease(WidgetRef ref, String id) {
+  final collapse = _pressCollapseId == id && !_pressDragged;
+  _pressCollapseId = null;
+  if (collapse) selectOnlyCalendarEvent(ref, id);
+}
+
 /// The Google-Calendar-style time grid: a header (navigation + 2..7 day
 /// selector), a day header row, an all-day strip and a scrolling 24 h grid
 /// where timed actions can be dragged (move) and edge-dragged (resize).
@@ -83,40 +157,53 @@ class CalendarView extends ConsumerWidget {
       child: Column(
         children: [
           _Header(start: start, dayCount: dayCount),
-          const Divider(height: 1),
           Expanded(
-            child: items == null
-                ? const Center(child: CircularProgressIndicator())
-                : LayoutBuilder(
-                    builder: (context, box) {
-                      final dayW = (box.maxWidth - _kGutter) / dayCount;
-                      return Column(
-                        children: [
-                          _DayHeaderRow(
-                            start: start,
-                            dayCount: dayCount,
-                            dayWidth: dayW,
-                          ),
-                          _AllDayStrip(
-                            start: start,
-                            dayCount: dayCount,
-                            dayWidth: dayW,
-                            items: items,
-                            running: running,
-                          ),
-                          Expanded(
-                            child: _TimeGrid(
-                              start: start,
-                              dayCount: dayCount,
-                              dayWidth: dayW,
-                              items: items,
-                              running: running,
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+            // One large glass panel under the day header, the all-day strip
+            // and the grid, so the background clouds show around it. No blur
+            // window: it is too big for that to pay off.
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: GlassSurface(
+                radius: GlassTheme.radiusPanel,
+                blurWindow: false,
+                child: Padding(
+                  // Keeps the grid lines out of the rounded corners.
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                  child: items == null
+                      ? const Center(child: CircularProgressIndicator())
+                      : LayoutBuilder(
+                          builder: (context, box) {
+                            final dayW = (box.maxWidth - _kGutter) / dayCount;
+                            return Column(
+                              children: [
+                                _DayHeaderRow(
+                                  start: start,
+                                  dayCount: dayCount,
+                                  dayWidth: dayW,
+                                ),
+                                _AllDayStrip(
+                                  start: start,
+                                  dayCount: dayCount,
+                                  dayWidth: dayW,
+                                  items: items,
+                                  running: running,
+                                ),
+                                Expanded(
+                                  child: _TimeGrid(
+                                    start: start,
+                                    dayCount: dayCount,
+                                    dayWidth: dayW,
+                                    items: items,
+                                    running: running,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -168,9 +255,26 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
     shiftCalendarDays(ref, days);
   }
 
+  /// Deletes every selected event (one Undo brings them all back). Only ids
+  /// that are in the current data count, so nothing invisible is deleted.
   void _deleteSelected() {
-    final id = ref.read(calendarSelectedActionProvider);
-    if (id != null) runUndoableDelete(context, ref, id);
+    final ids = {...ref.read(calendarSelectionProvider)};
+    final single = ref.read(calendarSelectedActionProvider);
+    if (ids.isEmpty && single != null) ids.add(single);
+    final visible = ref.read(calendarRangeProvider).value;
+    if (visible != null) {
+      final inView = {for (final a in visible) a.id};
+      ids.retainAll(inView);
+    }
+    if (ids.isEmpty) return;
+    clearCalendarSelection(ref);
+    runUndoableDeleteMany(context, ref, ids);
+  }
+
+  void _selectAll() {
+    final items = ref.read(calendarRangeProvider).value;
+    if (items == null) return;
+    setCalendarSelection(ref, {for (final a in items) a.id});
   }
 
   @override
@@ -187,6 +291,10 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
           const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
               shiftCalendarDays(ref, 1),
           const SingleActivator(LogicalKeyboardKey.delete): _deleteSelected,
+          const SingleActivator(LogicalKeyboardKey.escape): () =>
+              clearCalendarSelection(ref),
+          const SingleActivator(LogicalKeyboardKey.keyA, control: true):
+              _selectAll,
           // Ctrl + "+" is Ctrl+= on most layouts (with or without Shift),
           // plus the numpad keys.
           const SingleActivator(LogicalKeyboardKey.equal, control: true): () =>
@@ -236,53 +344,104 @@ class _Header extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final g = context.glass;
+    final scheme = theme.colorScheme;
+    // Each group of controls sits in a soft glass pill.
+    Widget pill(Widget child) => GlassSurface(
+      radius: 20,
+      shadow: false,
+      blurWindow: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: child,
+      ),
+    );
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            tooltip: 'Previous',
-            onPressed: () => shiftCalendarRange(ref, -1),
-          ),
-          OutlinedButton(
-            onPressed: () => goToCalendarToday(ref),
-            child: const Text('Today'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            tooltip: 'Next',
-            onPressed: () => shiftCalendarRange(ref, 1),
-          ),
-          const SizedBox(width: 8),
-          Text(_label(), style: Theme.of(context).textTheme.titleMedium),
-          const Spacer(),
-          // Zoom: how many hours of a day are visible at once.
-          IconButton(
-            icon: const Icon(Icons.zoom_out),
-            tooltip: 'Show more hours (Ctrl+−)',
-            onPressed: () => zoomCalendar(ref, -1),
-          ),
-          Text(
-            '${ref.watch(calendarVisibleHoursProvider)} h',
-            key: const ValueKey('zoom-label'),
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          IconButton(
-            icon: const Icon(Icons.zoom_in),
-            tooltip: 'Show fewer hours (Ctrl++)',
-            onPressed: () => zoomCalendar(ref, 1),
+          pill(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  tooltip: 'Previous',
+                  onPressed: () => shiftCalendarRange(ref, -1),
+                ),
+                OutlinedButton(
+                  onPressed: () => goToCalendarToday(ref),
+                  child: const Text('Today'),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  tooltip: 'Next',
+                  onPressed: () => shiftCalendarRange(ref, 1),
+                ),
+              ],
+            ),
           ),
           const SizedBox(width: 12),
-          SegmentedButton<int>(
-            showSelectedIcon: false,
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            segments: [
-              for (var n = 2; n <= 7; n++)
-                ButtonSegment(value: n, label: Text('$n'), tooltip: '$n days'),
-            ],
-            selected: {dayCount},
-            onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
+          Text(
+            _label(),
+            style: theme.textTheme.titleMedium?.copyWith(color: g.textPrimary),
+          ),
+          const Spacer(),
+          // Zoom: how many hours of a day are visible at once.
+          pill(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.zoom_out),
+                  tooltip: 'Show more hours (Ctrl+−)',
+                  onPressed: () => zoomCalendar(ref, -1),
+                ),
+                Text(
+                  '${ref.watch(calendarVisibleHoursProvider)} h',
+                  key: const ValueKey('zoom-label'),
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: g.textSecondary,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.zoom_in),
+                  tooltip: 'Show fewer hours (Ctrl++)',
+                  onPressed: () => zoomCalendar(ref, 1),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          pill(
+            SegmentedButton<int>(
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                side: const WidgetStatePropertyAll(BorderSide.none),
+                backgroundColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? scheme.primaryContainer
+                      : Colors.transparent,
+                ),
+                foregroundColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? scheme.onPrimaryContainer
+                      : g.textSecondary,
+                ),
+              ),
+              segments: [
+                for (var n = 2; n <= 7; n++)
+                  ButtonSegment(
+                    value: n,
+                    label: Text('$n'),
+                    tooltip: '$n days',
+                  ),
+              ],
+              selected: {dayCount},
+              onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
+            ),
           ),
         ],
       ),
@@ -304,11 +463,12 @@ class _DayHeaderRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final g = context.glass;
     final today = dayIndexOf(DateTime.now().toUtc(), start);
     return Container(
       height: 44,
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+        border: Border(bottom: BorderSide(color: _softLine(context))),
       ),
       child: Row(
         children: [
@@ -327,9 +487,7 @@ class _DayHeaderRow extends StatelessWidget {
                       Text(
                         _dayNames[l.weekday - 1],
                         style: TextStyle(
-                          color: isToday
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
+                          color: isToday ? scheme.primary : g.textSecondary,
                           fontWeight: isToday ? FontWeight.w600 : null,
                         ),
                       ),
@@ -349,9 +507,7 @@ class _DayHeaderRow extends StatelessWidget {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
-                            color: isToday
-                                ? scheme.onPrimary
-                                : scheme.onSurface,
+                            color: isToday ? scheme.onPrimary : g.textPrimary,
                           ),
                         ),
                       ),
@@ -368,7 +524,7 @@ class _DayHeaderRow extends StatelessWidget {
 
 // ---- all-day strip --------------------------------------------------------
 
-class _AllDayStrip extends StatelessWidget {
+class _AllDayStrip extends ConsumerStatefulWidget {
   final DateTime start;
   final int dayCount;
   final double dayWidth;
@@ -384,8 +540,83 @@ class _AllDayStrip extends StatelessWidget {
   });
 
   @override
+  ConsumerState<_AllDayStrip> createState() => _AllDayStripState();
+}
+
+class _AllDayStripState extends ConsumerState<_AllDayStrip> {
+  /// Shift/Ctrl+drag on empty strip space draws a rubber band (global
+  /// coordinates) and selects the chips it touches on release. Chips are
+  /// found by scanning the keyed `allday-*` elements, like the Current board.
+  Offset? _origin;
+  bool _moved = false;
+  final _marquee = ValueNotifier<Rect?>(null);
+
+  @override
+  void dispose() {
+    _marquee.dispose();
+    super.dispose();
+  }
+
+  Map<String, Rect> _chipRects() {
+    final rects = <String, Rect>{};
+    void visit(Element e) {
+      final k = e.widget.key;
+      if (k is ValueKey<String> && k.value.startsWith('allday-')) {
+        final box = e.renderObject;
+        if (box is RenderBox && box.attached && box.hasSize) {
+          rects[k.value.substring(7)] =
+              box.localToGlobal(Offset.zero) & box.size;
+        }
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    (context as Element).visitChildren(visit);
+    return rects;
+  }
+
+  void _down(PointerDownEvent e) {
+    _origin = null;
+    _marquee.value = null;
+    if ((e.buttons & kPrimaryButton) == 0 || !isAdditiveCalendarClick()) return;
+    // Only from empty space: a press on a chip toggles that chip instead.
+    if (_chipRects().values.any((r) => r.contains(e.position))) return;
+    _origin = e.position;
+    _moved = false;
+  }
+
+  void _move(PointerMoveEvent e) {
+    final o = _origin;
+    if (o == null) return;
+    if (!_moved && (e.position - o).distance < 4) return;
+    _moved = true;
+    _marquee.value = Rect.fromPoints(o, e.position);
+  }
+
+  void _up(PointerEvent e) {
+    final rect = _marquee.value;
+    final o = _origin;
+    _origin = null;
+    _marquee.value = null;
+    if (o == null || rect == null || e is PointerCancelEvent) return;
+    final hit = {
+      for (final c in _chipRects().entries)
+        if (c.value.overlaps(rect)) c.key,
+    };
+    if (hit.isEmpty) return;
+    setCalendarSelection(ref, {...ref.read(calendarSelectionProvider), ...hit});
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final start = widget.start;
+    final dayCount = widget.dayCount;
+    final dayWidth = widget.dayWidth;
+    final items = widget.items;
+    final running = widget.running;
+    final g = context.glass;
+    final line = _softLine(context);
     final byDay = <int, List<ActionListItem>>{};
     for (final a in items) {
       if (!a.isAllDay || a.startAt == null) continue;
@@ -395,47 +626,88 @@ class _AllDayStrip extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(minHeight: 30, maxHeight: 96),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+        // A slightly tinted translucent band.
+        color: g.border.withValues(alpha: g.dark ? 0.06 : 0.35),
+        border: Border(bottom: BorderSide(color: line)),
       ),
       child: SingleChildScrollView(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: _kGutter,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8, left: 6),
-                child: Text(
-                  'all-day',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-            for (var i = 0; i < dayCount; i++)
-              Container(
-                width: dayWidth,
-                constraints: const BoxConstraints(minHeight: 30),
-                padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
-                decoration: BoxDecoration(
-                  border: Border(
-                    left: BorderSide(color: scheme.outlineVariant),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    for (final a in byDay[i] ?? const <ActionListItem>[])
-                      _AllDayChip(
-                        key: ValueKey('allday-${a.id}'),
-                        item: a,
-                        running: running.contains(a.id),
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: _down,
+          onPointerMove: _move,
+          onPointerUp: _up,
+          onPointerCancel: _up,
+          child: Stack(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: _kGutter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8, left: 6),
+                      child: Text(
+                        'all-day',
+                        style: TextStyle(fontSize: 10, color: g.textSecondary),
                       ),
-                  ],
+                    ),
+                  ),
+                  for (var i = 0; i < dayCount; i++)
+                    Container(
+                      width: dayWidth,
+                      constraints: const BoxConstraints(minHeight: 30),
+                      padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
+                      decoration: BoxDecoration(
+                        border: Border(left: BorderSide(color: line)),
+                      ),
+                      child: Column(
+                        children: [
+                          for (final a in byDay[i] ?? const <ActionListItem>[])
+                            _AllDayChip(
+                              key: ValueKey('allday-${a.id}'),
+                              item: a,
+                              running: running.contains(a.id),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ListenableBuilder(
+                    listenable: _marquee,
+                    builder: (context, _) {
+                      final r = _marquee.value;
+                      if (r == null) return const SizedBox.shrink();
+                      final box = context.findRenderObject() as RenderBox;
+                      final primary = Theme.of(context).colorScheme.primary;
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned.fromRect(
+                            key: const ValueKey('marquee-allday'),
+                            rect: Rect.fromPoints(
+                              box.globalToLocal(r.topLeft),
+                              box.globalToLocal(r.bottomRight),
+                            ),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: primary.withValues(alpha: 0.15),
+                                border: Border.all(
+                                  color: primary.withValues(alpha: 0.8),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -450,6 +722,7 @@ class _AllDayChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    CalendarPerfCounters.chipBuilds++;
     final scheme = Theme.of(context).colorScheme;
     final done = item.isDoneBefore;
     final urgency = done || running
@@ -472,41 +745,42 @@ class _AllDayChip extends ConsumerWidget {
         ? scheme.onSurfaceVariant
         : uc?.fg ?? scheme.onTertiaryContainer;
     final selected = ref.watch(
-      calendarSelectedActionProvider.select((id) => id == item.id),
+      calendarSelectionProvider.select((s) => s.contains(item.id)),
     );
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: _HoverToolbarHost(
         actionId: item.id,
-        child: Material(
-          color: bg,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(4),
-            side: selected
-                ? BorderSide(color: scheme.onSurface, width: 2)
-                : BorderSide.none,
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(4),
-            // Click selects (so Delete can act on it); double-click edits.
-            onTapDown: (_) =>
-                ref.read(calendarSelectedActionProvider.notifier).state =
-                    item.id,
-            onTap: () {},
-            onDoubleTap: () => openActionEditor(context, ref, item.id),
-            child: Container(
-              height: 22,
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                item.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: fg,
-                  decoration: done ? TextDecoration.lineThrough : null,
+        child: Listener(
+          onPointerDown: (e) => _onPress(ref, item.id, e),
+          onPointerUp: (_) => _onRelease(ref, item.id),
+          child: Material(
+            color: bg,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: selected
+                  ? BorderSide(color: scheme.onSurface, width: 2)
+                  : BorderSide(color: _brightEdge(context.glass)),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              // Selection happens on press (see [_onPress]); double-click edits.
+              onTap: () {},
+              onDoubleTap: () => openActionEditor(context, ref, item.id),
+              child: Container(
+                height: 22,
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  item.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: fg,
+                    decoration: done ? TextDecoration.lineThrough : null,
+                  ),
                 ),
               ),
             ),
@@ -571,6 +845,20 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
     () => op(ref.read(actionServiceProvider)),
   );
 
+  /// The trash deletes the whole selection when this event is part of a
+  /// multi-selection, else just this event.
+  void _delete() {
+    final sel = ref.read(calendarSelectionProvider);
+    if (sel.length > 1 && sel.contains(widget.actionId)) {
+      final ids = {...sel};
+      clearCalendarSelection(ref);
+      runUndoableDeleteMany(context, ref, ids);
+    } else {
+      deselectCalendarEvent(ref, widget.actionId);
+      runUndoableDelete(context, ref, widget.actionId);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return OverlayPortal.overlayChildLayoutBuilder(
@@ -605,7 +893,7 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
                 'Postponed to next week',
                 (s) => s.postpone(widget.actionId, PostponeRule.nextWeek),
               ),
-              onDelete: () => runUndoableDelete(context, ref, widget.actionId),
+              onDelete: _delete,
             ),
           ),
         );
@@ -640,69 +928,63 @@ class _Toolbar extends StatelessWidget {
     required this.onDelete,
   });
 
+  Widget _tile(
+    IconData icon,
+    GlassHue hue,
+    String tooltip,
+    VoidCallback onTap,
+  ) => GlassIconTile(
+    icon: icon,
+    hue: hue,
+    tooltip: tooltip,
+    onTap: onTap,
+    size: _kToolTile,
+    iconSize: 18,
+    hitExtra: _kToolHit,
+  );
+
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      elevation: 4,
-      color: scheme.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(6),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _ToolButton('▶️', 'Start', 28, onStart),
-          _ToolButton('🏁', 'Finish', 28, onFinish),
-          _ToolButton('⏭️', 'Continue with same action', 28, onContinue),
-          _ToolButton('7⃣📅', 'Postpone +7 days', 40, onWeek),
-          // Kept apart from the everyday buttons so it isn't hit by accident.
-          Container(
-            width: 1,
-            height: 16,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            color: scheme.outlineVariant,
-          ),
-          Tooltip(
-            message: 'Delete',
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: onDelete,
-              child: SizedBox(
-                width: 28,
-                height: 24,
-                child: Icon(
-                  Icons.delete_outline,
-                  size: 16,
-                  color: scheme.error,
-                ),
+    // A small static glass pill; the transparent Material is only there so
+    // the buttons' ink has something to paint on.
+    return GlassSurface(
+      strength: 1.6,
+      radius: 14,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Padding(
+          padding: const EdgeInsets.all(_kToolPad),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _tile(Icons.play_arrow_rounded, GlassHue.blue, 'Start', onStart),
+              _tile(Icons.stop_rounded, GlassHue.pink, 'Finish', onFinish),
+              _tile(
+                Icons.autorenew_rounded,
+                GlassHue.green,
+                'Continue with same action',
+                onContinue,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ToolButton extends StatelessWidget {
-  final String emoji;
-  final String tooltip;
-  final double width;
-  final VoidCallback onTap;
-
-  const _ToolButton(this.emoji, this.tooltip, this.width, this.onTap);
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: onTap,
-        child: SizedBox(
-          width: width,
-          height: 24,
-          child: Center(
-            child: Text(emoji, style: const TextStyle(fontSize: 13)),
+              _tile(
+                Icons.calendar_view_week_rounded,
+                GlassHue.blue,
+                'Postpone +7 days',
+                onWeek,
+              ),
+              // Kept apart from the everyday buttons so it isn't hit by accident.
+              Container(
+                width: 1,
+                height: 16,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                color: _softLine(context),
+              ),
+              _tile(
+                Icons.delete_outline_rounded,
+                GlassHue.error,
+                'Delete',
+                onDelete,
+              ),
+            ],
           ),
         ),
       ),
@@ -722,6 +1004,14 @@ class _Seg {
   final bool isStart;
   final bool isEnd;
 
+  /// The action's own "HH:mm–HH:mm" (not this day-slice's), formatted once
+  /// per layout instead of on every block build.
+  final String timeRange;
+
+  /// Minutes from the day column's top to [start], and the slice's length.
+  final double topMin;
+  final double lenMin;
+
   const _Seg(
     this.item,
     this.day,
@@ -729,6 +1019,84 @@ class _Seg {
     this.end,
     this.isStart,
     this.isEnd,
+    this.timeRange,
+    this.topMin,
+    this.lenMin,
+  );
+}
+
+/// The ids of the events being dragged (null = no drag). Changes only when a
+/// drag starts or ends, so the 300 other blocks never hear about drag updates.
+typedef _DragFlag = ValueNotifier<Set<String>?>;
+
+/// Rebuilds only when "is [id] among the dragged events" flips. Keyed by id,
+/// not by layout object, so it stays right when the layout is recomputed
+/// mid-drag (Shift+scroll shifting the range).
+class _DragScoped extends StatefulWidget {
+  final ValueListenable<Set<String>?> dragged;
+  final String id;
+  final Widget Function(bool dragging) builder;
+
+  const _DragScoped({
+    required this.dragged,
+    required this.id,
+    required this.builder,
+  });
+
+  @override
+  State<_DragScoped> createState() => _DragScopedState();
+}
+
+class _DragScopedState extends State<_DragScoped> {
+  late bool _dragging = _isDragged();
+
+  bool _isDragged() => widget.dragged.value?.contains(widget.id) ?? false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.dragged.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(_DragScoped old) {
+    super.didUpdateWidget(old);
+    if (old.dragged != widget.dragged) {
+      old.dragged.removeListener(_changed);
+      widget.dragged.addListener(_changed);
+    }
+    _dragging = _isDragged();
+  }
+
+  @override
+  void dispose() {
+    widget.dragged.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    final now = _isDragged();
+    if (now != _dragging) setState(() => _dragging = now);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_dragging);
+}
+
+/// A built block and the inputs it was built from; reused while they match.
+class _BlockEntry {
+  final Widget widget;
+  final double hourHeight;
+  final double dayWidth;
+  final bool running;
+  final bool done;
+
+  const _BlockEntry(
+    this.widget,
+    this.hourHeight,
+    this.dayWidth,
+    this.running,
+    this.done,
   );
 }
 
@@ -736,16 +1104,58 @@ typedef _Placed = LaneAssignment<_Seg>;
 
 enum _DragKind { move, resizeTop, resizeBottom }
 
+/// A drag in progress. Everything it needs is a snapshot taken when it
+/// started (the items, the range it started in), never a reference to a
+/// widget or a layout object: Shift+scroll shifts the range mid-drag, which
+/// rebuilds the layout and can unmount the block that was grabbed.
 class _Drag {
-  final _Placed placed;
+  /// The event under the pointer; it drives the deltas.
+  final ActionListItem grabbed;
+
+  /// The screen column [grabbed]'s segment was in, and its lane there.
+  final int grabbedColumn;
+  final int lane;
+  final int laneCount;
   final _DragKind kind;
+
+  /// Everything that moves: [grabbed] first, then (for a move of one of
+  /// several selected events) the other selected ones. Resizes act on
+  /// [grabbed] alone.
+  final List<ActionListItem> members;
+
+  /// The range start when the drag began; the days scrolled since are
+  /// `widget.start - originRangeStart`.
+  final DateTime originRangeStart;
   final Offset origin;
   final Offset current;
 
-  const _Drag(this.placed, this.kind, this.origin, this.current);
+  const _Drag({
+    required this.grabbed,
+    required this.grabbedColumn,
+    required this.lane,
+    required this.laneCount,
+    required this.kind,
+    required this.members,
+    required this.originRangeStart,
+    required this.origin,
+    required this.current,
+  });
 
-  _Drag at(Offset p) => _Drag(placed, kind, origin, p);
+  _Drag at(Offset p) => _Drag(
+    grabbed: grabbed,
+    grabbedColumn: grabbedColumn,
+    lane: lane,
+    laneCount: laneCount,
+    kind: kind,
+    members: members,
+    originRangeStart: originRangeStart,
+    origin: origin,
+    current: p,
+  );
 }
+
+/// One dragged event and the schedule the drag would give it.
+typedef _Moved = ({ActionListItem item, CalendarSchedule schedule});
 
 class _TimeGrid extends ConsumerStatefulWidget {
   final DateTime start;
@@ -772,8 +1182,30 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   ScrollController? _scrollController;
   ScrollController get _scroll => _scrollController!;
   Timer? _tick;
-  _Drag? _drag;
-  _NewRange? _newRange;
+
+  /// Drag / drag-to-create state lives in notifiers so a pointer move updates
+  /// only the ghost layer, not the grid's 300 blocks.
+  final _dragN = ValueNotifier<_Drag?>(null);
+  final _newRangeN = ValueNotifier<_NewRange?>(null);
+  final _DragFlag _draggedIds = ValueNotifier<Set<String>?>(null);
+
+  /// True from release until the move is written: the drag (and its ghosts)
+  /// stay up meanwhile, and range changes must not clear the selection.
+  bool _committing = false;
+  _Drag? get _drag => _dragN.value;
+  _NewRange? get _newRange => _newRangeN.value;
+
+  // Memoized layout (see [_ensureLayout]) and the widgets built from it.
+  List<ActionListItem>? _layoutItems;
+  DateTime? _layoutStart;
+  int _layoutDayCount = 0;
+  List<DateTime> _dayStartsMemo = const [];
+  List<List<_Placed>> _placedByDay = const [];
+  final Map<_Placed, _BlockEntry> _blockCache = {};
+  final Map<int, (List<Widget>, Widget)> _columnCache = {};
+  Widget? _gutterCache;
+  double _gutterHeight = -1;
+  Color? _gutterColor;
 
   /// Pixels per hour at the current zoom: viewport height / visible hours.
   /// Refreshed on every build; everything vertical is measured with it.
@@ -800,6 +1232,12 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   @override
   void dispose() {
     _tick?.cancel();
+    _endMarquee();
+    _marqueeN.dispose();
+    _dragN.dispose();
+    _newRangeN.dispose();
+    _unroutePointer();
+    _draggedIds.dispose();
     _scrollController?.dispose();
     super.dispose();
   }
@@ -847,30 +1285,58 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// One mouse-wheel notch reports 100; a touchpad's small deltas add up.
   static const _wheelPixelsPerStep = 100.0;
 
-  List<DateTime> get _dayStarts => [
-    for (var i = 0; i <= widget.dayCount; i++) calendarAddDays(widget.start, i),
-  ];
+  /// Day segments + lane packing, recomputed only when the items list
+  /// instance, the range start or the day count change - never on selection,
+  /// hover, drag, zoom or clock ticks.
+  void _ensureLayout() {
+    if (identical(_layoutItems, widget.items) &&
+        _layoutStart == widget.start &&
+        _layoutDayCount == widget.dayCount) {
+      return;
+    }
+    _layoutItems = widget.items;
+    _layoutStart = widget.start;
+    _layoutDayCount = widget.dayCount;
+    _dayStartsMemo = [
+      for (var i = 0; i <= widget.dayCount; i++)
+        calendarAddDays(widget.start, i),
+    ];
+    final placed = _layout(_dayStartsMemo);
+    _placedByDay = [for (var d = 0; d < widget.dayCount; d++) <_Placed>[]];
+    for (final p in placed) {
+      _placedByDay[p.event.day].add(p);
+    }
+    _blockCache.clear();
+    _columnCache.clear();
+  }
 
   List<_Placed> _layout(List<DateTime> dayStarts) {
+    CalendarPerfCounters.layoutRuns++;
     final byDay = <int, List<_Seg>>{};
     for (final a in widget.items) {
       if (a.isAllDay || a.startAt == null) continue;
       final s = a.startAt!;
       final e = _effectiveEnd(a);
+      final range = '${_hhmm(s)}–${_hhmm(e)}';
       for (var d = 0; d < widget.dayCount; d++) {
         final ds = dayStarts[d];
         final de = dayStarts[d + 1];
         if (!s.isBefore(de) || !e.isAfter(ds)) continue;
+        final segStart = s.isAfter(ds) ? s : ds;
+        final segEnd = e.isBefore(de) ? e : de;
         byDay
             .putIfAbsent(d, () => [])
             .add(
               _Seg(
                 a,
                 d,
-                s.isAfter(ds) ? s : ds,
-                e.isBefore(de) ? e : de,
+                segStart,
+                segEnd,
                 !s.isBefore(ds),
                 !e.isAfter(de),
+                range,
+                segStart.difference(ds).inSeconds / 60,
+                segEnd.difference(segStart).inSeconds / 60,
               ),
             );
       }
@@ -882,20 +1348,89 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   }
 
   // -- drag handling --
+  //
+  // Once a drag has started it no longer depends on the block that was
+  // grabbed: that block's widgets can be rebuilt or unmounted when Shift+scroll
+  // shifts the range mid-drag, which would cancel its gesture recognizer. So
+  // moves, release and cancel come from a global pointer route registered at
+  // the start, and the block only starts the drag.
 
-  void _dragStart(_Placed p, _DragKind kind, Offset pos) =>
-      setState(() => _drag = _Drag(p, kind, pos, pos));
+  bool _routed = false;
+
+  void _routePointer() {
+    if (_routed) return;
+    _routed = true;
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
+  }
+
+  void _unroutePointer() {
+    if (!_routed) return;
+    _routed = false;
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
+  }
+
+  void _onPointer(PointerEvent e) {
+    if (e is PointerMoveEvent) {
+      _dragUpdate(e.position);
+    } else if (e is PointerUpEvent) {
+      _unroutePointer();
+      _dragEnd();
+    } else if (e is PointerCancelEvent) {
+      _unroutePointer();
+      _dragCancel();
+    }
+  }
+
+  void _dragStart(_Placed p, _DragKind kind, Offset pos) {
+    if (_drag != null) return;
+    _pressDragged = true;
+    final grabbed = p.event.item;
+    final members = <ActionListItem>[grabbed];
+    if (kind == _DragKind.move) {
+      // Dragging one of several selected events moves them all.
+      final sel = ref.read(calendarSelectionProvider);
+      if (sel.length > 1 && sel.contains(grabbed.id)) {
+        for (final a in widget.items) {
+          if (a.id != grabbed.id && sel.contains(a.id) && a.startAt != null) {
+            members.add(a);
+          }
+        }
+      }
+    }
+    _draggedIds.value = {for (final m in members) m.id};
+    _dragN.value = _Drag(
+      grabbed: grabbed,
+      grabbedColumn: p.event.day,
+      lane: p.lane,
+      laneCount: p.laneCount,
+      kind: kind,
+      members: members,
+      originRangeStart: widget.start,
+      origin: pos,
+      current: pos,
+    );
+    _routePointer();
+  }
 
   void _dragUpdate(Offset pos) {
     final d = _drag;
-    if (d != null) setState(() => _drag = d.at(pos));
+    if (d != null && !_committing) _dragN.value = d.at(pos);
   }
 
-  void _dragCancel() => setState(() => _drag = null);
+  void _clearDrag() {
+    _dragN.value = null;
+    _draggedIds.value = null;
+    _committing = false;
+  }
 
-  /// The schedule the pending drag would produce.
-  CalendarSchedule _preview(_Drag d) {
-    final item = d.placed.event.item;
+  void _dragCancel() => _clearDrag();
+
+  /// The schedules the pending drag would produce: the grabbed event drives
+  /// the deltas (10-minute snap vertically, whole days horizontally) and every
+  /// other member gets the same ones. The day delta counts the days scrolled
+  /// since the drag began, so it is the date under the pointer that decides.
+  List<_Moved> _preview(_Drag d) {
+    final item = d.grabbed;
     final start = item.startAt!;
     final durMin = _effectiveEnd(item).difference(start).inMinutes;
     final startMin = minutesOfDay(start);
@@ -905,67 +1440,113 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
     switch (d.kind) {
       case _DragKind.move:
-        var dayDelta = (dx / widget.dayWidth).round();
-        if (dayDelta != 0) {
-          final orig = dayIndexOf(start, widget.start);
-          dayDelta = (orig + dayDelta).clamp(0, widget.dayCount - 1) - orig;
-        }
+        final scrolled = dayIndexOf(widget.start, d.originRangeStart);
+        final column = (d.grabbedColumn + (dx / widget.dayWidth).round()).clamp(
+          0,
+          widget.dayCount - 1,
+        );
+        final dayDelta = scrolled + column - d.grabbedColumn;
         final hi = durMin <= 1440 - startMin ? 1440 - startMin - durMin : 0;
         minutes = minutes.clamp(-startMin, hi);
-        return movedSchedule(
-          startAt: start,
-          endAt: item.endAt,
-          dayDelta: dayDelta,
-          minuteDelta: minutes,
-          legacyEstimatedMinutes: item.estimatedMinutes,
-        );
+        return [
+          for (final m in d.members)
+            (
+              item: m,
+              schedule: movedSchedule(
+                startAt: m.startAt!,
+                endAt: m.endAt,
+                dayDelta: dayDelta,
+                // All-day chips follow the day delta only.
+                minuteDelta: m.isAllDay ? 0 : minutes,
+                legacyEstimatedMinutes: m.estimatedMinutes,
+              ),
+            ),
+        ];
       case _DragKind.resizeTop:
-        return resizedSchedule(
-          startAt: start,
-          endAt: item.endAt,
-          fromTop: true,
-          minuteDelta: math.max(minutes, -startMin),
-          legacyEstimatedMinutes: item.estimatedMinutes,
-        );
+        return [
+          (
+            item: item,
+            schedule: resizedSchedule(
+              startAt: start,
+              endAt: item.endAt,
+              fromTop: true,
+              minuteDelta: math.max(minutes, -startMin),
+              legacyEstimatedMinutes: item.estimatedMinutes,
+            ),
+          ),
+        ];
       case _DragKind.resizeBottom:
         final endRel = startMin + durMin;
         final dayEndRel = ((endRel - 1) ~/ 1440 + 1) * 1440;
-        return resizedSchedule(
-          startAt: start,
-          endAt: item.endAt,
-          fromTop: false,
-          minuteDelta: math.min(minutes, dayEndRel - endRel),
-          legacyEstimatedMinutes: item.estimatedMinutes,
-        );
+        return [
+          (
+            item: item,
+            schedule: resizedSchedule(
+              startAt: start,
+              endAt: item.endAt,
+              fromTop: false,
+              minuteDelta: math.min(minutes, dayEndRel - endRel),
+              legacyEstimatedMinutes: item.estimatedMinutes,
+            ),
+          ),
+        ];
     }
   }
 
   Future<void> _dragEnd() async {
     final d = _drag;
-    if (d == null) return;
-    final item = d.placed.event.item;
-    final s = _preview(d);
-    final unchanged =
-        s.startAt == item.startAt &&
-        (s.endAt == item.endAt ||
-            (item.endAt == null && s.endAt == _effectiveEnd(item)));
-    if (unchanged) {
-      setState(() => _drag = null);
+    if (d == null || _committing) return;
+    final changes = <ScheduleChange>[];
+    for (final m in _preview(d)) {
+      final item = m.item;
+      final s = m.schedule;
+      // An all-day action without an end keeps having none.
+      final endAt = item.isAllDay && item.endAt == null ? null : s.endAt;
+      final unchanged =
+          s.startAt == item.startAt &&
+          (endAt == item.endAt ||
+              (item.endAt == null && s.endAt == _effectiveEnd(item)));
+      if (!unchanged) {
+        changes.add(ScheduleChange(item.id, startAt: s.startAt, endAt: endAt));
+      }
+    }
+    if (changes.isEmpty) {
+      _clearDrag();
       return;
+    }
+    _committing = true;
+    // Events dragged out of the visible range leave the selection, so a later
+    // Delete can't hit something that isn't on screen.
+    final lo = _dayStartsMemo.first;
+    final hi = _dayStartsMemo.last;
+    final away = {
+      for (final c in changes)
+        if (!(c.startAt!.isBefore(hi) &&
+            (c.endAt == null
+                ? !c.startAt!.isBefore(lo)
+                : c.endAt!.isAfter(lo))))
+          c.id,
+    };
+    if (away.isNotEmpty) {
+      setCalendarSelection(
+        ref,
+        {...ref.read(calendarSelectionProvider)}..removeAll(away),
+      );
     }
     final resizing = d.kind != _DragKind.move;
     try {
-      await runUndoable(
+      await runUndoableMoveMany(
         context,
         ref,
-        item.id,
-        resizing ? 'Resized' : 'Moved',
-        () => ref
-            .read(actionServiceProvider)
-            .updateSchedule(item.id, startAt: s.startAt, endAt: s.endAt),
+        changes,
+        description: resizing
+            ? 'Resized'
+            : changes.length == 1
+            ? 'Moved'
+            : 'Moved ${changes.length} events',
       );
     } finally {
-      if (mounted) setState(() => _drag = null);
+      if (mounted) _clearDrag();
     }
   }
 
@@ -975,14 +1556,41 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   Widget build(BuildContext context) {
     final visibleHours = ref.watch(calendarVisibleHoursProvider);
     ref.listen<int>(calendarVisibleHoursProvider, (_, _) => _anchorZoom());
+    // Moving to other days clears the selection - except while dragging,
+    // where Shift+scroll shifts the range on purpose.
+    void clearOnRangeChange(Object? _, Object? _) {
+      if (_drag == null && !_committing) clearCalendarSelection(ref);
+    }
+
+    ref.listen<DateTime>(calendarRangeStartProvider, clearOnRangeChange);
+    ref.listen<int>(calendarDayCountProvider, clearOnRangeChange);
+    // A refresh drops selected ids that no longer exist (deleted or moved away).
+    ref.listen<AsyncValue<List<ActionListItem>>>(calendarRangeProvider, (
+      _,
+      next,
+    ) {
+      final sel = ref.read(calendarSelectionProvider);
+      final items = next.value;
+      if (sel.isEmpty || items == null || next.isLoading) return;
+      if (_drag != null || _committing) return;
+      final present = {for (final a in items) a.id};
+      if (!present.containsAll(sel)) {
+        setCalendarSelection(ref, sel.intersection(present));
+      }
+    });
 
     return LayoutBuilder(
       builder: (context, box) {
         _viewportHeight = box.maxHeight;
         _hourHeight = math.max(_kMinHourHeight, box.maxHeight / visibleHours);
-        _scrollController ??= ScrollController(
-          initialScrollOffset: math.max(0, _px(_minutesNow() - 60)),
-        );
+        if (_scrollController == null) {
+          _scrollController = ScrollController(
+            initialScrollOffset: math.max(0, _px(_minutesNow() - 60)),
+          )..addListener(_onScrolled);
+          // The first layout may clamp the initial offset; re-sync then.
+          WidgetsBinding.instance.addPostFrameCallback((_) => _onScrolled());
+        }
+        _updateWindow();
         return _buildGrid(context);
       },
     );
@@ -996,12 +1604,15 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   Widget _buildGrid(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final dayW = widget.dayWidth;
-    final dayStarts = _dayStarts;
-    final placed = _layout(dayStarts);
+    _ensureLayout();
+    final dayStarts = _dayStartsMemo;
     final now = DateTime.now().toUtc();
     final todayIdx = dayIndexOf(now, widget.start);
-    final drag = _drag;
     final gridHeight = _hourHeight * 24;
+    if (_columnGeometry != (dayW, gridHeight)) {
+      _columnCache.clear();
+      _columnGeometry = (dayW, gridHeight);
+    }
 
     final children = <Widget>[
       Positioned.fill(
@@ -1011,24 +1622,30 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           dragStartBehavior: DragStartBehavior.down,
-          onTapDown: (_) =>
-              ref.read(calendarSelectedActionProvider.notifier).state = null,
+          onTapDown: (_) {
+            if (!isAdditiveCalendarClick()) clearCalendarSelection(ref);
+          },
           onPanStart: _createStart,
           onPanUpdate: _createUpdate,
           onPanEnd: (_) => _createEnd(),
           onPanCancel: _createCancel,
-          child: CustomPaint(
-            painter: _GridPainter(
-              dayCount: widget.dayCount,
-              dayWidth: dayW,
-              hourHeight: _hourHeight,
-              color: scheme.outlineVariant,
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _GridPainter(
+                dayCount: widget.dayCount,
+                dayWidth: dayW,
+                hourHeight: _hourHeight,
+                color: _softLine(context),
+                todayIndex: todayIdx >= 0 && todayIdx < widget.dayCount
+                    ? todayIdx
+                    : -1,
+                todayTint: scheme.primary.withValues(alpha: 0.05),
+              ),
             ),
           ),
         ),
       ),
-      for (final p in placed)
-        _blockFor(p, dayStarts, drag != null && identical(drag.placed, p)),
+      for (var d = 0; d < widget.dayCount; d++) _column(d, gridHeight),
       if (todayIdx >= 0 && todayIdx < widget.dayCount)
         Positioned(
           left: todayIdx * dayW,
@@ -1040,8 +1657,33 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
             child: ColoredBox(color: scheme.error),
           ),
         ),
-      if (drag != null) _ghost(drag, dayStarts),
-      if (_newRange != null) _createPreview(scheme, _newRange!),
+      // Drag ghost and drag-to-create preview: the only things a pointer
+      // move rebuilds.
+      Positioned.fill(
+        child: IgnorePointer(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([_dragN, _newRangeN, _marqueeN]),
+            builder: (context, _) {
+              final drag = _drag;
+              final range = _newRange;
+              final marquee = _marqueeN.value;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  if (drag != null) ..._ghosts(drag, dayStarts),
+                  if (range != null) _createPreview(scheme, range),
+                  if (marquee != null)
+                    Positioned.fromRect(
+                      key: const ValueKey('marquee'),
+                      rect: marquee,
+                      child: _marqueeBox(scheme),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
     ];
 
     return SingleChildScrollView(
@@ -1056,26 +1698,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                width: _kGutter,
-                height: gridHeight,
-                child: Stack(
-                  children: [
-                    for (var h = 1; h < 24; h++)
-                      Positioned(
-                        top: h * _hourHeight - 7,
-                        right: 6,
-                        child: Text(
-                          '${twoDigits(h)}:00',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+              _gutter(context.glass.textSecondary, gridHeight),
               SizedBox(
                 width: dayW * widget.dayCount,
                 height: gridHeight,
@@ -1088,69 +1711,214 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     );
   }
 
-  Widget _blockFor(_Placed p, List<DateTime> dayStarts, bool dragging) {
-    final seg = p.event;
-    final laneW = widget.dayWidth / p.laneCount;
-    final topMin = seg.start.difference(dayStarts[seg.day]).inSeconds / 60;
-    final lenMin = seg.end.difference(seg.start).inSeconds / 60;
-    final height = math.max(_kMinBlockHeight, _px(lenMin));
-    final key = seg.isStart
-        ? ValueKey('event-${seg.item.id}')
-        : ValueKey('event-${seg.item.id}-d${seg.day}');
-    return Positioned(
-      key: key,
-      left: seg.day * widget.dayWidth + p.lane * laneW,
-      top: _px(topMin),
-      width: laneW - 2,
-      height: height,
-      child: _HoverToolbarHost(
-        actionId: seg.item.id,
-        suppressed: dragging,
-        child: _EventBlock(
-          seg: seg,
-          height: height,
-          running: widget.running.contains(seg.item.id),
-          dragging: dragging,
-          onDragStart: (kind, pos) => _dragStart(p, kind, pos),
-          onDragUpdate: _dragUpdate,
-          onDragEnd: _dragEnd,
-          onDragCancel: _dragCancel,
+  /// The hour labels; rebuilt only when the hour height or colour changes.
+  Widget _gutter(Color labelColor, double gridHeight) {
+    final cached = _gutterCache;
+    if (cached != null &&
+        _gutterHeight == _hourHeight &&
+        _gutterColor == labelColor) {
+      return cached;
+    }
+    _gutterHeight = _hourHeight;
+    _gutterColor = labelColor;
+    final style = TextStyle(fontSize: 10, color: labelColor);
+    return _gutterCache = RepaintBoundary(
+      child: SizedBox(
+        width: _kGutter,
+        height: gridHeight,
+        child: Stack(
+          children: [
+            for (var h = 1; h < 24; h++)
+              Positioned(
+                top: h * _hourHeight - 7,
+                right: 6,
+                child: Text('${twoDigits(h)}:00', style: style),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _ghost(_Drag drag, List<DateTime> dayStarts) {
-    final scheme = Theme.of(context).colorScheme;
-    final s = _preview(drag);
-    final day = dayIndexOf(
-      s.startAt,
-      widget.start,
-    ).clamp(0, widget.dayCount - 1);
-    final topMin = s.startAt.difference(dayStarts[day]).inMinutes;
-    final endMin = math.min(1440, s.endAt.difference(dayStarts[day]).inMinutes);
-    final p = drag.placed;
-    final laneW = widget.dayWidth / p.laneCount;
-    return Positioned(
-      key: const ValueKey('drag-ghost'),
-      left: day * widget.dayWidth + p.lane * laneW,
-      top: _px(topMin),
-      width: laneW - 2,
-      height: math.max(_kMinBlockHeight, _px(endMin - topMin)),
-      child: _rangeBox(scheme, '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}'),
+  /// One day's events in their own repaint boundary. The block widgets are
+  /// cached (see [_blockFor]) so a rebuild of the grid hands the framework the
+  /// same instances and it skips them.
+  Widget _column(int d, double gridHeight) {
+    final blocks = [
+      for (final p in _placedByDay[d])
+        if (_inWindow(p)) _blockFor(p),
+    ];
+    final cached = _columnCache[d];
+    if (cached != null && _sameWidgets(cached.$1, blocks)) return cached.$2;
+    final column = Positioned(
+      key: ValueKey('day-column-$d'),
+      left: d * widget.dayWidth,
+      width: widget.dayWidth,
+      top: 0,
+      height: gridHeight,
+      child: RepaintBoundary(
+        child: Stack(clipBehavior: Clip.none, children: blocks),
+      ),
     );
+    _columnCache[d] = (blocks, column);
+    return column;
   }
+
+  (double, double)? _columnGeometry;
+
+  // -- vertical windowing --
+  //
+  // Only blocks within one viewport above/below the visible hours are built;
+  // the window moves in half-viewport buckets so scrolling rebuilds the
+  // columns rarely, not on every pixel.
+  int _winBucket = -1 << 30;
+  double _winB = 0;
+  double _winLo = double.negativeInfinity;
+  double _winHi = double.infinity;
+
+  double get _scrollOffsetNow =>
+      _scroll.hasClients ? _scroll.offset : _scroll.initialScrollOffset;
+
+  /// Recomputes the window; true when it moved.
+  bool _updateWindow() {
+    if (_viewportHeight <= 0) return false;
+    final b = _viewportHeight / 2;
+    final k = (_scrollOffsetNow / b).floor();
+    if (k == _winBucket && b == _winB) return false;
+    _winBucket = k;
+    _winB = b;
+    _winLo = (k - 2) * b;
+    _winHi = (k + 5) * b;
+    return true;
+  }
+
+  void _onScrolled() {
+    if (mounted && _updateWindow()) setState(() {});
+  }
+
+  bool _inWindow(_Placed p) {
+    final seg = p.event;
+    final top = _px(seg.topMin);
+    final bottom = top + math.max(_kMinBlockHeight, _px(seg.lenMin));
+    return (bottom >= _winLo && top <= _winHi) ||
+        (_draggedIds.value?.contains(seg.item.id) ?? false);
+  }
+
+  static bool _sameWidgets(List<Widget> a, List<Widget> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  Widget _blockFor(_Placed p) {
+    final seg = p.event;
+    final running = widget.running.contains(seg.item.id);
+    final done = seg.item.isDoneBefore;
+    final cached = _blockCache[p];
+    if (cached != null &&
+        cached.hourHeight == _hourHeight &&
+        cached.dayWidth == widget.dayWidth &&
+        cached.running == running &&
+        cached.done == done) {
+      return cached.widget;
+    }
+    final laneW = widget.dayWidth / p.laneCount;
+    final height = math.max(_kMinBlockHeight, _px(seg.lenMin));
+    final key = seg.isStart
+        ? ValueKey('event-${seg.item.id}')
+        : ValueKey('event-${seg.item.id}-d${seg.day}');
+    final built = Positioned(
+      key: key,
+      left: p.lane * laneW,
+      top: _px(seg.topMin),
+      width: laneW - 2,
+      height: height,
+      child: _DragScoped(
+        dragged: _draggedIds,
+        id: seg.item.id,
+        builder: (dragging) => _HoverToolbarHost(
+          actionId: seg.item.id,
+          suppressed: dragging,
+          child: _EventBlock(
+            seg: seg,
+            height: height,
+            width: laneW - 2,
+            running: running,
+            dragging: dragging,
+            onDragStart: (kind, pos) => _dragStart(p, kind, pos),
+            onDragUpdate: _dragUpdate,
+          ),
+        ),
+      ),
+    );
+    _blockCache[p] = _BlockEntry(
+      built,
+      _hourHeight,
+      widget.dayWidth,
+      running,
+      done,
+    );
+    return built;
+  }
+
+  /// One ghost per dragged timed event, all inside the one ghost layer (no
+  /// extra layers per block). The grabbed event keeps its lane; the others
+  /// are drawn full column width. All-day chips have no ghost in the grid,
+  /// and a ghost whose day is outside the visible range is simply not drawn.
+  List<Widget> _ghosts(_Drag drag, List<DateTime> dayStarts) {
+    final scheme = Theme.of(context).colorScheme;
+    final ghosts = <Widget>[];
+    for (final m in _preview(drag)) {
+      if (m.item.isAllDay) continue;
+      final s = m.schedule;
+      final grabbed = m.item.id == drag.grabbed.id;
+      var day = dayIndexOf(s.startAt, widget.start);
+      if (grabbed) day = day.clamp(0, widget.dayCount - 1);
+      if (day < 0 || day >= widget.dayCount) continue;
+      final topMin = s.startAt.difference(dayStarts[day]).inMinutes;
+      final endMin = math.min(
+        1440,
+        s.endAt.difference(dayStarts[day]).inMinutes,
+      );
+      final lanes = grabbed ? drag.laneCount : 1;
+      final laneW = widget.dayWidth / lanes;
+      ghosts.add(
+        Positioned(
+          key: grabbed
+              ? const ValueKey('drag-ghost')
+              : ValueKey('drag-ghost-${m.item.id}'),
+          left: day * widget.dayWidth + (grabbed ? drag.lane : 0) * laneW,
+          top: _px(topMin),
+          width: laneW - 2,
+          height: math.max(_kMinBlockHeight, _px(endMin - topMin)),
+          child: _rangeBox(scheme, '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}'),
+        ),
+      );
+    }
+    return ghosts;
+  }
+
+  /// The translucent rubber-band rectangle (two solid draw ops).
+  Widget _marqueeBox(ColorScheme scheme) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: scheme.primary.withValues(alpha: 0.15),
+      border: Border.all(color: scheme.primary.withValues(alpha: 0.8)),
+    ),
+  );
 
   /// The translucent box with the bold white time chip, shared by the
   /// move/resize ghost and the drag-to-create preview.
   Widget _rangeBox(ColorScheme scheme, String range) {
+    final g = context.glass;
     return IgnorePointer(
       child: Container(
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
-          color: scheme.primary.withValues(alpha: 0.35),
+          color: scheme.primary.withValues(alpha: 0.25),
           border: Border.all(color: scheme.primary),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(8),
         ),
         // Not clipped: on a short block the chip spills below it rather
         // than being cut off.
@@ -1159,22 +1927,21 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              // Solid white with dark text in both themes, so the times
-              // stay legible over whatever block sits underneath.
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(4),
-              boxShadow: const [
-                BoxShadow(color: Colors.black38, blurRadius: 4),
-              ],
+              // The strong glass fill with navy text, so the times stay
+              // legible over whatever block sits underneath.
+              color: g.fillStrong,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: g.border),
+              boxShadow: [BoxShadow(color: g.shadow, blurRadius: 4)],
             ),
             child: Text(
               range,
               maxLines: 1,
               softWrap: false,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: Colors.black87,
+                color: g.textPrimary,
               ),
             ),
           ),
@@ -1186,21 +1953,88 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   // -- drag-to-create --
 
   void _createStart(DragStartDetails d) {
+    if (isAdditiveCalendarClick()) {
+      // Shift/Ctrl+drag on empty space: rubber-band selection, no new action.
+      _marqueeOrigin = d.localPosition;
+      _marqueeMoved = false;
+      _marqueeCancelled = false;
+      HardwareKeyboard.instance.addHandler(_marqueeKey);
+      return;
+    }
     final day = (d.localPosition.dx / widget.dayWidth).floor().clamp(
       0,
       widget.dayCount - 1,
     );
-    setState(
-      () => _newRange = _NewRange(day, d.localPosition.dy, d.localPosition.dy),
-    );
+    _newRangeN.value = _NewRange(day, d.localPosition.dy, d.localPosition.dy);
   }
 
   void _createUpdate(DragUpdateDetails d) {
+    final o = _marqueeOrigin;
+    if (o != null) {
+      if (!_marqueeMoved && (d.localPosition - o).distance < 4) return;
+      _marqueeMoved = true;
+      _marqueeN.value = Rect.fromPoints(o, d.localPosition);
+      return;
+    }
     final r = _newRange;
-    if (r != null) setState(() => _newRange = r.at(d.localPosition.dy));
+    if (r != null) _newRangeN.value = r.at(d.localPosition.dy);
   }
 
-  void _createCancel() => setState(() => _newRange = null);
+  void _createCancel() {
+    _endMarquee();
+    _newRangeN.value = null;
+  }
+
+  // -- rubber-band selection --
+
+  /// Grid-content coordinates (the same space the blocks are positioned in, so
+  /// scrolling and zoom don't matter) of where a Shift/Ctrl+drag began; null
+  /// when no marquee is in progress.
+  Offset? _marqueeOrigin;
+  bool _marqueeMoved = false;
+  final _marqueeN = ValueNotifier<Rect?>(null);
+
+  void _endMarquee() {
+    if (_marqueeOrigin != null) {
+      HardwareKeyboard.instance.removeHandler(_marqueeKey);
+    }
+    _marqueeOrigin = null;
+    _marqueeMoved = false;
+    _marqueeN.value = null;
+  }
+
+  bool _marqueeKey(KeyEvent e) {
+    if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.escape) {
+      // Abandon the rectangle but keep swallowing the drag until release.
+      _marqueeN.value = null;
+      _marqueeMoved = false;
+      _marqueeCancelled = true;
+    }
+    return false;
+  }
+
+  bool _marqueeCancelled = false;
+
+  /// Ids of the timed events whose drawn rectangle intersects [r], computed
+  /// from the layout (not the widgets), so blocks outside the built window
+  /// are still found.
+  Set<String> _marqueeHits(Rect r) {
+    final hits = <String>{};
+    for (var d = 0; d < _placedByDay.length; d++) {
+      for (final p in _placedByDay[d]) {
+        final seg = p.event;
+        final laneW = widget.dayWidth / p.laneCount;
+        final box = Rect.fromLTWH(
+          d * widget.dayWidth + p.lane * laneW,
+          _px(seg.topMin),
+          laneW - 2,
+          math.max(_kMinBlockHeight, _px(seg.lenMin)),
+        );
+        if (box.overlaps(r)) hits.add(seg.item.id);
+      }
+    }
+    return hits;
+  }
 
   /// The dragged range as UTC start/end: the start snaps down and the end up
   /// to the 10-minute grid, so the slot covers what was swept; at least
@@ -1232,8 +2066,21 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   }
 
   Future<void> _createEnd() async {
+    if (_marqueeOrigin != null) {
+      final rect = _marqueeN.value;
+      final cancelled = _marqueeCancelled;
+      _marqueeCancelled = false;
+      _endMarquee();
+      if (rect != null && !cancelled) {
+        setCalendarSelection(ref, {
+          ...ref.read(calendarSelectionProvider),
+          ..._marqueeHits(rect),
+        });
+      }
+      return;
+    }
     final r = _newRange;
-    setState(() => _newRange = null);
+    _newRangeN.value = null;
     if (r == null) return;
     final (start, end) = _newRangeTimes(r);
     await ActionEditorDialog.show(
@@ -1277,15 +2124,27 @@ class _GridPainter extends CustomPainter {
   final double hourHeight;
   final Color color;
 
+  /// Column of today (-1 = not in range) and its very light tint.
+  final int todayIndex;
+  final Color todayTint;
+
   const _GridPainter({
     required this.dayCount,
     required this.dayWidth,
     required this.hourHeight,
     required this.color,
+    required this.todayIndex,
+    required this.todayTint,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (todayIndex >= 0) {
+      canvas.drawRect(
+        Rect.fromLTWH(todayIndex * dayWidth, 0, dayWidth, size.height),
+        Paint()..color = todayTint,
+      );
+    }
     final paint = Paint()
       ..color = color
       ..strokeWidth = 1;
@@ -1304,60 +2163,104 @@ class _GridPainter extends CustomPainter {
       old.dayCount != dayCount ||
       old.dayWidth != dayWidth ||
       old.hourHeight != hourHeight ||
+      old.todayIndex != todayIndex ||
+      old.todayTint != todayTint ||
       old.color != color;
 }
 
-class _EventBlock extends ConsumerWidget {
+/// Whether a block's "name, newline, time" label fits as ONE paragraph
+/// (title within two lines, time on its own line) and how tall it then is.
+/// Measured once per (name, time, width, text scale) and remembered, so
+/// rebuilds, scrolling and selection changes never re-measure.
+class _LabelFit {
+  final bool fits;
+  final double height;
+  const _LabelFit(this.fits, this.height);
+}
+
+final Map<String, _LabelFit> _labelFits = {};
+
+_LabelFit _labelFitFor(
+  TextSpan span,
+  String key,
+  double width,
+  TextScaler scaler,
+) {
+  final cached = _labelFits[key];
+  if (cached != null) return cached;
+  final painter = TextPainter(
+    text: span,
+    textDirection: TextDirection.ltr,
+    textScaler: scaler,
+    maxLines: 3,
+  )..layout(maxWidth: math.max(0, width));
+  final fit = _LabelFit(!painter.didExceedMaxLines, painter.height);
+  painter.dispose();
+  if (_labelFits.length > 4000) _labelFits.clear();
+  return _labelFits[key] = fit;
+}
+
+class _EventBlock extends ConsumerStatefulWidget {
   final _Seg seg;
   final double height;
+  final double width;
   final bool running;
   final bool dragging;
   final void Function(_DragKind, Offset) onDragStart;
   final void Function(Offset) onDragUpdate;
-  final VoidCallback onDragEnd;
-  final VoidCallback onDragCancel;
 
   const _EventBlock({
     required this.seg,
     required this.height,
+    required this.width,
     required this.running,
     required this.dragging,
     required this.onDragStart,
     required this.onDragUpdate,
-    required this.onDragEnd,
-    required this.onDragCancel,
   });
 
-  void _select(WidgetRef ref, String id) =>
-      ref.read(calendarSelectedActionProvider.notifier).state = id;
+  @override
+  ConsumerState<_EventBlock> createState() => _EventBlockState();
+}
+
+class _EventBlockState extends ConsumerState<_EventBlock> {
+  /// Pointer is in a resize band: the one MouseRegion switches cursor on band
+  /// changes only (no per-band widgets).
+  bool _inBand = false;
 
   _DragKind _kindAt(double dy) {
+    final height = widget.height;
     final h = math.min(_kHandle, height / 3);
-    if (seg.isStart && dy < h) return _DragKind.resizeTop;
-    if (seg.isEnd && dy > height - h) return _DragKind.resizeBottom;
+    if (widget.seg.isStart && dy < h) return _DragKind.resizeTop;
+    if (widget.seg.isEnd && dy > height - h) return _DragKind.resizeBottom;
     return _DragKind.move;
   }
 
+  void _setBand(bool v) {
+    if (v != _inBand && mounted) setState(() => _inBand = v);
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
+  Widget build(BuildContext context) {
+    CalendarPerfCounters.blockBuilds++;
+    final seg = widget.seg;
+    final height = widget.height;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final item = seg.item;
     final done = item.isDoneBefore;
-    final urgency = done || running
+    final urgency = done || widget.running
         ? null
         : ref.watch(actionUrgencyProvider.select((m) => m[item.id]));
     final uc = urgency == null
         ? null
-        : urgencyColors(
-            urgency,
-            dark: Theme.of(context).brightness == Brightness.dark,
-          );
-    final bg = running
+        : urgencyColors(urgency, dark: theme.brightness == Brightness.dark);
+    final bg = widget.running
         ? scheme.primary
         : done
         ? scheme.surfaceContainerHighest
         : uc?.bg ?? scheme.primaryContainer;
-    final fg = running
+    final fg = widget.running
         ? scheme.onPrimary
         : done
         ? scheme.onSurfaceVariant
@@ -1369,15 +2272,59 @@ class _EventBlock extends ConsumerWidget {
       decoration: done ? TextDecoration.lineThrough : null,
     );
     final selected = ref.watch(
-      calendarSelectedActionProvider.select((id) => id == item.id),
+      calendarSelectionProvider.select((s) => s.contains(item.id)),
     );
     // The action's own start–end (not this day-slice's), so a block that
     // continues past midnight doesn't read "00:00", and the end is visible
     // without opening the event. The end is the one the block is drawn to.
-    final timeRange = '${_hhmm(item.startAt!)}–${_hhmm(_effectiveEnd(item))}';
+    final timeRange = seg.timeRange;
+    final padTop = height >= 20 ? 3.0 : 0.0;
 
-    final Widget label = height >= 34
-        ? Column(
+    // The label is ONE paragraph. A block gets a ClipRect only when its text
+    // is taller than it; otherwise nothing needs clipping.
+    Widget label;
+    var clip = false;
+    if (height >= 34) {
+      // Title (w600 12 px, up to two lines) then the time on its own line
+      // (11 px normal): one TextSpan tree = one paragraph.
+      final children = [
+        TextSpan(text: '${item.name}\n'),
+        TextSpan(
+          text: timeRange,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w400,
+            color: fg,
+            decoration: TextDecoration.none,
+          ),
+        ),
+      ];
+      final textWidth = widget.width - 12;
+      final scaler = MediaQuery.textScalerOf(context);
+      final fit = _labelFitFor(
+        TextSpan(
+          style: DefaultTextStyle.of(context).style.merge(name),
+          children: children,
+        ),
+        '${textWidth.toStringAsFixed(1)}|${scaler.scale(12)}|${item.name}|$timeRange',
+        textWidth,
+        scaler,
+      );
+      if (fit.fits) {
+        label = Text.rich(
+          TextSpan(style: name, children: children),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+        );
+        clip = height < padTop + fit.height;
+      } else {
+        // Title longer than two lines: keep the two-paragraph form so the
+        // ellipsis lands on the title and the time keeps its own line.
+        label = OverflowBox(
+          alignment: Alignment.topLeft,
+          minHeight: 0,
+          maxHeight: double.infinity,
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1389,83 +2336,60 @@ class _EventBlock extends ConsumerWidget {
               ),
               Text(timeRange, style: TextStyle(fontSize: 11, color: fg)),
             ],
-          )
-        : Text(
-            '${item.name} · $timeRange',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: name.copyWith(fontSize: 11),
-          );
+          ),
+        );
+        clip = true;
+      }
+    } else {
+      label = Text(
+        '${item.name} · $timeRange',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: name.copyWith(fontSize: 11),
+      );
+      clip = height < 16;
+    }
+    Widget content = Padding(
+      padding: EdgeInsets.fromLTRB(6, padTop, 6, 0),
+      child: label,
+    );
+    if (clip) content = ClipRect(child: content);
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      dragStartBehavior: DragStartBehavior.down,
-      // Click selects (so Delete can act on it); double-click edits.
-      onTapDown: (_) => _select(ref, item.id),
-      onDoubleTap: () => openActionEditor(context, ref, item.id),
-      onPanStart: (d) {
-        _select(ref, item.id);
-        onDragStart(_kindAt(d.localPosition.dy), d.globalPosition);
-      },
-      onPanUpdate: (d) => onDragUpdate(d.globalPosition),
-      onPanEnd: (_) => onDragEnd(),
-      onPanCancel: onDragCancel,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Opacity(
-              opacity: dragging ? 0.4 : 1,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: bg,
-                  borderRadius: BorderRadius.circular(4),
-                  border: selected
-                      ? Border.all(color: scheme.onSurface, width: 2)
-                      : Border.all(color: scheme.surface),
-                ),
-                child: ClipRect(
-                  child: OverflowBox(
-                    alignment: Alignment.topLeft,
-                    minHeight: 0,
-                    maxHeight: double.infinity,
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        6,
-                        height >= 20 ? 3 : 0,
-                        6,
-                        0,
-                      ),
-                      child: label,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (seg.isStart)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                height: math.min(_kHandle, height / 3),
-                child: const MouseRegion(
-                  cursor: SystemMouseCursors.resizeUpDown,
-                  opaque: false,
-                ),
-              ),
-            if (seg.isEnd)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: math.min(_kHandle, height / 3),
-                child: const MouseRegion(
-                  cursor: SystemMouseCursors.resizeUpDown,
-                  opaque: false,
-                ),
-              ),
-          ],
+    Widget box = DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: selected
+            ? Border.all(color: scheme.onSurface, width: 2)
+            : Border.all(color: _brightEdge(context.glass)),
+      ),
+      child: content,
+    );
+    // A saveLayer is only worth paying for on the block being dragged.
+    if (widget.dragging) box = Opacity(opacity: 0.4, child: box);
+
+    // Selection happens on press (see [_onPress]); double-click edits. Only
+    // the start of a drag comes from this recognizer: the rest (moves,
+    // release) arrives through the grid's global pointer route, so the drag
+    // survives this block being rebuilt or unmounted mid-drag.
+    return Listener(
+      onPointerDown: (e) => _onPress(ref, item.id, e),
+      onPointerUp: (_) => _onRelease(ref, item.id),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        dragStartBehavior: DragStartBehavior.down,
+        onDoubleTap: () => openActionEditor(context, ref, item.id),
+        onPanStart: (d) =>
+            widget.onDragStart(_kindAt(d.localPosition.dy), d.globalPosition),
+        onPanUpdate: (d) => widget.onDragUpdate(d.globalPosition),
+        child: MouseRegion(
+          cursor: _inBand
+              ? SystemMouseCursors.resizeUpDown
+              : SystemMouseCursors.click,
+          onHover: (e) =>
+              _setBand(_kindAt(e.localPosition.dy) != _DragKind.move),
+          onExit: (_) => _setBand(false),
+          child: box,
         ),
       ),
     );

@@ -11,6 +11,7 @@ import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/providers.dart';
+import 'package:livenow/ui/theme/glass_theme.dart';
 import 'package:livenow/ui/views/calendar_layout.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
 
@@ -163,11 +164,11 @@ void main() {
     await useDays(tester, 3);
     final block = find.byKey(ValueKey('event-$id'));
     expect(
-      find.descendant(of: block, matching: find.text('Alpha')),
+      find.descendant(of: block, matching: find.textContaining('Alpha')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: block, matching: find.text('10:00–11:30')),
+      find.descendant(of: block, matching: find.textContaining('10:00–11:30')),
       findsOneWidget,
     );
     expect(find.text('1 hour 30 min'), findsNothing);
@@ -302,7 +303,8 @@ void main() {
         matching: find.byWidgetPredicate(
           (w) =>
               w is Container &&
-              (w.decoration as BoxDecoration?)?.color == Colors.white,
+              (w.decoration as BoxDecoration?)?.color ==
+                  GlassTheme.light.fillStrong,
         ),
       ),
       findsOneWidget,
@@ -871,6 +873,147 @@ void main() {
       });
       expect((await row(tester, id)).done, isTrue);
       await tester.pump(const Duration(seconds: 1));
+      await unmount(tester);
+    });
+  });
+
+  group('event block drawing cost', () {
+    int countDescendants(Finder block) => find
+        .descendant(of: block, matching: find.byWidgetPredicate((_) => true))
+        .evaluate()
+        .length;
+
+    testWidgets('a tall block: one paragraph, no Opacity, no ClipRect', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(13));
+      await useDays(tester, 3);
+      final block = find.byKey(ValueKey('event-$id'));
+      // ignore: avoid_print
+      print('BLOCK WIDGETS (tall): ${countDescendants(block)}');
+      expect(
+        find.descendant(of: block, matching: find.byType(RichText)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: block, matching: find.textContaining('Alpha')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: block,
+          matching: find.textContaining('10:00–13:00'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: block, matching: find.byType(Opacity)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: block, matching: find.byType(ClipRect)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: block, matching: find.byType(OverflowBox)),
+        findsNothing,
+      );
+      expect(countDescendants(block), lessThanOrEqualTo(17));
+      await unmount(tester);
+    });
+
+    testWidgets('a long title keeps two lines plus its own time line', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(
+        tester,
+        name: List.filled(40, 'longword').join(' '),
+        startAt: at(10),
+        endAt: at(13),
+      );
+      await useDays(tester, 3);
+      final block = find.byKey(ValueKey('event-$id'));
+      expect(
+        find.descendant(of: block, matching: find.text('10:00–13:00')),
+        findsOneWidget,
+      );
+      await unmount(tester);
+    });
+
+    testWidgets('the dragged block (only) gets an Opacity', (tester) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(12));
+      final other = await create(
+        tester,
+        name: 'Beta',
+        startAt: at(14),
+        endAt: at(15),
+      );
+      await useDays(tester, 3);
+      final block = find.byKey(ValueKey('event-$id'));
+      final g = await tester.startGesture(
+        tester.getCenter(block),
+        kind: PointerDeviceKind.mouse,
+      );
+      await g.moveBy(const Offset(0, 1));
+      await tester.pump();
+      await g.moveBy(const Offset(0, 20));
+      await tester.pump();
+      expect(
+        find.descendant(of: block, matching: find.byType(Opacity)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('event-$other')),
+          matching: find.byType(Opacity),
+        ),
+        findsNothing,
+      );
+      await tester.runAsync(() async {
+        await g.up();
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      await tester.pump(const Duration(milliseconds: 400));
+      await unmount(tester);
+    });
+
+    testWidgets('resize cursor only in the top/bottom band', (tester) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(13));
+      await useDays(tester, 3);
+      final block = find.byKey(ValueKey('event-$id'));
+      MouseCursor cursor() => tester
+          .widget<MouseRegion>(
+            find
+                .descendant(
+                  of: block,
+                  matching: find.byWidgetPredicate(
+                    (w) => w is MouseRegion && w.onHover != null,
+                  ),
+                )
+                .first,
+          )
+          .cursor;
+      final m = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await m.addPointer(location: const Offset(1, 1));
+      addTearDown(m.removePointer);
+      final tl = tester.getTopLeft(block);
+      final size = tester.getSize(block);
+      await m.moveTo(tl + Offset(size.width / 2, 2));
+      await tester.pump();
+      expect(cursor(), SystemMouseCursors.resizeUpDown);
+      await m.moveTo(tl + Offset(size.width / 2, size.height / 2));
+      await tester.pump();
+      expect(cursor(), SystemMouseCursors.click);
+      await m.moveTo(tl + Offset(size.width / 2, size.height - 2));
+      await tester.pump();
+      expect(cursor(), SystemMouseCursors.resizeUpDown);
+      await m.moveTo(tl + Offset(size.width / 2, size.height / 2));
+      await tester.pump();
+      expect(cursor(), SystemMouseCursors.click);
       await unmount(tester);
     });
   });

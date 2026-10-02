@@ -8,22 +8,8 @@ import '../../core/ids.dart';
 import '../../data/database.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
+import '../widgets/glass.dart';
 import '../widgets/metric_picker.dart';
-
-const _priorities = [
-  'A1',
-  'A2',
-  'A3',
-  'B1',
-  'B2',
-  'B3',
-  'C1',
-  'C2',
-  'C3',
-  'D1',
-  'D2',
-  'D3',
-];
 
 /// Saved quick-entry presets: "Use" instantiates a new action from one in a
 /// single tap.
@@ -39,10 +25,14 @@ class TemplatesScreen extends ConsumerWidget {
         data: (templates) => templates.isEmpty
             ? const Center(child: Text('No templates yet.'))
             : ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 itemCount: templates.length,
                 itemBuilder: (context, i) {
                   final t = templates[i];
-                  return ListTile(
+                  final tile = ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     title: Text(t.name),
                     onTap: () => _showEditor(context, existing: t),
                     trailing: Row(
@@ -60,6 +50,21 @@ class TemplatesScreen extends ConsumerWidget {
                       ],
                     ),
                   );
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    child: GlassSurface(
+                      radius: 16,
+                      shadow: false,
+                      blurWindow: false,
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: tile,
+                      ),
+                    ),
+                  );
                 },
               ),
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -73,12 +78,15 @@ class TemplatesScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _use(BuildContext context, WidgetRef ref, ActionTemplate t) async {
+  Future<void> _use(
+    BuildContext context,
+    WidgetRef ref,
+    ActionTemplate t,
+  ) async {
     await ref.read(actionServiceProvider).createFromTemplate(t.id);
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Created "${t.name}"')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Created "${t.name}"')));
     }
   }
 
@@ -107,13 +115,11 @@ class _TemplateEditorDialog extends ConsumerStatefulWidget {
       _TemplateEditorDialogState();
 }
 
-class _TemplateEditorDialogState
-    extends ConsumerState<_TemplateEditorDialog> {
+class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   // Legacy payload field: no longer editable, but preserved on re-save.
   int? _legacyEstimatedMinutes;
-  String? _priority;
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
 
@@ -130,11 +136,9 @@ class _TemplateEditorDialogState
       text: payload?['name'] as String? ?? '',
     );
     _legacyEstimatedMinutes = payload?['estimatedMinutes'] as int?;
-    _priority = payload?['priority'] as String?;
     _isAllDay = payload?['isAllDay'] as bool? ?? false;
     _selectedMetricIds =
-        ((payload?['metricIds'] as List<dynamic>?)?.cast<String>() ??
-                const [])
+        ((payload?['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
             .toSet();
   }
 
@@ -168,17 +172,6 @@ class _TemplateEditorDialogState
                   onFieldSubmitted: (_) => _save(),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String?>(
-                  initialValue: _priority,
-                  decoration: const InputDecoration(labelText: 'Priority'),
-                  items: [
-                    const DropdownMenuItem(value: null, child: Text('None')),
-                    for (final p in _priorities)
-                      DropdownMenuItem(value: p, child: Text(p)),
-                  ],
-                  onChanged: (v) => setState(() => _priority = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -214,7 +207,6 @@ class _TemplateEditorDialogState
 
     final payload = jsonEncode({
       'name': name,
-      if (_priority != null) 'priority': _priority,
       if (_legacyEstimatedMinutes != null)
         'estimatedMinutes': _legacyEstimatedMinutes,
       'isAllDay': _isAllDay,

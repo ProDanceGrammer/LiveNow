@@ -22,7 +22,9 @@ Future<ThemeMode> loadThemeMode() async {
 
 Future<void> _saveThemeMode(ThemeMode mode) async {
   try {
-    await (await _file()).writeAsString(mode == ThemeMode.dark ? 'dark' : 'light');
+    await (await _file()).writeAsString(
+      mode == ThemeMode.dark ? 'dark' : 'light',
+    );
   } catch (_) {
     // Persistence is best-effort; the in-memory choice still applies.
   }
@@ -44,5 +46,6 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
       setMode(state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark);
 }
 
-final themeModeProvider =
-    NotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);
+final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
+  ThemeModeNotifier.new,
+);

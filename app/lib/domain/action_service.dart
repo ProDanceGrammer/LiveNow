@@ -59,6 +59,31 @@ class DeleteUndo {
   });
 }
 
+/// Everything [ActionService.deleteActions] removed, in deletion order.
+class DeleteManyUndo {
+  final List<DeleteUndo> parts;
+
+  const DeleteManyUndo(this.parts);
+
+  int get count => parts.length;
+}
+
+/// One action's new schedule for [ActionService.moveActions].
+class ScheduleChange {
+  final String id;
+  final DateTime? startAt;
+  final DateTime? endAt;
+
+  const ScheduleChange(this.id, {required this.startAt, required this.endAt});
+}
+
+/// The schedules [ActionService.moveActions] overwrote.
+class MoveManyUndo {
+  final List<ScheduleChange> before;
+
+  const MoveManyUndo(this.before);
+}
+
 /// How far back finished runs count toward a Countable Activity's average
 /// ("over the last month" in the Notion prototype).
 const Duration _countableAverageWindow = Duration(days: 30);
@@ -76,7 +101,6 @@ class ActionService {
 
   Future<String> createAction({
     required String name,
-    String? priority,
     String postponeFlex = 'flexible',
     String? depthLevel,
     DateTime? startAt,
@@ -97,7 +121,6 @@ class ActionService {
             ActionsTableCompanion.insert(
               id: id,
               name: name,
-              priority: Value(priority),
               postponeFlex: Value(postponeFlex),
               depthLevel: Value(depthLevel),
               startAt: Value(dateTimeToDb(startAt)),
@@ -131,7 +154,6 @@ class ActionService {
   Future<void> updateAction({
     required String actionId,
     required String name,
-    String? priority,
     required String postponeFlex,
     String? depthLevel,
     DateTime? startAt,
@@ -147,7 +169,6 @@ class ActionService {
     )..where((t) => t.id.equals(actionId))).write(
       ActionsTableCompanion(
         name: Value(name),
-        priority: Value(priority),
         postponeFlex: Value(postponeFlex),
         depthLevel: Value(depthLevel),
         startAt: Value(dateTimeToDb(startAt)),
@@ -236,6 +257,67 @@ class ActionService {
             actionIds.contains(edge.successorId)) {
           await db.into(db.actionDependenciesTable).insert(edge);
         }
+      }
+    });
+  }
+
+  /// Deletes several actions in ONE transaction (each as [deleteAction]
+  /// does). Ids that no longer exist are skipped. Undo with [undoDeleteMany].
+  Future<DeleteManyUndo> deleteActions(Iterable<String> ids) {
+    final unique = ids.toSet();
+    return db.transaction(() async {
+      final existing = (await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.isIn(unique))).get()).map((a) => a.id).toSet();
+      final parts = <DeleteUndo>[];
+      // Keep the caller's order so undo (which runs in reverse) is exact.
+      for (final id in ids) {
+        if (existing.remove(id)) parts.add(await deleteAction(id));
+      }
+      return DeleteManyUndo(parts);
+    });
+  }
+
+  /// Puts back what [deleteActions] removed. Restored in REVERSE order so a
+  /// dependency edge between two deleted actions (recorded with whichever was
+  /// deleted first) finds both ends present again.
+  Future<void> undoDeleteMany(DeleteManyUndo undo) {
+    return db.transaction(() async {
+      for (final part in undo.parts.reversed) {
+        await undoDelete(part);
+      }
+    });
+  }
+
+  /// Sets the schedule of several actions in ONE transaction (each as
+  /// [updateSchedule]) and returns the previous schedules for
+  /// [undoMoveActions]. Unknown ids are skipped. Unlike snapshot/restore this
+  /// only rewrites start/end, so links and history are never touched.
+  Future<MoveManyUndo> moveActions(Iterable<ScheduleChange> changes) {
+    return db.transaction(() async {
+      final before = <ScheduleChange>[];
+      for (final c in changes) {
+        final row = await (db.select(
+          db.actionsTable,
+        )..where((t) => t.id.equals(c.id))).getSingleOrNull();
+        if (row == null) continue;
+        before.add(
+          ScheduleChange(
+            c.id,
+            startAt: dateTimeFromDb(row.startAt),
+            endAt: dateTimeFromDb(row.endAt),
+          ),
+        );
+        await updateSchedule(c.id, startAt: c.startAt, endAt: c.endAt);
+      }
+      return MoveManyUndo(before);
+    });
+  }
+
+  Future<void> undoMoveActions(MoveManyUndo undo) {
+    return db.transaction(() async {
+      for (final c in undo.before) {
+        await updateSchedule(c.id, startAt: c.startAt, endAt: c.endAt);
       }
     });
   }
@@ -498,7 +580,6 @@ class ActionService {
             ActionsTableCompanion.insert(
               id: newActionId,
               name: formatSequenceName(sequence + 1, baseName),
-              priority: Value(source.priority),
               postponeFlex: Value(source.postponeFlex),
               depthLevel: Value(source.depthLevel),
               // Timed even when the source is all-day: it starts right now.
@@ -758,7 +839,7 @@ class ActionService {
   }
 
   /// Instantiates a new action from a saved template's JSON payload, in one
-  /// transaction. Payload shape: `{name, priority?, postponeFlex?,
+  /// transaction. Payload shape: `{name, postponeFlex?,
   /// depthLevel?, estimatedMinutes?, isAllDay?, metricIds?}`.
   /// Snapshots [actionId]'s full row and occurrence history — see
   /// [ActionSnapshot] and [restore].
@@ -807,7 +888,6 @@ class ActionService {
 
     return createAction(
       name: payload['name'] as String,
-      priority: payload['priority'] as String?,
       postponeFlex: payload['postponeFlex'] as String? ?? 'flexible',
       depthLevel: payload['depthLevel'] as String?,
       isAllDay: payload['isAllDay'] as bool? ?? false,

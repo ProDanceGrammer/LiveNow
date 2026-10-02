@@ -180,4 +180,48 @@ void main() {
     expect(blockColor(tester, 'Runner'), scheme.primary);
     await unmount(tester);
   });
+
+  testWidgets('block border is a thin bright edge, 2px onSurface when selected', (
+    tester,
+  ) async {
+    for (final dark in [false, true]) {
+      urgency.clear();
+      await pump(
+        tester,
+        urgency,
+        mode: dark ? ThemeMode.dark : ThemeMode.light,
+      );
+      await tomorrow(tester);
+      await create(tester, 'Edge', at(33), at(34));
+      await settle(tester);
+      final scheme = Theme.of(tester.element(find.byType(CalendarView)))
+          .colorScheme;
+      BoxDecoration deco() => tester
+          .widget<DecoratedBox>(
+            find
+                .ancestor(
+                  of: find.textContaining('Edge'),
+                  matching: find.byType(DecoratedBox),
+                )
+                .first,
+          )
+          .decoration as BoxDecoration;
+      final unselected = deco().border! as Border;
+      expect(unselected.top.width, 1);
+      expect(unselected.top.color, isNot(scheme.surface));
+      expect(
+        unselected.top.color.a,
+        closeTo(dark ? 0.25 : 0.7, 0.01),
+        reason: 'dark=$dark',
+      );
+      expect(deco().borderRadius, BorderRadius.circular(8));
+      await tester.tap(find.textContaining('Edge'));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+      final selected = deco().border! as Border;
+      expect(selected.top.width, 2);
+      expect(selected.top.color, scheme.onSurface);
+      await unmount(tester);
+    }
+  });
 }

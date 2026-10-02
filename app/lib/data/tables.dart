@@ -15,6 +15,7 @@ import 'package:drift/drift.dart';
 @DataClassName('ActionRow')
 @TableIndex(name: 'idx_actions_done_start', columns: {#done, #startAt})
 @TableIndex(name: 'idx_actions_allday_start', columns: {#isAllDay, #startAt})
+@TableIndex(name: 'idx_actions_start', columns: {#startAt})
 class ActionsTable extends Table {
   @override
   String get tableName => 'actions';
@@ -22,7 +23,6 @@ class ActionsTable extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
   BoolColumn get done => boolean().withDefault(const Constant(false))();
-  TextColumn get priority => text().nullable()();
   TextColumn get postponeFlex =>
       text().withDefault(const Constant('flexible'))();
   TextColumn get depthLevel => text().nullable()();
@@ -62,8 +62,6 @@ class ActionsTable extends Table {
 
   @override
   List<String> get customConstraints => [
-    "CHECK (priority IS NULL OR priority IN "
-        "('A1','A2','A3','B1','B2','B3','C1','C2','C3','D1','D2','D3'))",
     "CHECK (postpone_flex IN ('flexible','hard','impossible'))",
     "CHECK (depth_level IS NULL OR depth_level IN ('easy','medium','deep'))",
   ];

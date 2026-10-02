@@ -109,6 +109,21 @@ const _metricsV3 = '''
     is_main INTEGER NOT NULL DEFAULT 0,
     importance_level INTEGER NOT NULL DEFAULT 0
   )''';
+// v6 = v5 plus the Mindmap position columns.
+const _metricsV6 = '''
+  CREATE TABLE metrics (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'boolean',
+    time_window TEXT NULL,
+    target REAL NOT NULL DEFAULT 1,
+    is_main INTEGER NOT NULL DEFAULT 0,
+    importance_level INTEGER NOT NULL DEFAULT 0,
+    icon TEXT NULL,
+    pos_x REAL NULL,
+    pos_y REAL NULL
+  )''';
 // v5 = v3 metrics plus the emoji `icon` column (no Mindmap positions yet).
 const _metricsV5 = '''
   CREATE TABLE metrics (
@@ -131,8 +146,8 @@ const _metricDependenciesV3 = '''
     CHECK (metric_id <> depends_on_id)
   )''';
 
-/// A database at [version] 3, 4 or 5: v3 = growth directions, v4 adds
-/// `actions.notes`, v5 adds `metrics.icon`.
+/// A database at [version] 3..6: v3 = growth directions, v4 adds
+/// `actions.notes`, v5 adds `metrics.icon`, v6 adds the Mindmap positions.
 AppDatabase _v3Database({int version = 3}) {
   return AppDatabase.forTesting(
     NativeDatabase.memory(
@@ -142,7 +157,9 @@ AppDatabase _v3Database({int version = 3}) {
         if (version >= 4) {
           raw.execute('ALTER TABLE actions ADD COLUMN notes TEXT NULL');
         }
-        raw.execute(version >= 5 ? _metricsV5 : _metricsV3);
+        raw.execute(
+          version >= 6 ? _metricsV6 : (version >= 5 ? _metricsV5 : _metricsV3),
+        );
         raw.execute(_metricDependenciesV3);
         raw.execute(_actionMetricsOld);
         raw.execute(
@@ -187,13 +204,24 @@ Future<void> _expectIconAndPositionsUsable(
   expect((w.icon, w.posX, w.posY), ('\u{1F331}', 12.5, -7));
 }
 
+Future<void> _expectStartIndex(AppDatabase db) async {
+  final rows = await db
+      .customSelect(
+        "SELECT name FROM sqlite_master WHERE type='index' "
+        "AND name='idx_actions_start'",
+      )
+      .get();
+  expect(rows, hasLength(1), reason: 'idx_actions_start created by v7 step');
+}
+
 void main() {
-  for (final version in [3, 4, 5]) {
-    test('v$version database upgrades to v6: rows intact, new columns empty', () async {
+  for (final version in [3, 4, 5, 6]) {
+    test('v$version database upgrades to v8: rows intact, new columns empty', () async {
       final db = _v3Database(version: version);
       addTearDown(db.close);
 
       final action = (await db.select(db.actionsTable).get()).single;
+      await _expectStartIndex(db);
       expect(action.name, 'Existing action');
       expect(action.notes, isNull);
 
@@ -220,13 +248,14 @@ void main() {
 
   for (final version in [1, 2]) {
     test(
-      'v$version database upgrades to v6 keeping actions, metrics and links',
+      'v$version database upgrades to v8 keeping actions, metrics and links',
       () async {
         final db = _oldDatabase(version: version);
         addTearDown(db.close);
 
         // Actions survive, with the v2 columns empty.
         final actions = await db.select(db.actionsTable).get();
+        await _expectStartIndex(db);
         expect(actions.single.name, 'Old action');
         expect(actions.single.sequenceNumber, isNull);
         expect(actions.single.countableActivityId, isNull);
@@ -281,7 +310,98 @@ void main() {
     );
   }
 
-  test('v1 database (upgraded to v6) still gets the v2 columns and activities table', () async {
+  test('v7 database upgrades to v8: priority column gone, data and indexes intact',
+      () async {
+    final db = AppDatabase.forTesting(
+      NativeDatabase.memory(
+        setup: (raw) {
+          raw.execute(_countableActivitiesV2);
+          raw.execute('''
+            CREATE TABLE actions (
+              id TEXT NOT NULL PRIMARY KEY,
+              name TEXT NOT NULL,
+              done INTEGER NOT NULL DEFAULT 0,
+              priority TEXT NULL,
+              postpone_flex TEXT NOT NULL DEFAULT 'flexible',
+              depth_level TEXT NULL,
+              start_at TEXT NULL,
+              end_at TEXT NULL,
+              is_all_day INTEGER NOT NULL DEFAULT 0,
+              estimated_minutes INTEGER NULL,
+              result_note TEXT NULL,
+              notes TEXT NULL,
+              completed_at TEXT NULL,
+              sequence_number INTEGER NULL,
+              countable_activity_id TEXT NULL REFERENCES countable_activities(id)
+                ON DELETE SET NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              CHECK (priority IS NULL OR priority IN ('A1','B2')),
+              CHECK (postpone_flex IN ('flexible','hard','impossible'))
+            )''');
+          raw.execute(_metricsV6);
+          raw.execute(_metricDependenciesV3);
+          raw.execute(_actionMetricsOld);
+          raw.execute(
+            'CREATE TABLE action_dependencies ('
+            'id TEXT NOT NULL PRIMARY KEY, '
+            'predecessor_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE, '
+            'successor_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE)',
+          );
+          raw.execute(
+            'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
+          );
+          raw.execute(
+            'CREATE INDEX idx_actions_allday_start ON actions (is_all_day, start_at)',
+          );
+          raw.execute('CREATE INDEX idx_actions_start ON actions (start_at)');
+          raw.execute(
+            "INSERT INTO actions (id, name, priority, postpone_flex, created_at, updated_at) "
+            "VALUES ('a1', 'One', 'B2', 'hard', 't', 't'), "
+            "('a2', 'Two', NULL, 'flexible', 't', 't')",
+          );
+          raw.execute(
+            "INSERT INTO metrics (id, name) VALUES ('m1', 'Dir')",
+          );
+          raw.execute(
+            "INSERT INTO action_metrics (id, action_id, metric_id) "
+            "VALUES ('l1', 'a1', 'm1')",
+          );
+          raw.execute(
+            "INSERT INTO action_dependencies (id, predecessor_id, successor_id) "
+            "VALUES ('d1', 'a1', 'a2')",
+          );
+          raw.execute('PRAGMA user_version = 7');
+          raw.execute('PRAGMA foreign_keys = ON');
+        },
+      ),
+    );
+    addTearDown(db.close);
+
+    final cols = await db.customSelect('PRAGMA table_info(actions)').get();
+    expect(cols.map((c) => c.read<String>('name')), isNot(contains('priority')));
+
+    final actions = await db.select(db.actionsTable).get();
+    expect(actions.map((a) => (a.id, a.name, a.postponeFlex)), [
+      ('a1', 'One', 'hard'),
+      ('a2', 'Two', 'flexible'),
+    ]);
+    expect(await db.select(db.actionMetricsTable).get(), hasLength(1));
+    expect(await db.select(db.actionDependenciesTable).get(), hasLength(1));
+
+    final idx = await db
+        .customSelect(
+          "SELECT name FROM sqlite_master WHERE type='index' "
+          "AND name LIKE 'idx_actions_%'",
+        )
+        .get();
+    expect(
+      idx.map((r) => r.read<String>('name')).toSet(),
+      {'idx_actions_done_start', 'idx_actions_allday_start', 'idx_actions_start'},
+    );
+  });
+
+  test('v1 database (upgraded to v8) still gets the v2 columns and activities table', () async {
     final db = _oldDatabase(version: 1);
     addTearDown(db.close);
     await db

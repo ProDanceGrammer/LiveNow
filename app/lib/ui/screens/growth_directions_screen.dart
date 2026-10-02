@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/growth_rules.dart';
 import '../../domain/notion_icons.dart';
 import '../providers.dart';
+import '../theme/glass_theme.dart';
+import '../widgets/glass.dart';
 import '../widgets/growth_direction_dialog.dart';
 import '../widgets/metric_picker.dart' show describeDirection;
 import '../widgets/mindmap_view.dart';
@@ -51,18 +53,28 @@ class GrowthDirectionsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
       length: 3,
+      animationDuration: Duration.zero,
       child: Scaffold(
         body: Column(
           children: [
             Row(
               children: [
                 const Expanded(
-                  child: TabBar(
-                    tabs: [
-                      Tab(text: 'Balance'),
-                      Tab(text: 'List'),
-                      Tab(text: 'Mindmap'),
-                    ],
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(12, 8, 4, 4),
+                    child: GlassSurface(
+                      radius: 20,
+                      shadow: false,
+                      blurWindow: false,
+                      child: TabBar(
+                        splashFactory: NoSplash.splashFactory,
+                        tabs: [
+                          Tab(text: 'Balance'),
+                          Tab(text: 'List'),
+                          Tab(text: 'Mindmap'),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 IconButton(
@@ -75,6 +87,7 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                   tooltip: 'Import growth directions from CSV…',
                   onPressed: () => _import(context, ref),
                 ),
+                const SizedBox(width: 8),
               ],
             ),
             const Expanded(
@@ -270,83 +283,90 @@ class _BalanceBoardState extends State<_BalanceBoard> {
       color: theme.colorScheme.onSurfaceVariant,
     );
 
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(title, style: theme.textTheme.titleMedium),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: Row(
-                children: [
-                  Expanded(child: Text('Direction', style: headerStyle)),
-                  SizedBox(
-                    width: 72,
-                    child: Text(
-                      'Urgency',
-                      style: headerStyle,
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 120,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: Text('Progress', style: headerStyle),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 56,
-                    child: Text(
-                      'Weight',
-                      style: headerStyle,
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                  SizedBox(
-                    width: 32,
-                    child: Text(
-                      'Lvl',
-                      style: headerStyle,
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (rows.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('Nothing here.'),
-              )
-            else
-              for (final r in rows.take(_shown)) _BalanceRowTile(row: r),
-            if (rows.length > _shown)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () => setState(() => _shown += kBalancePageSize),
-                  child: Text('Show more (${rows.length - _shown})'),
-                ),
-              ),
-            if (average != null)
+    // Rows stay plain (no per-row surface): the board is ONE glass panel, and
+    // a transparent Material inside it hosts the rows' ink.
+    return GlassSurface(
+      radius: GlassTheme.radiusPanel,
+      shadow: false,
+      blurWindow: false,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                child: Text(
-                  'AVERAGE ${_fmt(average, 2)}',
-                  key: ValueKey(
-                    'average-${widget.side.name}-${widget.group.name}',
-                  ),
-                  style: headerStyle,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(title, style: theme.textTheme.titleMedium),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: Row(
+                  children: [
+                    Expanded(child: Text('Direction', style: headerStyle)),
+                    SizedBox(
+                      width: 72,
+                      child: Text(
+                        'Urgency',
+                        style: headerStyle,
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Text('Progress', style: headerStyle),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 56,
+                      child: Text(
+                        'Weight',
+                        style: headerStyle,
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 32,
+                      child: Text(
+                        'Lvl',
+                        style: headerStyle,
+                        textAlign: TextAlign.right,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-          ],
+              if (rows.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('Nothing here.'),
+                )
+              else
+                for (final r in rows.take(_shown)) _BalanceRowTile(row: r),
+              if (rows.length > _shown)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => setState(() => _shown += kBalancePageSize),
+                    child: Text('Show more (${rows.length - _shown})'),
+                  ),
+                ),
+              if (average != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                  child: Text(
+                    'AVERAGE ${_fmt(average, 2)}',
+                    key: ValueKey(
+                      'average-${widget.side.name}-${widget.group.name}',
+                    ),
+                    style: headerStyle,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -431,6 +451,9 @@ class _ProgressBar extends StatelessWidget {
         LinearProgressIndicator(
           value: (progress / 100).clamp(0.0, 1.0),
           minHeight: 4,
+          borderRadius: BorderRadius.circular(2),
+          backgroundColor: Theme.of(context).colorScheme.primary
+              .withValues(alpha: 0.15),
         ),
       ],
     );
@@ -532,6 +555,7 @@ class _ListTabState extends ConsumerState<_ListTab> {
                       ),
                       const SizedBox(width: 12),
                       DropdownButton<_Sort>(
+                        dropdownColor: context.glass.fillDialog,
                         value: _sort,
                         items: const [
                           DropdownMenuItem(
@@ -555,6 +579,7 @@ class _ListTabState extends ConsumerState<_ListTab> {
                       ),
                       const SizedBox(width: 12),
                       DropdownButton<MetricKind?>(
+                        dropdownColor: context.glass.fillDialog,
                         value: _kind,
                         items: const [
                           DropdownMenuItem(
@@ -587,34 +612,52 @@ class _ListTabState extends ConsumerState<_ListTab> {
                           itemBuilder: (context, i) {
                             final m = items[i];
                             final s = snapshot.stats[m.id]!;
-                            return ListTile(
-                              key: ValueKey('direction-${m.id}'),
-                              title: Text(m.label),
-                              subtitle: Text(
-                                '${describeDirection(m)}'
-                                '${m.isMain ? ' · main' : ''}'
-                                ' · weight ${m.weight.round()}',
-                              ),
-                              trailing: SizedBox(
-                                width: 190,
-                                child: Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 110,
-                                      child: _ProgressBar(progress: s.progress),
-                                    ),
-                                    Expanded(
-                                      child: Text(
-                                        'U ${_fmt(s.urgency)}',
-                                        textAlign: TextAlign.right,
+                            return Padding(
+                              padding: const EdgeInsets.fromLTRB(12, 3, 12, 3),
+                              child: GlassSurface(
+                                radius: GlassTheme.radiusControl,
+                                shadow: false,
+                                blurWindow: false,
+                                child: Material(
+                                  type: MaterialType.transparency,
+                                  child: ListTile(
+                                    key: ValueKey('direction-${m.id}'),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(
+                                        GlassTheme.radiusControl,
                                       ),
                                     ),
-                                  ],
+                                    title: Text(m.label),
+                                    subtitle: Text(
+                                      '${describeDirection(m)}'
+                                      '${m.isMain ? ' · main' : ''}'
+                                      ' · weight ${m.weight.round()}',
+                                    ),
+                                    trailing: SizedBox(
+                                      width: 190,
+                                      child: Row(
+                                        children: [
+                                          SizedBox(
+                                            width: 110,
+                                            child: _ProgressBar(
+                                              progress: s.progress,
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: Text(
+                                              'U ${_fmt(s.urgency)}',
+                                              textAlign: TextAlign.right,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    onTap: () => GrowthDirectionDialog.show(
+                                      context,
+                                      existing: m,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              onTap: () => GrowthDirectionDialog.show(
-                                context,
-                                existing: m,
                               ),
                             );
                           },

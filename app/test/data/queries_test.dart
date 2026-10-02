@@ -99,7 +99,7 @@ void main() {
         final done = await actions.createAction(name: 'Already done');
         await actions.finish(done);
 
-        final result = await queries.watchCurrentNotDone().first;
+        final result = await queries.watchCurrentNotDone(limit: 100).first;
         final ids = result.map((a) => a.id).toList();
 
         expect(ids, isNot(contains(done)));
@@ -118,7 +118,7 @@ void main() {
       await actions.start(secondDone);
       await actions.finish(secondDone);
 
-      final result = await queries.watchCurrentDone().first;
+      final result = await queries.watchCurrentDone(limit: 100).first;
       final ids = result.map((a) => a.id).toList();
 
       expect(ids, isNot(contains(open)));
@@ -134,7 +134,7 @@ void main() {
       final running = await actions.createAction(name: 'In progress');
       await actions.start(running);
 
-      final result = await queries.watchCurrentNotDone().first;
+      final result = await queries.watchCurrentNotDone(limit: 100).first;
       final item = result.firstWhere((a) => a.id == running);
 
       // start() always resolves some duration (falling back to zero), so

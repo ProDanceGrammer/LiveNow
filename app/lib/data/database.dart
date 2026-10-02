@@ -27,7 +27,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -75,6 +75,16 @@ class AppDatabase extends _$AppDatabase {
         // Mindmap node positions (same: the v3 rebuild covers older ones).
         await m.addColumn(metricsTable, metricsTable.posX);
         await m.addColumn(metricsTable, metricsTable.posY);
+      }
+      if (from < 7) {
+        // Calendar range filter and the Current board's ORDER BY start_at.
+        await m.createIndex(idxActionsStart);
+      }
+      if (from < 8) {
+        // Drops actions.priority. A plain DROP COLUMN fails because of its
+        // CHECK constraint, so the table is rebuilt (indexes are recreated by
+        // drift; foreign keys are off during the rebuild so links survive).
+        await m.alterTable(TableMigration(actionsTable));
       }
     },
   );

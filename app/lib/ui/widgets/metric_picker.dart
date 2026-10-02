@@ -5,6 +5,7 @@ import '../../data/database.dart';
 import '../../domain/growth_rules.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
+import '../theme/glass_theme.dart';
 
 /// Chips for the chosen growth directions plus an "Add" button that opens a
 /// searchable multi-select. There are hundreds of directions, so a chip per
@@ -46,7 +47,7 @@ class MetricPicker extends ConsumerWidget {
         Text(label, style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 4),
         if (chosen.isEmpty)
-          const Text('None')
+          Text('None', style: TextStyle(color: context.glass.textSecondary))
         else
           Wrap(
             spacing: 8,
@@ -134,6 +135,15 @@ class _MetricSearchDialogState extends State<_MetricSearchDialog> {
                         final m = shown[i];
                         return CheckboxListTile(
                           dense: true,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                              GlassTheme.radiusChip,
+                            ),
+                          ),
+                          tileColor: _selected.contains(m.id)
+                              ? Theme.of(context).colorScheme.primary
+                                    .withValues(alpha: 0.10)
+                              : null,
                           value: _selected.contains(m.id),
                           title: Text(metricLabel(m.name, m.icon)),
                           subtitle: Text(_subtitle(m)),

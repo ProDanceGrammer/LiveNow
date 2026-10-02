@@ -30,8 +30,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    Brightness brightness() =>
-        Theme.of(tester.element(find.text('Current Actions'))).brightness;
+    // 'Current Actions' is both the app bar title and a label of the Actions
+    // switch; probe the theme at the title.
+    Brightness brightness() => Theme.of(
+      tester.element(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Current Actions'),
+        ),
+      ),
+    ).brightness;
 
     expect(brightness(), Brightness.light);
 

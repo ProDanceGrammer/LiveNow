@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
-/// A "Start: `<date/time>`" row with pick/clear controls. [value] and the
-/// value passed to [onChanged] are UTC; the picker itself works in the
-/// device's local time, same as any other date/time picker. Shared by the
-/// action editor's "Manual parameters" section and the board card's quick
-/// time-edit dialog.
+import '../time_format.dart';
+import 'quick_time_edit_dialog.dart';
+
+/// A "Start: `<date/time>`" row with edit/clear controls. [value] and the
+/// value passed to [onChanged] are UTC instants; they are shown and edited as
+/// wall-clock time in the app time zone. Tapping the text (or "Pick") opens
+/// the shared [QuickTimeEditDialog] in single-value mode and hands the result
+/// back to the form without touching the database. Used by the action editor's
+/// "Manual parameters" section.
 class DateTimeField extends StatelessWidget {
   final String label;
   final DateTime? value;
@@ -21,20 +25,22 @@ class DateTimeField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final local = value?.toLocal();
-    final text = local == null
+    final text = value == null
         ? 'Not set'
-        : includeTime
-        ? '${_fmtDate(local)} ${_fmtTime(local)}'
-        : _fmtDate(local);
+        : formatUtcDateTime(value!, includeTime: includeTime);
 
     return Row(
       children: [
-        Expanded(child: Text('$label: $text')),
-        TextButton(
-          onPressed: () => _pick(context, local),
-          child: const Text('Pick'),
+        Expanded(
+          child: InkWell(
+            onTap: () => _pick(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('$label: $text'),
+            ),
+          ),
         ),
+        TextButton(onPressed: () => _pick(context), child: const Text('Pick')),
         if (value != null)
           IconButton(
             icon: const Icon(Icons.clear),
@@ -45,42 +51,15 @@ class DateTimeField extends StatelessWidget {
     );
   }
 
-  Future<void> _pick(BuildContext context, DateTime? currentLocal) async {
-    final now = DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      initialDate: currentLocal ?? now,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 5),
+  Future<void> _pick(BuildContext context) async {
+    final result = await QuickTimeEditDialog.pick(
+      context,
+      start: value,
+      isAllDay: !includeTime,
+      showEnd: false,
+      title: label,
     );
-    if (date == null) return;
-
-    if (!includeTime) {
-      onChanged(DateTime(date.year, date.month, date.day).toUtc());
-      return;
-    }
-
-    if (!context.mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: currentLocal != null
-          ? TimeOfDay(hour: currentLocal.hour, minute: currentLocal.minute)
-          : TimeOfDay.now(),
-    );
-    if (time == null) return;
-
-    onChanged(
-      DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-      ).toUtc(),
-    );
+    if (result == null) return;
+    onChanged(result.start);
   }
-
-  String _fmtDate(DateTime d) => '${d.year}-${_two(d.month)}-${_two(d.day)}';
-  String _fmtTime(DateTime d) => '${_two(d.hour)}:${_two(d.minute)}';
-  String _two(int n) => n.toString().padLeft(2, '0');
 }

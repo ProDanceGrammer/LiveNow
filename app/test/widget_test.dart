@@ -10,42 +10,44 @@ import 'package:livenow/ui/providers.dart';
 void main() {
   setUpAll(initPostponeTimeZoneData);
 
-  testWidgets('home shell shows all destinations and opens the new-action dialog', (
-    tester,
-  ) async {
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(db.close);
+  testWidgets(
+    'home shell shows all destinations and opens the new-action dialog',
+    (tester) async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
-        child: const LiveNowApp(),
-      ),
-    );
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [databaseProvider.overrideWithValue(db)],
+          child: const LiveNowApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    // Current Actions is the default view.
-    expect(find.text('Current Actions'), findsOneWidget);
-    expect(find.text('Current'), findsOneWidget);
-    expect(find.text('Operational'), findsNothing);
-    expect(find.text('TODO'), findsNothing);
-    expect(find.text('Most Important'), findsNothing);
-    expect(find.text('Calendar'), findsOneWidget);
-    expect(find.text('All'), findsOneWidget);
-    expect(find.text('Growth directions'), findsOneWidget);
-    expect(find.text('Templates'), findsOneWidget);
+      // Current Actions is the default view.
+      // (once as the page title, once as the Actions section's switch label)
+      expect(find.text('Current Actions'), findsNWidgets(2));
+      expect(find.text('Actions'), findsOneWidget);
+      expect(find.text('Current'), findsNothing);
+      expect(find.text('Operational'), findsNothing);
+      expect(find.text('TODO'), findsNothing);
+      expect(find.text('Most Important'), findsNothing);
+      expect(find.text('All'), findsOneWidget); // third Actions tab
+      expect(find.text('Growth directions'), findsOneWidget);
+      expect(find.text('Templates'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pumpAndSettle();
-    expect(find.text('New action'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.add));
+      await tester.pumpAndSettle();
+      expect(find.text('New action'), findsOneWidget);
 
-    // Unmount the tree (and so dispose the Drift-backed providers) while
-    // still inside the test body, then advance the fake clock by a
-    // non-zero amount so the zero-duration timer Drift schedules when a
-    // query stream is cancelled actually fires. A duration-less pump
-    // doesn't elapse fake time at all, so that timer is still "pending"
-    // when flutter_test's final invariant check runs otherwise.
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump(const Duration(milliseconds: 1));
-  });
+      // Unmount the tree (and so dispose the Drift-backed providers) while
+      // still inside the test body, then advance the fake clock by a
+      // non-zero amount so the zero-duration timer Drift schedules when a
+      // query stream is cancelled actually fires. A duration-less pump
+      // doesn't elapse fake time at all, so that timer is still "pending"
+      // when flutter_test's final invariant check runs otherwise.
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    },
+  );
 }

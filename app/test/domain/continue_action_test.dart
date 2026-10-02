@@ -162,7 +162,6 @@ void main() {
     final activityId = await service.createCountableActivity('Reading');
     final s = await service.createAction(
       name: 'Read',
-      priority: 'B2',
       postponeFlex: 'hard',
       depthLevel: 'deep',
       countableActivityId: activityId,
@@ -172,7 +171,6 @@ void main() {
     final n = (await service.continueSameAction(s)).newActionId;
 
     final created = await row(n);
-    expect(created.priority, 'B2');
     expect(created.postponeFlex, 'hard');
     expect(created.depthLevel, 'deep');
     expect(created.countableActivityId, activityId);

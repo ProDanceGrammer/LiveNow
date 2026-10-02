@@ -350,17 +350,6 @@ class $ActionsTableTable extends ActionsTable
     ),
     defaultValue: const Constant(false),
   );
-  static const VerificationMeta _priorityMeta = const VerificationMeta(
-    'priority',
-  );
-  @override
-  late final GeneratedColumn<String> priority = GeneratedColumn<String>(
-    'priority',
-    aliasedName,
-    true,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-  );
   static const VerificationMeta _postponeFlexMeta = const VerificationMeta(
     'postponeFlex',
   );
@@ -513,7 +502,6 @@ class $ActionsTableTable extends ActionsTable
     id,
     name,
     done,
-    priority,
     postponeFlex,
     depthLevel,
     startAt,
@@ -557,12 +545,6 @@ class $ActionsTableTable extends ActionsTable
       context.handle(
         _doneMeta,
         done.isAcceptableOrUnknown(data['done']!, _doneMeta),
-      );
-    }
-    if (data.containsKey('priority')) {
-      context.handle(
-        _priorityMeta,
-        priority.isAcceptableOrUnknown(data['priority']!, _priorityMeta),
       );
     }
     if (data.containsKey('postpone_flex')) {
@@ -683,10 +665,6 @@ class $ActionsTableTable extends ActionsTable
         DriftSqlType.bool,
         data['${effectivePrefix}done'],
       )!,
-      priority: attachedDatabase.typeMapping.read(
-        DriftSqlType.string,
-        data['${effectivePrefix}priority'],
-      ),
       postponeFlex: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}postpone_flex'],
@@ -752,7 +730,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   final String id;
   final String name;
   final bool done;
-  final String? priority;
   final String postponeFlex;
   final String? depthLevel;
 
@@ -785,7 +762,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     required this.id,
     required this.name,
     required this.done,
-    this.priority,
     required this.postponeFlex,
     this.depthLevel,
     this.startAt,
@@ -806,9 +782,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
     map['done'] = Variable<bool>(done);
-    if (!nullToAbsent || priority != null) {
-      map['priority'] = Variable<String>(priority);
-    }
     map['postpone_flex'] = Variable<String>(postponeFlex);
     if (!nullToAbsent || depthLevel != null) {
       map['depth_level'] = Variable<String>(depthLevel);
@@ -848,9 +821,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       id: Value(id),
       name: Value(name),
       done: Value(done),
-      priority: priority == null && nullToAbsent
-          ? const Value.absent()
-          : Value(priority),
       postponeFlex: Value(postponeFlex),
       depthLevel: depthLevel == null && nullToAbsent
           ? const Value.absent()
@@ -894,7 +864,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       done: serializer.fromJson<bool>(json['done']),
-      priority: serializer.fromJson<String?>(json['priority']),
       postponeFlex: serializer.fromJson<String>(json['postponeFlex']),
       depthLevel: serializer.fromJson<String?>(json['depthLevel']),
       startAt: serializer.fromJson<String?>(json['startAt']),
@@ -919,7 +888,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'done': serializer.toJson<bool>(done),
-      'priority': serializer.toJson<String?>(priority),
       'postponeFlex': serializer.toJson<String>(postponeFlex),
       'depthLevel': serializer.toJson<String?>(depthLevel),
       'startAt': serializer.toJson<String?>(startAt),
@@ -940,7 +908,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     String? id,
     String? name,
     bool? done,
-    Value<String?> priority = const Value.absent(),
     String? postponeFlex,
     Value<String?> depthLevel = const Value.absent(),
     Value<String?> startAt = const Value.absent(),
@@ -958,7 +925,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     id: id ?? this.id,
     name: name ?? this.name,
     done: done ?? this.done,
-    priority: priority.present ? priority.value : this.priority,
     postponeFlex: postponeFlex ?? this.postponeFlex,
     depthLevel: depthLevel.present ? depthLevel.value : this.depthLevel,
     startAt: startAt.present ? startAt.value : this.startAt,
@@ -984,7 +950,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       done: data.done.present ? data.done.value : this.done,
-      priority: data.priority.present ? data.priority.value : this.priority,
       postponeFlex: data.postponeFlex.present
           ? data.postponeFlex.value
           : this.postponeFlex,
@@ -1021,7 +986,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('done: $done, ')
-          ..write('priority: $priority, ')
           ..write('postponeFlex: $postponeFlex, ')
           ..write('depthLevel: $depthLevel, ')
           ..write('startAt: $startAt, ')
@@ -1044,7 +1008,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     id,
     name,
     done,
-    priority,
     postponeFlex,
     depthLevel,
     startAt,
@@ -1066,7 +1029,6 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           other.id == this.id &&
           other.name == this.name &&
           other.done == this.done &&
-          other.priority == this.priority &&
           other.postponeFlex == this.postponeFlex &&
           other.depthLevel == this.depthLevel &&
           other.startAt == this.startAt &&
@@ -1086,7 +1048,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   final Value<String> id;
   final Value<String> name;
   final Value<bool> done;
-  final Value<String?> priority;
   final Value<String> postponeFlex;
   final Value<String?> depthLevel;
   final Value<String?> startAt;
@@ -1105,7 +1066,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.done = const Value.absent(),
-    this.priority = const Value.absent(),
     this.postponeFlex = const Value.absent(),
     this.depthLevel = const Value.absent(),
     this.startAt = const Value.absent(),
@@ -1125,7 +1085,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     required String id,
     required String name,
     this.done = const Value.absent(),
-    this.priority = const Value.absent(),
     this.postponeFlex = const Value.absent(),
     this.depthLevel = const Value.absent(),
     this.startAt = const Value.absent(),
@@ -1148,7 +1107,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Expression<String>? id,
     Expression<String>? name,
     Expression<bool>? done,
-    Expression<String>? priority,
     Expression<String>? postponeFlex,
     Expression<String>? depthLevel,
     Expression<String>? startAt,
@@ -1168,7 +1126,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       if (id != null) 'id': id,
       if (name != null) 'name': name,
       if (done != null) 'done': done,
-      if (priority != null) 'priority': priority,
       if (postponeFlex != null) 'postpone_flex': postponeFlex,
       if (depthLevel != null) 'depth_level': depthLevel,
       if (startAt != null) 'start_at': startAt,
@@ -1191,7 +1148,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Value<String>? id,
     Value<String>? name,
     Value<bool>? done,
-    Value<String?>? priority,
     Value<String>? postponeFlex,
     Value<String?>? depthLevel,
     Value<String?>? startAt,
@@ -1211,7 +1167,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       id: id ?? this.id,
       name: name ?? this.name,
       done: done ?? this.done,
-      priority: priority ?? this.priority,
       postponeFlex: postponeFlex ?? this.postponeFlex,
       depthLevel: depthLevel ?? this.depthLevel,
       startAt: startAt ?? this.startAt,
@@ -1240,9 +1195,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     }
     if (done.present) {
       map['done'] = Variable<bool>(done.value);
-    }
-    if (priority.present) {
-      map['priority'] = Variable<String>(priority.value);
     }
     if (postponeFlex.present) {
       map['postpone_flex'] = Variable<String>(postponeFlex.value);
@@ -1297,7 +1249,6 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('done: $done, ')
-          ..write('priority: $priority, ')
           ..write('postponeFlex: $postponeFlex, ')
           ..write('depthLevel: $depthLevel, ')
           ..write('startAt: $startAt, ')
@@ -3439,6 +3390,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_actions_allday_start',
     'CREATE INDEX idx_actions_allday_start ON actions (is_all_day, start_at)',
   );
+  late final Index idxActionsStart = Index(
+    'idx_actions_start',
+    'CREATE INDEX idx_actions_start ON actions (start_at)',
+  );
   late final Index idxDepSuccessor = Index(
     'idx_dep_successor',
     'CREATE INDEX idx_dep_successor ON action_dependencies (successor_id)',
@@ -3470,6 +3425,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     metricDependenciesTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
+    idxActionsStart,
     idxDepSuccessor,
     idxOccurrenceAction,
     idxActionMetricsMetric,
@@ -3849,7 +3805,6 @@ typedef $$ActionsTableTableCreateCompanionBuilder =
       required String id,
       required String name,
       Value<bool> done,
-      Value<String?> priority,
       Value<String> postponeFlex,
       Value<String?> depthLevel,
       Value<String?> startAt,
@@ -3870,7 +3825,6 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
       Value<String> id,
       Value<String> name,
       Value<bool> done,
-      Value<String?> priority,
       Value<String> postponeFlex,
       Value<String?> depthLevel,
       Value<String?> startAt,
@@ -4030,11 +3984,6 @@ class $$ActionsTableTableFilterComposer
 
   ColumnFilters<bool> get done => $composableBuilder(
     column: $table.done,
-    builder: (column) => ColumnFilters(column),
-  );
-
-  ColumnFilters<String> get priority => $composableBuilder(
-    column: $table.priority,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4250,11 +4199,6 @@ class $$ActionsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get priority => $composableBuilder(
-    column: $table.priority,
-    builder: (column) => ColumnOrderings(column),
-  );
-
   ColumnOrderings<String> get postponeFlex => $composableBuilder(
     column: $table.postponeFlex,
     builder: (column) => ColumnOrderings(column),
@@ -4357,9 +4301,6 @@ class $$ActionsTableTableAnnotationComposer
 
   GeneratedColumn<bool> get done =>
       $composableBuilder(column: $table.done, builder: (column) => column);
-
-  GeneratedColumn<String> get priority =>
-      $composableBuilder(column: $table.priority, builder: (column) => column);
 
   GeneratedColumn<String> get postponeFlex => $composableBuilder(
     column: $table.postponeFlex,
@@ -4577,7 +4518,6 @@ class $$ActionsTableTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<bool> done = const Value.absent(),
-                Value<String?> priority = const Value.absent(),
                 Value<String> postponeFlex = const Value.absent(),
                 Value<String?> depthLevel = const Value.absent(),
                 Value<String?> startAt = const Value.absent(),
@@ -4596,7 +4536,6 @@ class $$ActionsTableTableTableManager
                 id: id,
                 name: name,
                 done: done,
-                priority: priority,
                 postponeFlex: postponeFlex,
                 depthLevel: depthLevel,
                 startAt: startAt,
@@ -4617,7 +4556,6 @@ class $$ActionsTableTableTableManager
                 required String id,
                 required String name,
                 Value<bool> done = const Value.absent(),
-                Value<String?> priority = const Value.absent(),
                 Value<String> postponeFlex = const Value.absent(),
                 Value<String?> depthLevel = const Value.absent(),
                 Value<String?> startAt = const Value.absent(),
@@ -4636,7 +4574,6 @@ class $$ActionsTableTableTableManager
                 id: id,
                 name: name,
                 done: done,
-                priority: priority,
                 postponeFlex: postponeFlex,
                 depthLevel: depthLevel,
                 startAt: startAt,

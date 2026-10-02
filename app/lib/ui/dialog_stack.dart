@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 /// Number of dialogs opened through [showStackedDialog] that are still open.
@@ -13,7 +15,10 @@ void resetStackedDialogsForTest() => _openDialogs = 0;
 /// Like [showDialog], but only the bottom-most dialog dims the background.
 /// Dialogs opened over another one get a transparent barrier (which still
 /// blocks taps on the layers below), so the background keeps the same
-/// darkness however many dialogs are stacked.
+/// darkness however many dialogs are stacked. The bottom-most dialog also
+/// frosts the page behind it with ONE live blur (the only `BackdropFilter` in
+/// the app: a dialog floats over real content, so the pre-rendered glass
+/// background used elsewhere would not do).
 Future<T?> showStackedDialog<T>({
   required BuildContext context,
   required WidgetBuilder builder,
@@ -25,10 +30,31 @@ Future<T?> showStackedDialog<T>({
   try {
     return showDialog<T>(
       context: context,
-      builder: builder,
+      builder: isFirst
+          ? (ctx) => Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ),
+                builder(ctx),
+              ],
+            )
+          : builder,
       barrierDismissible: barrierDismissible,
       useRootNavigator: useRootNavigator,
-      barrierColor: isFirst ? null : Colors.transparent,
+      // A soft navy veil instead of the default black one, so the frosted
+      // page behind the dialog keeps its light colours.
+      barrierColor: !isFirst
+          ? Colors.transparent
+          : Theme.of(context).brightness == Brightness.dark
+          ? const Color(0x73050A18)
+          : const Color(0x401E293B),
     ).whenComplete(() {
       if (_openDialogs > 0) _openDialogs--;
     });

@@ -49,6 +49,7 @@ void main() {
       urgencyColors(600, dark: false).bg,
       urgencyBackground(UrgencyBand.critical, dark: false),
     );
-    expect(urgencyForeground(const Color(0xFFFFFFFF)), const Color(0xDE000000));
+    expect(urgencyForeground(const Color(0xFFFFFFFF)), const Color(0xFF1E293B));
+    expect(urgencyForeground(const Color(0xFF0E7490)), const Color(0xFFFFFFFF));
   });
 }

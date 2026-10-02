@@ -12,26 +12,13 @@ import '../../domain/done_rule.dart';
 import '../../domain/duration_rules.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
+import '../theme/glass_theme.dart';
 import 'action_menu_button.dart';
 import 'action_tile.dart' show formatUrgency;
 import 'date_time_field.dart';
 import 'metric_picker.dart';
+import 'notes_document.dart';
 import 'notes_editor.dart';
-
-const _priorities = [
-  'A1',
-  'A2',
-  'A3',
-  'B1',
-  'B2',
-  'B3',
-  'C1',
-  'C2',
-  'C3',
-  'D1',
-  'D2',
-  'D3',
-];
 
 /// Create/edit dialog for a single action: core fields, metric links, and
 /// (when editing) its previous/next action dependencies.
@@ -74,7 +61,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
 
-  String? _priority;
   String _postponeFlex = 'flexible';
   String? _depthLevel;
   DateTime? _startAt;
@@ -84,7 +70,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   String? _countableActivityId;
   int _activityFieldEpoch = 0;
   String? _notes;
-  bool _notesExpanded = false;
+  bool _notesOpen = false; // the Notes section (tile) is open
+  bool _notesExpanded = false; // the editor's wide "Expand" mode
   final _notesKey = GlobalKey();
 
   bool get _isEditing => widget.existing != null;
@@ -95,11 +82,13 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     final existing = widget.existing;
     _nameController = TextEditingController(text: existing?.name ?? '');
     _notes = existing?.notes;
+    // Open the Notes section only when there already is text to show.
+    _notesOpen =
+        _notes != null && !notesDocumentIsEmpty(notesDocumentFromJson(_notes));
     _startAt = widget.initialStart;
     _endAt = widget.initialEnd;
 
     if (existing != null) {
-      _priority = existing.priority;
       _postponeFlex = existing.postponeFlex;
       _depthLevel = existing.depthLevel;
       _startAt = dateTimeFromDb(existing.startAt);
@@ -166,16 +155,31 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                     child: _buildStatusAndTracking(context),
                   ),
                 const SizedBox(height: 12),
-                Text('Notes', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                NotesEditor(
-                  key: _notesKey,
-                  initialJson: widget.existing?.notes,
-                  onChanged: (json) => _notes = json,
-                  height: notesHeight,
-                  expanded: expanded,
-                  onToggleExpand: () =>
-                      setState(() => _notesExpanded = !_notesExpanded),
+                // Collapsed by default (opened only when the action already
+                // has notes). `maintainState: false` keeps the heavy editor
+                // out of the tree until the section is opened; the latest
+                // JSON lives in `_notes`, so collapsing never loses edits.
+                ExpansionTile(
+                  title: const Text('Notes'),
+                  initiallyExpanded: _notesOpen,
+                  maintainState: false,
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  onExpansionChanged: (open) => setState(() {
+                    _notesOpen = open;
+                    if (!open) _notesExpanded = false;
+                  }),
+                  children: [
+                    NotesEditor(
+                      key: _notesKey,
+                      initialJson: _notes,
+                      onChanged: (json) => _notes = json,
+                      height: notesHeight,
+                      expanded: expanded,
+                      onToggleExpand: () =>
+                          setState(() => _notesExpanded = !_notesExpanded),
+                    ),
+                  ],
                 ),
                 Visibility(
                   visible: !expanded,
@@ -233,30 +237,19 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 12),
-        ExpansionTile(
-          title: const Text('Manual parameters'),
+        _ParametersPanel(
+          title: 'Manual parameters',
           // Opened when a schedule came with the dialog (dragged out
           // on the calendar), so the chosen time is visible.
-          initiallyExpanded: widget.initialStart != null,
-          tilePadding: EdgeInsets.zero,
-          childrenPadding: const EdgeInsets.only(bottom: 8),
+          initiallyOpen: widget.initialStart != null,
           children: [
-            DropdownButtonFormField<String?>(
-              initialValue: _priority,
-              decoration: const InputDecoration(labelText: 'Priority'),
-              items: [
-                const DropdownMenuItem(value: null, child: Text('None')),
-                for (final p in _priorities)
-                  DropdownMenuItem(value: p, child: Text(p)),
-              ],
-              onChanged: (v) => setState(() => _priority = v),
-            ),
-            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: _postponeFlex,
+                    isDense: true,
+                    dropdownColor: context.glass.fillDialog,
                     decoration: const InputDecoration(
                       labelText: 'Postpone flexibility',
                     ),
@@ -278,6 +271,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                 Expanded(
                   child: DropdownButtonFormField<String?>(
                     initialValue: _depthLevel,
+                    isDense: true,
+                    dropdownColor: context.glass.fillDialog,
                     decoration: const InputDecoration(
                       labelText: 'Depth (learning)',
                     ),
@@ -292,10 +287,11 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            _buildCountableActivityField(),
             const SizedBox(height: 8),
+            _buildCountableActivityField(),
             SwitchListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
               contentPadding: EdgeInsets.zero,
               title: const Text('All day'),
               value: _isAllDay,
@@ -322,7 +318,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             MetricPicker(
               label: 'Growth directions',
               selectedIds: _selectedMetricIds,
@@ -377,6 +373,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     return DropdownButtonFormField<String?>(
       key: ValueKey((selected, _activityFieldEpoch)),
       initialValue: selected,
+      isDense: true,
+      dropdownColor: context.glass.fillDialog,
       decoration: const InputDecoration(labelText: 'Countable activity'),
       items: [
         const DropdownMenuItem(value: null, child: Text('None')),
@@ -444,7 +442,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       await service.updateAction(
         actionId: id,
         name: name,
-        priority: _priority,
         postponeFlex: _postponeFlex,
         depthLevel: _depthLevel,
         startAt: _startAt,
@@ -457,7 +454,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     } else {
       await service.createAction(
         name: name,
-        priority: _priority,
         postponeFlex: _postponeFlex,
         depthLevel: _depthLevel,
         startAt: _startAt,
@@ -712,6 +708,82 @@ class _ActionPickerDialogState extends ConsumerState<_ActionPickerDialog> {
           child: const Text('Cancel'),
         ),
       ],
+    );
+  }
+}
+
+/// The "Manual parameters" section: a flat glass panel with a plain header
+/// row that toggles the compact body (no Material ExpansionTile look). The
+/// body is only built while open, as before.
+class _ParametersPanel extends StatefulWidget {
+  const _ParametersPanel({
+    required this.title,
+    required this.children,
+    this.initiallyOpen = false,
+  });
+
+  final String title;
+  final bool initiallyOpen;
+  final List<Widget> children;
+
+  @override
+  State<_ParametersPanel> createState() => _ParametersPanelState();
+}
+
+class _ParametersPanelState extends State<_ParametersPanel> {
+  late bool _open = widget.initiallyOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final g = context.glass;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      // A Material (not a DecoratedBox) so the ListTiles inside can paint ink.
+      child: Material(
+        color: g.dark ? const Color(0x14FFFFFF) : const Color(0xFFE8EFFF),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(GlassTheme.radiusControl),
+          side: BorderSide(color: g.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(GlassTheme.radiusControl),
+              onTap: () => setState(() => _open = !_open),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
+                    Icon(
+                      _open ? Icons.expand_less : Icons.expand_more,
+                      size: 20,
+                      color: g.textSecondary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_open)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: widget.children,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -2,13 +2,11 @@ import 'package:drift/drift.dart' show OrderingTerm, innerJoin;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
-import '../core/time_codec.dart';
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
 import '../domain/action_urgency.dart';
 import '../domain/dependency_service.dart';
-import '../domain/done_rule.dart' as done_rule;
 import '../domain/growth_rules.dart';
 import '../domain/metric_service.dart';
 import 'views/calendar_layout.dart';
@@ -31,12 +29,37 @@ final viewQueriesProvider = Provider<ViewQueries>(
   (ref) => ViewQueries(ref.watch(databaseProvider)),
 );
 
+/// Page size of a Current Actions column and how much "Show more" adds.
+const kCurrentPageSize = 100;
+
+/// How many cards the right ("Not Done Yet") column loads.
+final currentNotDoneLimitProvider = StateProvider<int>(
+  (ref) => kCurrentPageSize,
+);
+
+/// How many cards the left ("Done Before") column loads.
+final currentDoneLimitProvider = StateProvider<int>((ref) => kCurrentPageSize);
+
 final currentNotDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref.watch(viewQueriesProvider).watchCurrentNotDone(),
+  (ref) => ref
+      .watch(viewQueriesProvider)
+      .watchCurrentNotDone(limit: ref.watch(currentNotDoneLimitProvider)),
 );
 
 final currentDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref.watch(viewQueriesProvider).watchCurrentDone(),
+  (ref) => ref
+      .watch(viewQueriesProvider)
+      .watchCurrentDone(limit: ref.watch(currentDoneLimitProvider)),
+);
+
+/// Total not-done actions (the column header shows this, not the page size).
+final currentNotDoneCountProvider = StreamProvider.autoDispose<int>(
+  (ref) => ref.watch(viewQueriesProvider).watchCurrentNotDoneCount(),
+);
+
+/// Total done actions.
+final currentDoneCountProvider = StreamProvider.autoDispose<int>(
+  (ref) => ref.watch(viewQueriesProvider).watchCurrentDoneCount(),
 );
 
 /// How many day columns the calendar shows (2..7).
@@ -212,24 +235,10 @@ final templatesProvider = StreamProvider.autoDispose<List<ActionTemplate>>((
 
 /// All not-done actions, for the action editor's predecessor/successor
 /// picker.
-final openActionsProvider = StreamProvider.autoDispose<List<ActionRow>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db
-      .select(db.actionsTable)
-      .watch()
-      .map(
-        (rows) => rows
-            .where(
-              (a) => !done_rule.isDoneBefore(
-                startAt: dateTimeFromDb(a.startAt),
-                endAt: dateTimeFromDb(a.endAt),
-                isAllDay: a.isAllDay,
-                done: a.done,
-              ),
-            )
-            .toList(),
-      );
-});
+/// The rows have `notes` / `resultNote` == null (not read).
+final openActionsProvider = StreamProvider.autoDispose<List<ActionRow>>(
+  (ref) => ref.watch(viewQueriesProvider).watchOpenActions(),
+);
 
 /// The actions that must happen before [actionId] (its current predecessors).
 final predecessorsOfProvider = StreamProvider.autoDispose
@@ -291,14 +300,9 @@ final occurrencesOfProvider = StreamProvider.autoDispose
 
 /// All actions regardless of status, most recently updated first — the
 /// "see everything, including finished" view.
-final allActionsProvider = StreamProvider.autoDispose<List<ActionListItem>>((
-  ref,
-) {
-  final db = ref.watch(databaseProvider);
-  final query = db.select(db.actionsTable)
-    ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
-  return query.watch().map((rows) => rows.map(ActionListItem.fromRow).toList());
-});
+final allActionsProvider = StreamProvider.autoDispose<List<ActionListItem>>(
+  (ref) => ref.watch(viewQueriesProvider).watchAllActions(),
+);
 
 /// The metric ids currently linked to [actionId].
 final metricIdsOfProvider = StreamProvider.autoDispose

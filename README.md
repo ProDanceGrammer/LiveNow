@@ -123,7 +123,7 @@ MVP actually works end to end, not only that it compiles:
 - **Shell** — window launches; the `NavigationRail` shows all 7 destinations (Operational, TODO,
   Most Important, Calendar, Habits, Metrics, Templates); Operational correctly shows the
   "Nothing scheduled for today." empty state on a fresh database.
-- **Create** — the FAB opens the "New action" dialog; every field renders (Kind, Priority,
+- **Create** — the FAB opens the "New action" dialog; every field renders (Kind,
   Postpone flexibility, Depth, All day, Start/End pickers, Estimated minutes, Metrics), Name is
   autofocused, and Save persists the row.
 - **Live queries** — a task created with no schedule and no predecessors immediately appears in

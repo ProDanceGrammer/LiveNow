@@ -42,7 +42,11 @@ void main() {
 
   /// Main (icon P), Alpha -> Main, and an unlinked Beta; positioned so the
   /// test does not depend on the automatic layout unless [placed] is off.
-  Future<void> pumpMap(WidgetTester tester, {bool placed = true}) async {
+  Future<void> pumpMap(
+    WidgetTester tester, {
+    bool placed = true,
+    Brightness brightness = Brightness.light,
+  }) async {
     tester.view.physicalSize = const Size(1400, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -80,7 +84,10 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [databaseProvider.overrideWithValue(db)],
-        child: const MaterialApp(home: GrowthDirectionsScreen()),
+        child: MaterialApp(
+          theme: ThemeData(brightness: brightness),
+          home: const GrowthDirectionsScreen(),
+        ),
       ),
     );
     await settle(tester);
@@ -723,4 +730,29 @@ void main() {
       await unmount(tester);
     },
   );
+
+  testWidgets('glass node: fill stays the urgency colour in dark; border '
+      'differs selected vs not', (tester) async {
+    await pumpMap(tester, brightness: Brightness.dark);
+    expect(nodeColor(tester, mainId), urgencyColors(1000, dark: true).bg);
+    expect(nodeColor(tester, alphaId), urgencyColors(90, dark: true).bg);
+
+    BoxBorder? border(String id) {
+      final box = find.descendant(
+        of: node(id),
+        matching: find.byType(Container),
+      );
+      return (tester.widget<Container>(box.first).decoration as BoxDecoration)
+          .border;
+    }
+
+    final plain = (border(alphaId) as Border).top;
+    expect(plain.width, 1);
+    await tester.tap(node(alphaId));
+    await tester.pump(const Duration(milliseconds: 400));
+    final picked = (border(alphaId) as Border).top;
+    expect(picked.width, 2);
+    expect(picked.color, isNot(plain.color));
+    await unmount(tester);
+  });
 }

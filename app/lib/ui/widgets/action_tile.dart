@@ -4,7 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/queries.dart';
 import '../../domain/duration_rules.dart';
 import '../providers.dart';
+import '../time_format.dart';
 import 'action_menu_button.dart';
+import 'action_time_label.dart';
+import 'glass.dart';
+
+// Re-exported for the widgets/views that imported these from here.
+export '../time_format.dart' show twoDigits, formatClockTime;
 
 /// One row in a view list: name, a short "when/how long" subtitle, and the
 /// Start/Finish/Postpone menu.
@@ -24,47 +30,66 @@ class ActionTile extends ConsumerWidget {
       actionUrgencyProvider.select((m) => m[action.id]),
     );
 
-    final subtitleParts = <String>[
+    // Parts are either plain strings or the clickable time label.
+    final subtitleParts = <Object>[
       if (action.isDoneBefore) 'Done',
-      if (action.priority != null) action.priority!,
-      if (action.startAt != null) formatScheduledWhen(action),
+      if (action.startAt != null)
+        ActionTimeLabel(
+          key: const ValueKey('tileTimeLabel'),
+          action: action,
+          text: formatScheduledWhen(action),
+        ),
       if (!action.isAllDay) formatActionDuration(action),
       if (isRunning && action.startAt != null)
         'Started ${formatClockTime(action.startAt!)}',
+      if (urgency != null) 'U ${formatUrgency(urgency)}',
     ];
 
-    return ListTile(
+    final tile = ListTile(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       leading: Icon(
         iconForAction(action, isRunning),
         color: isRunning ? Theme.of(context).colorScheme.primary : null,
       ),
       title: Text(action.name),
-      subtitle: subtitleParts.isEmpty && urgency == null
+      subtitle: subtitleParts.isEmpty
           ? null
-          : Text(
-              [
-                ...subtitleParts,
-                if (urgency != null) 'U ${formatUrgency(urgency)}',
-              ].join(' · '),
+          : Text.rich(
+              TextSpan(
+                children: [
+                  for (var i = 0; i < subtitleParts.length; i++) ...[
+                    if (i > 0) const TextSpan(text: ' · '),
+                    switch (subtitleParts[i]) {
+                      final Widget w => WidgetSpan(
+                        alignment: PlaceholderAlignment.baseline,
+                        baseline: TextBaseline.alphabetic,
+                        child: w,
+                      ),
+                      final p => TextSpan(text: p as String),
+                    },
+                  ],
+                ],
+              ),
             ),
       onTap: onTap,
       trailing: ActionMenuButton(actionId: action.id),
     );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: GlassSurface(
+        radius: 16,
+        // Small row: no shadow / blurred window (invisible here, costly in bulk).
+        shadow: false,
+        blurWindow: false,
+        child: Material(type: MaterialType.transparency, child: tile),
+      ),
+    );
   }
 }
 
-String formatScheduledWhen(ActionListItem a) {
-  final start = a.startAt!.toLocal();
-  final date =
-      '${start.year}-${twoDigits(start.month)}-${twoDigits(start.day)}';
-  if (a.isAllDay) return date;
-  return '$date ${twoDigits(start.hour)}:${twoDigits(start.minute)}';
-}
-
-String formatClockTime(DateTime utc) {
-  final local = utc.toLocal();
-  return '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
-}
+String formatScheduledWhen(ActionListItem a) =>
+    formatUtcDateTime(a.startAt!, includeTime: !a.isAllDay);
 
 /// The computed, human-readable duration of [a] (see `computeActionDuration`).
 String formatActionDuration(ActionListItem a) => formatDuration(
@@ -77,8 +102,6 @@ String formatActionDuration(ActionListItem a) => formatDuration(
 
 /// Urgency rounded to a whole number, e.g. 910 or -90.
 String formatUrgency(double u) => u.round().toString();
-
-String twoDigits(int n) => n.toString().padLeft(2, '0');
 
 IconData iconForAction(ActionListItem a, bool isRunning) {
   if (isRunning) return Icons.play_circle_fill;

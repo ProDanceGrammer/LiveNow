@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart'
     show StateController, StateProvider;
 
+import '../domain/action_service.dart' show ScheduleChange;
 import '../domain/growth_rules.dart' show metricLabel;
 import 'providers.dart';
 
@@ -86,6 +87,63 @@ Future<void> runUndoableDelete(
     lastUndo,
     'Deleted "${undo.action.name}"',
     () => service.undoDelete(undo),
+  );
+}
+
+/// Deletes SEVERAL actions at once (one transaction) and offers ONE Undo that
+/// brings all of them back, links included. Like [runUndoableDelete] nothing
+/// needing `ref`/`context` is touched after the first await. Clears the
+/// calendar's single selection if it was among them; a caller that keeps its
+/// own selection set must clear it itself (before or after this call).
+Future<void> runUndoableDeleteMany(
+  BuildContext context,
+  WidgetRef ref,
+  Iterable<String> actionIds,
+) async {
+  final ids = actionIds.toList();
+  if (ids.isEmpty) return;
+  final service = ref.read(actionServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+  final selected = ref.read(calendarSelectedActionProvider.notifier);
+
+  final undo = await service.deleteActions(ids);
+  if (undo.count == 0) return;
+  if (ids.contains(selected.state)) selected.state = null;
+  _offerUndo(
+    messenger,
+    lastUndo,
+    undo.count == 1
+        ? 'Deleted "${undo.parts.first.action.name}"'
+        : 'Deleted ${undo.count} actions',
+    () => service.undoDeleteMany(undo),
+  );
+}
+
+/// Moves SEVERAL actions at once (one transaction) and offers ONE Undo that
+/// puts all their schedules back. [description] defaults to "Moved N events".
+Future<void> runUndoableMoveMany(
+  BuildContext context,
+  WidgetRef ref,
+  Iterable<ScheduleChange> changes, {
+  String? description,
+}) async {
+  final list = changes.toList();
+  if (list.isEmpty) return;
+  final service = ref.read(actionServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  final undo = await service.moveActions(list);
+  if (undo.before.isEmpty) return;
+  _offerUndo(
+    messenger,
+    lastUndo,
+    description ??
+        (undo.before.length == 1
+            ? 'Moved'
+            : 'Moved ${undo.before.length} events'),
+    () => service.undoMoveActions(undo),
   );
 }
 

@@ -9,7 +9,9 @@ import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
+import '../theme/glass_theme.dart';
 import '../undo.dart';
+import 'glass_pill_selector.dart';
 import 'metric_picker.dart';
 
 /// Create or edit one growth direction: its type and target, whether it is a
@@ -132,86 +134,56 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                   },
                 ),
                 const SizedBox(height: 12),
-                DropdownButtonFormField<MetricKind>(
-                  isExpanded: true,
-                  initialValue: _kind,
-                  decoration: const InputDecoration(labelText: 'Type'),
-                  items: const [
-                    DropdownMenuItem(
-                      value: MetricKind.count,
-                      child: Text('Number of actions'),
-                    ),
-                    DropdownMenuItem(
-                      value: MetricKind.hours,
-                      child: Text('Hours spent'),
-                    ),
-                    DropdownMenuItem(
-                      value: MetricKind.boolean,
-                      child: Text('Boolean (done or not)'),
-                    ),
-                  ],
-                  onChanged: (v) => setState(() => _kind = v!),
+                GlassPillSelector<MetricKind>(
+                  label: 'Type',
+                  options: const {
+                    MetricKind.count: 'Number of actions',
+                    MetricKind.hours: 'Hours spent',
+                    MetricKind.boolean: 'Boolean',
+                  },
+                  value: _kind,
+                  onChanged: (v) => setState(() => _kind = v),
                 ),
                 if (numeric) ...[
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<MetricWindow>(
-                          isExpanded: true,
-                          initialValue: _window,
-                          decoration: const InputDecoration(labelText: 'Per'),
-                          items: const [
-                            DropdownMenuItem(
-                              value: MetricWindow.week,
-                              child: Text('Week (last 7 days)'),
-                            ),
-                            DropdownMenuItem(
-                              value: MetricWindow.month,
-                              child: Text('Month (last 30 days)'),
-                            ),
-                            DropdownMenuItem(
-                              value: MetricWindow.year,
-                              child: Text('Year'),
-                            ),
-                            DropdownMenuItem(
-                              value: MetricWindow.fiveYears,
-                              child: Text('5 years'),
-                            ),
-                          ],
-                          onChanged: (v) => setState(() => _window = v!),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _target,
-                          decoration: InputDecoration(
-                            labelText: _kind == MetricKind.hours
-                                ? 'Target (hours)'
-                                : 'Target (actions)',
-                          ),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) {
-                            if (_relationsLoaded) _save();
-                          },
-                          validator: (v) {
-                            final n = double.tryParse(
-                              (v ?? '').trim().replaceAll(',', '.'),
-                            );
-                            return (n == null || n <= 0)
-                                ? 'A number above 0'
-                                : null;
-                          },
-                        ),
-                      ),
-                    ],
+                  GlassPillSelector<MetricWindow>(
+                    label: 'Per',
+                    options: const {
+                      MetricWindow.week: 'Week',
+                      MetricWindow.month: 'Month',
+                      MetricWindow.year: 'Year',
+                      MetricWindow.fiveYears: '5 years',
+                    },
+                    value: _window,
+                    onChanged: (v) => setState(() => _window = v),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _target,
+                    decoration: InputDecoration(
+                      labelText: _kind == MetricKind.hours
+                          ? 'Target (hours)'
+                          : 'Target (actions)',
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) {
+                      if (_relationsLoaded) _save();
+                    },
+                    validator: (v) {
+                      final n = double.tryParse(
+                        (v ?? '').trim().replaceAll(',', '.'),
+                      );
+                      return (n == null || n <= 0) ? 'A number above 0' : null;
+                    },
                   ),
                 ],
                 CheckboxListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(GlassTheme.radiusChip),
+                  ),
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   title: const Text('Main growth direction (weight 1000)'),
@@ -225,7 +197,8 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                       'Weight ${live.weight.round()} · level ${live.importanceLevel}'
                       ' · progress ${stat.progress.toStringAsFixed(1)}%'
                       ' · urgency ${stat.urgency.toStringAsFixed(1)}',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: Theme.of(context).textTheme.bodySmall
+                          ?.copyWith(color: context.glass.textSecondary),
                     ),
                   ),
                 if (!_relationsLoaded)

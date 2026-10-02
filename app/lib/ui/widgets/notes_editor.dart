@@ -127,12 +127,18 @@ class NotesEditorState extends State<NotesEditor> {
   Timer? _timer;
   String? _lastEmitted;
 
+  /// Number of editors created so far (tests assert it stays put while a
+  /// collapsed section must not build the editor).
+  @visibleForTesting
+  static int createdCount = 0;
+
   @visibleForTesting
   EditorState get editorState => _editorState;
 
   @override
   void initState() {
     super.initState();
+    createdCount++;
     _editorState = EditorState(
       document: notesDocumentFromJson(widget.initialJson),
     );
@@ -288,9 +294,13 @@ class NotesEditorState extends State<NotesEditor> {
         Container(
           height: widget.height,
           decoration: BoxDecoration(
+            color: Colors.white.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.06 : 0.45,
+            ),
             border: Border.all(color: scheme.outlineVariant),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(14),
           ),
+          clipBehavior: Clip.antiAlias,
           child: FloatingToolbar(
             items: floatingItems,
             style: toolbarStyle,

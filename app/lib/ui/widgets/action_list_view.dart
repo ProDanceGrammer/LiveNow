@@ -26,6 +26,7 @@ class ActionListView extends ConsumerWidget {
       data: (items) => items.isEmpty
           ? Center(child: Text(emptyMessage))
           : ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: items.length,
               itemBuilder: (context, i) => ActionTile(
                 key: ValueKey(items[i].id),

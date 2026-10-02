@@ -1,16 +1,17 @@
 import 'package:drift/drift.dart';
 
+import '../core/stream_utils.dart';
 import '../core/time_codec.dart';
 import '../domain/done_rule.dart' as done_rule;
 import 'database.dart';
 
 /// A row as shown in an action list — the Current Actions board, All Actions
-/// and the calendar render these.
+/// and the calendar render these. Deliberately has no notes: list queries
+/// never read the (large) `notes` / `result_note` columns.
 class ActionListItem {
   final String id;
   final String name;
   final bool done;
-  final String? priority;
   final DateTime? startAt;
   final DateTime? endAt;
   final bool isAllDay;
@@ -20,12 +21,36 @@ class ActionListItem {
     required this.id,
     required this.name,
     required this.done,
-    this.priority,
     this.startAt,
     this.endAt,
     required this.isAllDay,
     this.estimatedMinutes,
   });
+
+  /// Value equality, so an unchanged query result can be recognised and
+  /// dropped (see `distinctList`).
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ActionListItem &&
+          id == other.id &&
+          name == other.name &&
+          done == other.done &&
+          startAt == other.startAt &&
+          endAt == other.endAt &&
+          isAllDay == other.isAllDay &&
+          estimatedMinutes == other.estimatedMinutes;
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    done,
+    startAt,
+    endAt,
+    isAllDay,
+    estimatedMinutes,
+  );
 
   /// Whether this action counts as done for filtering/board-column purposes
   /// — see `domain/done_rule.dart`.
@@ -40,7 +65,6 @@ class ActionListItem {
     id: row.id,
     name: row.name,
     done: row.done,
-    priority: row.priority,
     startAt: dateTimeFromDb(row.startAt),
     endAt: dateTimeFromDb(row.endAt),
     isAllDay: row.isAllDay,
@@ -51,7 +75,6 @@ class ActionListItem {
     id: row.read<String>('id'),
     name: row.read<String>('name'),
     done: row.read<bool>('done'),
-    priority: row.readNullable<String>('priority'),
     startAt: dateTimeFromDb(row.readNullable<String>('start_at')),
     endAt: dateTimeFromDb(row.readNullable<String>('end_at')),
     isAllDay: row.read<bool>('is_all_day'),
@@ -59,33 +82,106 @@ class ActionListItem {
   );
 }
 
+/// Quiet period after which a burst of writes is collapsed into one list
+/// rebuild (see `core/stream_utils.dart`).
+const kListDebounce = Duration(milliseconds: 40);
+
+/// "Now" as SQL text in the `dateTimeToDb` format (6 fractional digits).
+const kSqlNowUtc = "(strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000Z')";
+
+/// SQL port of `domain/done_rule.dart` `isDoneBefore()` over `actions`
+/// columns (timestamps are fixed-width UTC ISO text, so text `<` is
+/// chronological):
+///
+///   unscheduled (start_at NULL) or all-day  ->  the manual `done` flag
+///   scheduled, timed                        ->  end_at IS NOT NULL AND end_at < now
+///
+/// [nowExpr] is a SQL expression for "now". The default is evaluated by
+/// SQLite on every re-run of a live query, which matches the Dart rule being
+/// evaluated on every emit; tests bind a fixed instant instead.
+/// `test/data/list_queries_test.dart` checks that the Dart and SQL rules agree.
+String doneBeforeSql([String nowExpr = kSqlNowUtc]) =>
+    'CASE WHEN start_at IS NULL OR is_all_day = 1 THEN done = 1 '
+    'ELSE (end_at IS NOT NULL AND end_at < $nowExpr) END';
+
 /// Live (auto-refreshing) queries backing the views. Assumes
 /// [initPostponeTimeZoneData] (see `domain/postpone_rules.dart`) has already
 /// run at app startup.
+///
+/// List queries read only the columns a list needs — never `notes` or
+/// `result_note` (a checklist note is ~3 KB; thousands of them are what made
+/// the lists slow) — and every stream is debounced and de-duplicated, so a
+/// burst of writes causes one rebuild and an unchanged result none.
 class ViewQueries {
   final AppDatabase db;
 
   ViewQueries(this.db);
 
+  /// Columns of `actions` a list item needs.
+  static const _itemColumns =
+      'id, name, done, start_at, end_at, is_all_day, estimated_minutes';
+
+  /// Every `actions` column except the big text ones, for the few callers
+  /// that need a full [ActionRow] (built with `notes`/`resultNote` null).
+  late final List<String> _rowColumns = [
+    for (final c in db.actionsTable.$columns)
+      if (c.$name != 'notes' && c.$name != 'result_note') c.$name,
+  ];
+
+  Stream<List<ActionListItem>> _items(
+    String sql, {
+    List<Variable> variables = const [],
+  }) => distinctList(
+    debounced(
+      db
+          .customSelect(
+            sql,
+            variables: variables,
+            readsFrom: {db.actionsTable},
+          )
+          .watch()
+          .map((rows) => rows.map(ActionListItem.fromQueryRow).toList()),
+      kListDebounce,
+    ),
+  );
+
+  Stream<int> _count(String where, {List<Variable> variables = const []}) =>
+      debounced(
+        db
+            .customSelect(
+              'SELECT COUNT(*) AS c FROM actions WHERE $where',
+              variables: variables,
+              readsFrom: {db.actionsTable},
+            )
+            .watchSingle()
+            .map((r) => r.read<int>('c')),
+        kListDebounce,
+      ).distinct();
+
   /// Every action linked to a growth direction, as (metric id, action row).
   /// An action linked to several directions appears once per link. The
   /// progress rules (`domain/growth_rules.dart`) decide what counts; this
   /// only supplies the rows, so it refreshes when a link or an action changes.
+  /// The rows have `notes` / `resultNote` == null.
   Stream<List<(String, ActionRow)>> watchMetricLinkedActions() {
-    final query = db.select(db.actionMetricsTable).join([
-      innerJoin(
-        db.actionsTable,
-        db.actionsTable.id.equalsExp(db.actionMetricsTable.actionId),
+    final cols = _rowColumns.map((c) => 'a.$c AS $c').join(', ');
+    return distinctList(
+      debounced(
+        db
+            .customSelect(
+              'SELECT am.metric_id AS metric_id, $cols FROM action_metrics am '
+              'JOIN actions a ON a.id = am.action_id',
+              readsFrom: {db.actionMetricsTable, db.actionsTable},
+            )
+            .watch()
+            .map(
+              (rows) => [
+                for (final r in rows)
+                  (r.read<String>('metric_id'), db.actionsTable.map(r.data)),
+              ],
+            ),
+        kListDebounce,
       ),
-    ]);
-    return query.watch().map(
-      (rows) => [
-        for (final r in rows)
-          (
-            r.readTable(db.actionMetricsTable).metricId,
-            r.readTable(db.actionsTable),
-          ),
-      ],
     );
   }
 
@@ -99,58 +195,86 @@ class ViewQueries {
   }) {
     final startText = dateTimeToDb(weekStartUtc)!;
     final endText = dateTimeToDb(weekEndUtc)!;
-
-    final query = db.select(db.actionsTable)
-      ..where(
-        (t) =>
-            t.startAt.isSmallerThanValue(endText) &
-            (t.startAt.isBiggerOrEqualValue(startText) |
-                t.endAt.isBiggerThanValue(startText)),
-      )
-      ..orderBy([(t) => OrderingTerm.asc(t.startAt)]);
-
-    return query.watch().map(
-      (rows) => rows.map(ActionListItem.fromRow).toList(),
+    return _items(
+      'SELECT $_itemColumns FROM actions '
+      'WHERE start_at < ? AND (start_at >= ? OR end_at > ?) '
+      'ORDER BY start_at ASC',
+      variables: [
+        Variable.withString(endText),
+        Variable.withString(startText),
+        Variable.withString(startText),
+      ],
     );
   }
 
-  /// Current Actions board, right column: everything not done yet, nearest
-  /// deadline first (unscheduled last). Once an action has been started,
-  /// `start_at` is its actual start time (see [ActionService.start]), so
-  /// this is also "started, still running" first.
-  Stream<List<ActionListItem>> watchCurrentNotDone() {
-    final query = db.select(db.actionsTable)
-      ..orderBy([
-        (t) => OrderingTerm.asc(
-          const CustomExpression<bool>('start_at IS NULL'),
-        ),
-        (t) => OrderingTerm.asc(t.startAt),
-      ]);
+  /// All actions regardless of status, most recently updated first.
+  Stream<List<ActionListItem>> watchAllActions() =>
+      _items('SELECT $_itemColumns FROM actions ORDER BY updated_at DESC');
 
-    return query.watch().map(
-      (rows) => rows
-          .map(ActionListItem.fromRow)
-          .where((a) => !a.isDoneBefore)
-          .toList(),
+  /// Not-done actions as [ActionRow]s without the heavy text columns (the
+  /// predecessor/successor picker).
+  Stream<List<ActionRow>> watchOpenActions() => distinctList(
+    debounced(
+      db
+          .customSelect(
+            'SELECT ${_rowColumns.join(', ')} FROM actions '
+            'WHERE NOT (${doneBeforeSql()})',
+            readsFrom: {db.actionsTable},
+          )
+          .watch()
+          .map((rows) => rows.map((r) => db.actionsTable.map(r.data)).toList()),
+      kListDebounce,
+    ),
+  );
+
+  static const _notDoneOrder = 'ORDER BY start_at IS NULL ASC, start_at ASC';
+  static const _doneOrder = 'ORDER BY end_at IS NULL ASC, end_at DESC';
+
+  /// Current Actions board, right column: not done yet, nearest deadline
+  /// first (unscheduled last), at most [limit] rows. Once an action has been
+  /// started, `start_at` is its actual start time (see
+  /// [ActionService.start]), so this is also "started, still running" first.
+  /// [nowUtc] pins "now" (tests); by default SQLite's clock is used.
+  Stream<List<ActionListItem>> watchCurrentNotDone({
+    required int limit,
+    DateTime? nowUtc,
+  }) {
+    final (now, vars) = _now(nowUtc);
+    return _items(
+      'SELECT $_itemColumns FROM actions WHERE NOT (${doneBeforeSql(now)}) '
+      '$_notDoneOrder LIMIT ?',
+      variables: [...vars, Variable.withInt(limit)],
     );
   }
 
   /// Current Actions board, left column: done actions, most recently
   /// finished first (`end_at` is the actual finish time — see
-  /// [ActionService.finish]).
-  Stream<List<ActionListItem>> watchCurrentDone() {
-    final query = db.select(db.actionsTable)
-      ..orderBy([
-        (t) =>
-            OrderingTerm.asc(const CustomExpression<bool>('end_at IS NULL')),
-        (t) => OrderingTerm.desc(t.endAt),
-      ]);
-
-    return query.watch().map(
-      (rows) => rows
-          .map(ActionListItem.fromRow)
-          .where((a) => a.isDoneBefore)
-          .toList(),
+  /// [ActionService.finish]), at most [limit] rows.
+  Stream<List<ActionListItem>> watchCurrentDone({
+    required int limit,
+    DateTime? nowUtc,
+  }) {
+    final (now, vars) = _now(nowUtc);
+    return _items(
+      'SELECT $_itemColumns FROM actions WHERE (${doneBeforeSql(now)}) '
+      '$_doneOrder LIMIT ?',
+      variables: [...vars, Variable.withInt(limit)],
     );
   }
+
+  /// Total number of not-done actions (the column header; not the page size).
+  Stream<int> watchCurrentNotDoneCount({DateTime? nowUtc}) {
+    final (now, vars) = _now(nowUtc);
+    return _count('NOT (${doneBeforeSql(now)})', variables: vars);
+  }
+
+  /// Total number of done actions.
+  Stream<int> watchCurrentDoneCount({DateTime? nowUtc}) {
+    final (now, vars) = _now(nowUtc);
+    return _count('(${doneBeforeSql(now)})', variables: vars);
+  }
+
+  (String, List<Variable>) _now(DateTime? nowUtc) => nowUtc == null
+      ? (kSqlNowUtc, const [])
+      : ('?', [Variable.withString(dateTimeToDb(nowUtc)!)]);
 }
