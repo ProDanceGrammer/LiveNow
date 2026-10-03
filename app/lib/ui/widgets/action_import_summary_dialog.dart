@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/action_import_service.dart';
+import '../../domain/template_import_service.dart';
 import '../dialog_stack.dart';
 
 /// Shows what an actions CSV import did: counts plus the lists the user may
@@ -59,6 +60,60 @@ class ActionImportSummaryDialog extends StatelessWidget {
                 r.unresolvedRefs,
               ),
               _list(context, 'Links refused', r.rejectedEdges),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Summary of a templates CSV import.
+class TemplateImportSummaryDialog extends StatelessWidget {
+  const TemplateImportSummaryDialog({super.key, required this.result});
+
+  final TemplateImportResult result;
+
+  static Future<void> show(BuildContext context, TemplateImportResult result) =>
+      showStackedDialog<void>(
+        context: context,
+        builder: (_) => TemplateImportSummaryDialog(result: result),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final r = result;
+    return AlertDialog(
+      title: const Text('Import finished'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${r.created} templates created'),
+              Text('${r.skipped} skipped (name already a template)'),
+              if (r.linksIgnored > 0)
+                Text(
+                  '${r.linksIgnored} rows had next/previous links (ignored)',
+                ),
+              if (r.unmatchedDirections.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    'Unmatched growth directions (${r.unmatchedDirections.length})',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                for (final s in r.unmatchedDirections) Text(s),
+              ],
             ],
           ),
         ),

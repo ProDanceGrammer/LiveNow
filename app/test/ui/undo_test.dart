@@ -164,4 +164,51 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await unmount(tester);
   });
+
+  testWidgets('runUndoableToggleDone ticks and Undo unticks', (tester) async {
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await tester.runAsync(() async {
+      actionId = await ProviderContainer(
+        overrides: [databaseProvider.overrideWithValue(db)],
+      ).read(actionServiceProvider).createAction(name: 'chk', isAllDay: true);
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Consumer(
+              builder: (context, ref, _) => TextButton(
+                onPressed: () => runUndoableToggleDone(context, ref, actionId),
+                child: const Text('go'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Future<bool> done() async => (await tester.runAsync(
+      () => (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle(),
+    ))!.done;
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('go'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(await done(), isTrue);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    expect(await done(), isFalse);
+
+    await tester.pump(const Duration(seconds: 1));
+    await unmount(tester);
+  });
 }

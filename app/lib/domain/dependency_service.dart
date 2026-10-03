@@ -69,10 +69,7 @@ class DependencyService {
   /// Whether [to] can be reached by following successor edges forward from
   /// [from] — i.e. whether [from] already "leads to" [to] somewhere down the
   /// chain. Used to reject an edge that would close a loop.
-  Future<bool> _isReachable({
-    required String from,
-    required String to,
-  }) async {
+  Future<bool> _isReachable({required String from, required String to}) async {
     final row = await db
         .customSelect(
           '''

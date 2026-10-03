@@ -294,7 +294,8 @@ void main() {
       ),
     );
     expect(find.text('Scheduled start: 2026-10-02 14:30'), findsOneWidget);
-    await tester.tap(find.text('Pick'));
+    expect(find.text('Pick'), findsNothing);
+    await tester.tap(find.text('Scheduled start: 2026-10-02 14:30'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const ValueKey('time-end-minute')), findsNothing);

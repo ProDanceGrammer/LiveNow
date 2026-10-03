@@ -131,8 +131,14 @@ void zoomCalendar(WidgetRef ref, int direction) {
 /// The calendar event last clicked (Delete removes it); null = none.
 final calendarSelectedActionProvider = StateProvider<String?>((ref) => null);
 
-/// The "Today" button: re-anchors for the current day count.
+/// Bumped by the "Today" button; the time grid scrolls the now-line to the
+/// viewport centre when it changes.
+final calendarScrollToNowProvider = StateProvider<int>((ref) => 0);
+
+/// The "Today" button: re-anchors for the current day count and scrolls the
+/// grid to the current time.
 void goToCalendarToday(WidgetRef ref) {
+  ref.read(calendarScrollToNowProvider.notifier).state++;
   ref.read(calendarRangeStartProvider.notifier).state = calendarAnchorStart(
     DateTime.now().toUtc(),
     ref.read(calendarDayCountProvider),
@@ -303,6 +309,10 @@ final occurrencesOfProvider = StreamProvider.autoDispose
 final allActionsProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref.watch(viewQueriesProvider).watchAllActions(),
 );
+
+/// The search text above the All list (matched case-insensitively against the
+/// loaded names in Dart; empty = everything).
+final allActionsQueryProvider = StateProvider.autoDispose<String>((ref) => '');
 
 /// The metric ids currently linked to [actionId].
 final metricIdsOfProvider = StreamProvider.autoDispose

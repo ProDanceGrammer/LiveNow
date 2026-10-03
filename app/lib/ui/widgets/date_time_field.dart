@@ -5,7 +5,7 @@ import 'quick_time_edit_dialog.dart';
 
 /// A "Start: `<date/time>`" row with edit/clear controls. [value] and the
 /// value passed to [onChanged] are UTC instants; they are shown and edited as
-/// wall-clock time in the app time zone. Tapping the text (or "Pick") opens
+/// wall-clock time in the app time zone. Tapping the text opens
 /// the shared [QuickTimeEditDialog] in single-value mode and hands the result
 /// back to the form without touching the database. Used by the action editor's
 /// "Manual parameters" section.
@@ -29,22 +29,22 @@ class DateTimeField extends StatelessWidget {
         ? 'Not set'
         : formatUtcDateTime(value!, includeTime: includeTime);
 
+    // Just the text: tapping it opens the picker (no separate Pick button).
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: InkWell(
-            onTap: () => _pick(context),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text('$label: $text'),
-            ),
+        InkWell(
+          onTap: () => _pick(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('$label: $text'),
           ),
         ),
-        TextButton(onPressed: () => _pick(context), child: const Text('Pick')),
         if (value != null)
           IconButton(
-            icon: const Icon(Icons.clear),
+            icon: const Icon(Icons.clear, size: 16),
             tooltip: 'Clear',
+            visualDensity: VisualDensity.compact,
             onPressed: () => onChanged(null),
           ),
       ],

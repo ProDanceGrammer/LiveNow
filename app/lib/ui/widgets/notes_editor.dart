@@ -99,6 +99,10 @@ class NotesEditor extends StatefulWidget {
   final bool expanded;
   final VoidCallback? onToggleExpand;
 
+  /// Ctrl+Enter inside the editor (the host dialog's Save). Without it the
+  /// package would use the key to toggle a checkbox.
+  final VoidCallback? onSave;
+
   const NotesEditor({
     super.key,
     this.initialJson,
@@ -106,6 +110,7 @@ class NotesEditor extends StatefulWidget {
     this.height = 320,
     this.expanded = false,
     this.onToggleExpand,
+    this.onSave,
   });
 
   @override
@@ -156,6 +161,19 @@ class NotesEditorState extends State<NotesEditor> {
           return KeyEventResult.handled;
         },
       ),
+      if (widget.onSave != null)
+        CommandShortcutEvent(
+          key: 'save the dialog',
+          getDescription: () => 'Save',
+          command: 'ctrl+enter',
+          macOSCommand: 'cmd+enter',
+          handler: (_) {
+            // Hand the latest text over before the host saves.
+            _flush();
+            widget.onSave?.call();
+            return KeyEventResult.handled;
+          },
+        ),
       // The custom blocks' Tab / Backspace commands must run BEFORE the
       // standard ones, or the standard Tab / Backspace handle the key first.
       ...customNotesCommandShortcuts(),

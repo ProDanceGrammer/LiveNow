@@ -877,6 +877,474 @@ void main() {
     });
   });
 
+  group('G2 all-day workflow', () {
+    Future<void> afterWrite(WidgetTester tester) async {
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 250)),
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+      await settle(tester);
+    }
+
+    /// Lets the real-zone continuations of the snackbar's exit animation run
+    /// while the tree is still mounted, then unmounts.
+    Future<void> finish(WidgetTester tester) async {
+      await tester.pump(const Duration(seconds: 1));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await unmount(tester);
+    }
+
+    /// The Undo snackbar slides in after the write resumed in the fake zone.
+    Future<void> tapUndo(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Undo'));
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      await tester.pump(const Duration(seconds: 1));
+      await settle(tester);
+    }
+
+    double lineY(WidgetTester tester, int hour) =>
+        tester.getTopLeft(find.text('13:00')).dy +
+        7 +
+        (hour - 13) * 60 * pxPerMinute(tester);
+
+    double colX(int day) => 56 + (1400 - 56) / 3 * (day + 0.5);
+
+    /// A real mouse drag from [from] to [to], paused at [to] for [during].
+    Future<void> dragTo(
+      WidgetTester tester,
+      Offset from,
+      Offset to, {
+      Future<void> Function()? during,
+    }) async {
+      final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+      await g.moveBy(const Offset(0, 8));
+      await tester.pump();
+      await g.moveTo(to);
+      await tester.pump();
+      if (during != null) await during();
+      await tester.runAsync(() async {
+        await g.up();
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await settle(tester);
+    }
+
+    testWidgets('chip checkbox ticks, strikes the name and Undo unticks', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(
+        tester,
+        name: 'Holiday',
+        startAt: at(0),
+        isAllDay: true,
+      );
+      await useDays(tester, 3);
+      final box = find.byKey(ValueKey('chip-check-$id'));
+      Text name() => tester.widget<Text>(
+        find.descendant(
+          of: find.byKey(ValueKey('allday-$id')),
+          matching: find.text('Holiday'),
+        ),
+      );
+      expect(tester.widget<Checkbox>(box).value, isFalse);
+      expect(name().style?.decoration, isNull);
+
+      await tester.runAsync(() async {
+        await tester.tap(box);
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      await afterWrite(tester);
+      expect((await row(tester, id)).done, isTrue);
+      expect(tester.widget<Checkbox>(box).value, isTrue);
+      expect(name().style?.decoration, TextDecoration.lineThrough);
+
+      await tapUndo(tester);
+      expect((await row(tester, id)).done, isFalse);
+      expect(tester.widget<Checkbox>(box).value, isFalse);
+      await finish(tester);
+    });
+
+    testWidgets('Start on an all-day chip makes it a running block now', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(
+        tester,
+        name: 'Holiday',
+        startAt: at(0),
+        isAllDay: true,
+      );
+      await useDays(tester, 3);
+      await hover(tester, find.byKey(ValueKey('allday-$id')));
+      await tester.runAsync(() async {
+        await tester.tap(find.byTooltip('Start'));
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      await settle(tester);
+
+      final r = await row(tester, id);
+      expect(r.isAllDay, isFalse);
+      final s = dateTimeFromDb(r.startAt)!;
+      expect(
+        s.difference(DateTime.now().toUtc()).abs() < const Duration(minutes: 1),
+        isTrue,
+      );
+      expect(dateTimeFromDb(r.endAt)!.difference(s), const Duration(hours: 1));
+      expect(find.byKey(ValueKey('allday-$id')), findsNothing);
+      expect(find.byKey(ValueKey('event-$id')), findsOneWidget);
+      final running = await tester.runAsync(
+        () => (db.select(
+          db.actionOccurrencesTable,
+        )..where((t) => t.actionId.equals(id) & t.finishedAt.isNull())).get(),
+      );
+      expect(running, hasLength(1));
+      await finish(tester);
+    });
+
+    testWidgets('dragging a chip into the grid schedules it; Undo reverts', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(
+        tester,
+        name: 'Holiday',
+        startAt: at(0),
+        isAllDay: true,
+      );
+      await useDays(tester, 3);
+      final ppm = pxPerMinute(tester);
+      final from = tester.getCenter(find.byKey(ValueKey('allday-$id')));
+
+      // 14:03 on tomorrow's column snaps to 14:00.
+      await dragTo(
+        tester,
+        from + const Offset(20, 0),
+        Offset(colX(1), lineY(tester, 14) + 3 * ppm),
+        during: () async {
+          expect(find.byKey(const ValueKey('chip-ghost')), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byKey(const ValueKey('chip-ghost')),
+              matching: find.text('14:00 – 15:00'),
+            ),
+            findsOneWidget,
+          );
+        },
+      );
+      expect(find.byKey(const ValueKey('chip-ghost')), findsNothing);
+      var r = await row(tester, id);
+      const day = Duration(days: 1);
+      expect(r.isAllDay, isFalse);
+      expect(dateTimeFromDb(r.startAt), at(14).add(day));
+      expect(dateTimeFromDb(r.endAt), at(15).add(day));
+      expect(find.byKey(ValueKey('event-$id')), findsOneWidget);
+
+      await tapUndo(tester);
+      r = await row(tester, id);
+      expect(r.isAllDay, isTrue);
+      expect(dateTimeFromDb(r.startAt), at(0));
+      await finish(tester);
+    });
+
+    testWidgets('a chip dropped outside the grid changes nothing', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(0), isAllDay: true);
+      await useDays(tester, 3);
+      final from = tester.getCenter(find.byKey(ValueKey('allday-$id')));
+      // Dropped on the hour gutter, left of the day columns.
+      await dragTo(tester, from, Offset(20, lineY(tester, 14)));
+      final r = await row(tester, id);
+      expect(r.isAllDay, isTrue);
+      expect(dateTimeFromDb(r.startAt), at(0));
+      await finish(tester);
+    });
+
+    testWidgets('dragging a timed block onto a strip cell makes it all-day', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(11));
+      await useDays(tester, 3);
+      Color? cellColor(int i) =>
+          (tester
+                      .widget<Container>(
+                        find.byKey(ValueKey('strip-cell-$i')),
+                      )
+                      .decoration
+                  as BoxDecoration)
+              .color;
+      expect(cellColor(2), isNull);
+
+      await dragTo(
+        tester,
+        tester.getCenter(find.byKey(ValueKey('event-$id'))),
+        tester.getCenter(find.byKey(const ValueKey('strip-cell-2'))),
+        during: () async {
+          expect(cellColor(2), isNotNull, reason: 'target cell highlighted');
+          expect(cellColor(1), isNull);
+          expect(find.byKey(const ValueKey('drag-ghost')), findsNothing);
+        },
+      );
+      expect(cellColor(2), isNull);
+      var r = await row(tester, id);
+      const days2 = Duration(days: 2);
+      expect(r.isAllDay, isTrue);
+      expect(dateTimeFromDb(r.startAt), at(0).add(days2));
+      expect(r.endAt, isNull);
+      expect(find.byKey(ValueKey('allday-$id')), findsOneWidget);
+
+      await tapUndo(tester);
+      r = await row(tester, id);
+      expect(r.isAllDay, isFalse);
+      expect(dateTimeFromDb(r.startAt), at(10));
+      expect(dateTimeFromDb(r.endAt), at(11));
+      await finish(tester);
+    });
+  });
+
+  group('G1 calendar fixes', () {
+    int dayCount() => container.read(calendarDayCountProvider);
+
+    Finder gridScroll() => find.byType(SingleChildScrollView).last;
+
+    ScrollPosition gridPosition(WidgetTester tester) => tester
+        .state<ScrollableState>(
+          find.descendant(of: gridScroll(), matching: find.byType(Scrollable)),
+        )
+        .position;
+
+    testWidgets('keys 2-7 and the numpad set the day count', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      expect(dayCount(), 7);
+      final keys = [
+        LogicalKeyboardKey.digit2,
+        LogicalKeyboardKey.digit3,
+        LogicalKeyboardKey.digit4,
+        LogicalKeyboardKey.digit5,
+        LogicalKeyboardKey.digit6,
+        LogicalKeyboardKey.digit7,
+      ];
+      for (var n = 2; n <= 7; n++) {
+        await tester.sendKeyEvent(keys[n - 2]);
+        await tester.pump();
+        expect(dayCount(), n, reason: 'digit $n');
+      }
+      await tester.sendKeyEvent(LogicalKeyboardKey.numpad4);
+      await tester.pump();
+      expect(dayCount(), 4);
+      await tester.sendKeyEvent(LogicalKeyboardKey.numpad7);
+      await tester.pump();
+      expect(dayCount(), 7);
+      await unmount(tester);
+    });
+
+    testWidgets('an event expands over lanes that are free (D is 2/3 wide)', (
+      tester,
+    ) async {
+      await pump(tester);
+      final a = await create(tester, name: 'A', startAt: at(8), endAt: at(22));
+      final b = await create(
+        tester,
+        name: 'B',
+        startAt: at(8, 30),
+        endAt: at(9, 10),
+      );
+      final c = await create(tester, name: 'C', startAt: at(9), endAt: at(10));
+      final d = await create(
+        tester,
+        name: 'D',
+        startAt: at(10, 10),
+        endAt: at(11),
+      );
+      await useDays(tester, 3);
+      final dayW = tester.getSize(find.byKey(const ValueKey('day-header-0'))).width;
+      double width(String id) =>
+          tester.getSize(find.byKey(ValueKey('event-$id'))).width;
+      double left(String id) =>
+          tester.getTopLeft(find.byKey(ValueKey('event-$id'))).dx;
+      expect(width(a), closeTo(dayW / 3 - 2, 0.5));
+      expect(width(b), closeTo(dayW / 3 - 2, 0.5));
+      expect(width(c), closeTo(dayW / 3 - 2, 0.5));
+      expect(width(d), closeTo(dayW * 2 / 3 - 2, 0.5));
+      expect(left(d), closeTo(left(b), 0.5));
+      await unmount(tester);
+    });
+
+    testWidgets('event text is 9 px (name) and 8 px (time)', (tester) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(12));
+      await useDays(tester, 3);
+      final rich = tester.widget<RichText>(
+        find.descendant(
+          of: find.byKey(ValueKey('event-$id')),
+          matching: find.byType(RichText),
+        ),
+      );
+      // Text wraps our span in the default style's span.
+      final root = (rich.text as TextSpan).children!.first as TextSpan;
+      expect(root.style!.fontSize, 9);
+      expect((root.children!.last as TextSpan).style!.fontSize, 8);
+      await unmount(tester);
+    });
+
+    testWidgets('resizing the bottom edge sideways crosses into the next day', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(10), endAt: at(11));
+      await useDays(tester, 3);
+      final block = find.byKey(ValueKey('event-$id'));
+      final dayW = (1400 - 56) / 3;
+      await dragBy(
+        tester,
+        block,
+        Offset(30, tester.getSize(block).height - 2),
+        Offset(dayW, 20 * pxPerMinute(tester)),
+      );
+      final r = await row(tester, id);
+      expect(dateTimeFromDb(r.startAt), at(10));
+      expect(
+        dateTimeFromDb(r.endAt),
+        at(11, 20).add(const Duration(days: 1)),
+      );
+      await unmount(tester);
+    });
+
+    testWidgets('resizing the top edge sideways crosses into the day before', (
+      tester,
+    ) async {
+      await pump(tester);
+      final tomorrow = const Duration(days: 1);
+      final id = await create(
+        tester,
+        startAt: at(10).add(tomorrow),
+        endAt: at(11).add(tomorrow),
+      );
+      await useDays(tester, 3);
+      final dayW = (1400 - 56) / 3;
+      await dragBy(
+        tester,
+        find.byKey(ValueKey('event-$id')),
+        const Offset(30, 2),
+        Offset(-dayW, 0),
+      );
+      final r = await row(tester, id);
+      expect(dateTimeFromDb(r.startAt), at(10));
+      expect(dateTimeFromDb(r.endAt), at(11).add(tomorrow));
+      await unmount(tester);
+    });
+
+    testWidgets('a cross-day resize draws one ghost per day slice', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(22), endAt: at(23));
+      await useDays(tester, 3);
+      final block = find.byKey(ValueKey('event-$id'));
+      final dayW = (1400 - 56) / 3;
+      final g = await tester.startGesture(
+        tester.getBottomLeft(block) + const Offset(30, -2),
+        kind: PointerDeviceKind.mouse,
+      );
+      await g.moveBy(const Offset(0, 1));
+      await tester.pump();
+      await g.moveBy(Offset(dayW, 120 * pxPerMinute(tester)));
+      await tester.pump();
+      // Ends 01:00 two days on (the old 23:00 end + 1 day + 2 h): 22:00-24:00
+      // today, all of tomorrow, and 00:00-01:00 the day after.
+      expect(find.byKey(const ValueKey('drag-ghost')), findsOneWidget);
+      expect(find.byKey(const ValueKey('drag-ghost-d1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('drag-ghost-d2')), findsOneWidget);
+      await tester.runAsync(() async {
+        await g.up();
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      });
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      final r = await row(tester, id);
+      expect(
+        dateTimeFromDb(r.endAt),
+        at(1).add(const Duration(days: 2)),
+      );
+      await tester.pump(const Duration(seconds: 6));
+      await unmount(tester);
+    });
+
+    testWidgets('Today scrolls the now-line to the viewport centre', (
+      tester,
+    ) async {
+      await pump(tester);
+      container.read(calendarVisibleHoursProvider.notifier).state = 6;
+      await settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await settle(tester);
+      final position = gridPosition(tester);
+      position.jumpTo(0);
+      await tester.pump();
+
+      await tester.tap(find.text('Today'));
+      await tester.pump();
+      await tester.pump();
+      await settle(tester);
+
+      final viewport = tester.getSize(gridScroll()).height;
+      final px = pxPerMinute(tester);
+      final now = minutesOfDay(DateTime.now().toUtc());
+      final target = (now * px - viewport / 2).clamp(
+        0.0,
+        position.maxScrollExtent,
+      );
+      expect(position.pixels, closeTo(target, px * 2 + 1));
+      await unmount(tester);
+    });
+
+    testWidgets('hover toolbar hides while the event top is above the viewport', (
+      tester,
+    ) async {
+      await pump(tester);
+      container.read(calendarVisibleHoursProvider.notifier).state = 6;
+      final id = await create(tester, startAt: at(3), endAt: at(8));
+      await useDays(tester, 3);
+      final position = gridPosition(tester);
+      final px = pxPerMinute(tester);
+
+      position.jumpTo(2 * 60 * px);
+      await tester.pump();
+      final block = find.byKey(ValueKey('event-$id'));
+      await hover(tester, block);
+      expect(find.byTooltip('Start'), findsOneWidget);
+
+      // Half an hour of the block's top is now scrolled out; the pointer is
+      // still over the block, but the bar would float over the header.
+      position.jumpTo(3.5 * 60 * px);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byTooltip('Start'), findsNothing);
+
+      // Scrolling back brings it back (re-evaluated while scrolling).
+      position.jumpTo(2 * 60 * px);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byTooltip('Start'), findsOneWidget);
+      await unmount(tester);
+    });
+  });
+
   group('event block drawing cost', () {
     int countDescendants(Finder block) => find
         .descendant(of: block, matching: find.byWidgetPredicate((_) => true))

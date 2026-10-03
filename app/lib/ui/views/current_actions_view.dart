@@ -11,15 +11,20 @@ import '../undo.dart';
 import '../widgets/action_card.dart';
 import '../widgets/glass.dart';
 
-/// Tint of the two header blocks: deeper than the cards so they read as
-/// headings, not as actions. Derived from the theme tokens only.
+/// Tint of the two header blocks: only a little deeper than the cards so they
+/// read as headings without being heavy. Derived from the theme tokens only.
 Color boardHeaderTint(ColorScheme scheme, GlassTheme glass) {
   final base = Color.alphaBlend(
-    scheme.primary.withValues(alpha: glass.dark ? 0.10 : 0.45),
+    scheme.primary.withValues(alpha: glass.dark ? 0.08 : 0.35),
     glass.fillStrong,
   );
-  // Dark: the shadow token (black) makes it a deeper navy than the cards.
-  return glass.dark ? Color.alphaBlend(glass.shadow, base) : base;
+  // Dark: a weak dose of the shadow token (black) makes it slightly deeper.
+  return glass.dark
+      ? Color.alphaBlend(
+          glass.shadow.withValues(alpha: glass.shadow.a * 0.5),
+          base,
+        )
+      : base;
 }
 
 /// Text colour on [boardHeaderTint].
@@ -313,19 +318,10 @@ class _BoardColumn extends StatelessWidget {
                     horizontal: 12,
                     vertical: 10,
                   ),
-                  child: Row(
-                    children: [
-                      Text(
-                        title,
-                        style: text.titleMedium?.copyWith(color: textColor),
-                      ),
-                      const SizedBox(width: 8),
-                      if (total != null)
-                        Text(
-                          '$total',
-                          style: text.bodySmall?.copyWith(color: textColor),
-                        ),
-                    ],
+                  child: Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: text.titleMedium?.copyWith(color: textColor),
                   ),
                 ),
               ),

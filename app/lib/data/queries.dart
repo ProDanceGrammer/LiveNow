@@ -42,15 +42,8 @@ class ActionListItem {
           estimatedMinutes == other.estimatedMinutes;
 
   @override
-  int get hashCode => Object.hash(
-    id,
-    name,
-    done,
-    startAt,
-    endAt,
-    isAllDay,
-    estimatedMinutes,
-  );
+  int get hashCode =>
+      Object.hash(id, name, done, startAt, endAt, isAllDay, estimatedMinutes);
 
   /// Whether this action counts as done for filtering/board-column purposes
   /// — see `domain/done_rule.dart`.
@@ -134,11 +127,7 @@ class ViewQueries {
   }) => distinctList(
     debounced(
       db
-          .customSelect(
-            sql,
-            variables: variables,
-            readsFrom: {db.actionsTable},
-          )
+          .customSelect(sql, variables: variables, readsFrom: {db.actionsTable})
           .watch()
           .map((rows) => rows.map(ActionListItem.fromQueryRow).toList()),
       kListDebounce,

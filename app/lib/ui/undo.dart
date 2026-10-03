@@ -147,6 +147,68 @@ Future<void> runUndoableMoveMany(
   );
 }
 
+/// Ticks/unticks an action (`done` only, schedule untouched) and offers Undo.
+/// Nothing needing `ref`/`context` is touched after the first await.
+Future<void> runUndoableToggleDone(
+  BuildContext context,
+  WidgetRef ref,
+  String actionId,
+) async {
+  final service = ref.read(actionServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  final undo = await service.toggleDone(actionId);
+  _offerUndo(
+    messenger,
+    lastUndo,
+    undo.done ? 'Marked not done' : 'Marked done',
+    () => service.undoToggleDone(undo),
+  );
+}
+
+/// Drops an all-day action into the time grid at [start] (predicted duration)
+/// and offers Undo, which also restores the all-day flag.
+Future<void> runUndoableScheduleAllDayAt(
+  BuildContext context,
+  WidgetRef ref,
+  String actionId,
+  DateTime start,
+) async {
+  final service = ref.read(actionServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  final undo = await service.scheduleAllDayAt(actionId, start);
+  _offerUndo(
+    messenger,
+    lastUndo,
+    'Scheduled',
+    () => service.undoMoveActions(undo),
+  );
+}
+
+/// Turns an action into an all-day one on [day] and offers Undo, which puts
+/// the old times and the all-day flag back.
+Future<void> runUndoableMakeAllDay(
+  BuildContext context,
+  WidgetRef ref,
+  String actionId,
+  DateTime day,
+) async {
+  final service = ref.read(actionServiceProvider);
+  final messenger = ScaffoldMessenger.of(context);
+  final lastUndo = ref.read(lastUndoProvider.notifier);
+
+  final undo = await service.makeAllDay(actionId, day);
+  _offerUndo(
+    messenger,
+    lastUndo,
+    'Made all-day',
+    () => service.undoMoveActions(undo),
+  );
+}
+
 /// Deletes a growth direction right away and offers Undo (same approach as
 /// [runUndoableDelete]: nothing needing `ref`/`context` is touched after the
 /// first await, since the screen showing the direction may be gone by then).

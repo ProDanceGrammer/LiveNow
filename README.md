@@ -1,12 +1,44 @@
 # LiveNow
 
-A personal task/habit-management app (GTD-style: priorities, recurring habits, and a
-previous/next action dependency chain), replacing a Notion prototype with a fast, reliable,
-offline-first app.
+A personal task-management app (GTD-style): actions chained by previous/next dependencies, a
+calendar, and "growth directions" that measure whether your actions keep the important areas of
+life in balance. It replaces a Notion prototype with a fast, reliable, offline-first app.
 
 **Status:** Windows desktop MVP. An iOS "remote controller" app and cross-device sync are
 planned but not started — the local schema is already designed for that (see
 [Architecture](#architecture)).
+
+## Features
+
+- **Actions** (one section, three switchable views)
+  - **Current Actions** — a Done Before / Not Done Yet board with hover toolbar (Start, Finish,
+    Continue, postpone, delete), marquee and Ctrl/Shift multi-select, and paging for large lists.
+  - **Calendar** — time grid with a 2–7 day range (keys `2`–`7`), drag to move, resize an event
+    across days, drag on empty space to create, **Shift/Ctrl+drag to rubber-band select**, group
+    move/delete, zoom (Ctrl +/−/wheel). **Today** scrolls the red now-line to the middle.
+    All-day actions have a checkbox (done, struck through), can be dragged into the time grid
+    (duration = the action's average/predicted time, else 1 hour) and Start puts them on the
+    now-line; a timed event dragged into a day's all-day strip becomes all-day there.
+  - **All** — every action in one list, with a search box.
+  - **Import CSV** (upload button next to the tabs) — reads a Notion export of actions (name,
+    date/time, next/previous actions, growth directions), links the actions and directions, and
+    skips rows that already exist, so re-importing the same file is safe.
+- **Edit time anywhere** — click an action's time on a card or list row (or in the action
+  editor) to open one editor: type digits, `Ctrl+↑/↓` to raise/lower the focused unit
+  (minute/hour/day/month/year, with carry), `←/→` to move between units, `↓/↑` to switch between
+  start and end. The cursor starts on the start minutes. Saving from a card or row can be undone.
+- **Growth directions** — Balance boards, a List and a **Mindmap** of how directions lead to
+  larger goals, each with a target over a rolling window and a computed urgency.
+- **Edit menu** — name, a button row (Start, Finish, postpone, delete…), clickable start/end with
+  duration and All day, urgency, growth directions, notes, previous/next actions in two columns,
+  and manual parameters. Related actions and directions open from every edit menu; `Ctrl+Enter`
+  saves.
+- **Templates** store a name, average duration and growth directions; they affect growth
+  directions only after **Use** creates an action. **Import CSV** on the Templates screen loads
+  templates from a Notion export. Current Actions colours cards by urgency.
+- **Undo** (snackbar / Ctrl+Z) for destructive and state-changing operations.
+- Light and dark glass look, a collapsible icon-only side bar, and Istanbul wall-clock time for
+  all scheduling rules.
 
 ## Tech stack
 
@@ -44,11 +76,12 @@ All run from `app/`:
 
 ```
 flutter pub get                          # install dependencies
-dart run build_runner build              # regenerate the Drift schema after editing tables.dart
+dart run build_runner build              # regenerate lib/data/database.g.dart after editing tables.dart
 flutter analyze                          # static analysis
 flutter test                             # run all tests
 flutter test test/domain/some_test.dart  # run a single test file
 flutter run -d windows                   # run the app
+flutter build windows --debug            # debug build (fast compile-check)
 flutter build windows --release          # release build
 ```
 
@@ -57,25 +90,28 @@ flutter build windows --release          # release build
 ```
 app/
   lib/
-    core/       small shared helpers (UUID generation, UTC<->text timestamp codec, app settings)
-    data/       Drift schema, database connection, and the live queries behind each view
-    domain/     business rules: postpone rules, action lifecycle, dependency graph
+    core/       shared helpers (UUIDv7 ids, UTC<->text timestamp codec, settings, stream utils)
+    data/       Drift schema, database connection/migrations, live queries behind the views
+    domain/     business rules: action lifecycle, dependencies, postpone/done/duration rules,
+                growth-direction rules, mindmap layout, CSV parsing and import
     ui/
       providers.dart   Riverpod wiring: database -> services/queries -> widgets
-      widgets/         reusable pieces (action tile, create/edit dialog, list view)
-      views/           the 5 action views (Operational, TODO, Most Important, Calendar, Habits)
-      screens/         top-level screens (the NavigationRail shell, Metrics, Templates)
-  test/         mirrors lib/, one test file per source file it covers
+      theme/           glass design tokens and the app theme
+      widgets/         reusable pieces (glass surfaces, rail, editors, dialogs, mindmap)
+      views/           Current Actions board, Calendar, All
+      screens/         shell (rail + sections), Actions section, Growth directions, Templates
+  test/         mirrors lib/
+dev/            Notion-prototype spec (Actions-Template-Function-Reference.md) and sample data
 ```
 
 ## Architecture
 
 **Layering:** `ui/` → `domain/` (services) → `data/` (Drift/SQLite). The UI never writes SQL
-directly except for simple CRUD (metrics, templates); every rule about actions and their
-dependencies lives in a domain service, so it's testable independently of any widget and so a
+directly except for simple CRUD (templates); every rule about actions, dependencies and growth
+directions lives in a domain service, so it's testable independently of any widget and so a
 future sync layer doesn't have to re-derive it.
 
-**Schema decisions**, and why:
+**Schema decisions**, and why (schema version 8):
 - **No parent/child task hierarchy.** `action_dependencies` (predecessor/successor — "this must
   happen before that") is the *only* linking mechanism between actions. It's a graph, not a tree.
 - **Every table's primary key is a text UUIDv7** (`core/ids.dart`), not an autoincrementing
@@ -84,29 +120,40 @@ future sync layer doesn't have to re-derive it.
   layer a matter of adding a sync client, not a schema migration.
 - **Every timestamp is UTC ISO-8601 text**, not Drift's native integer-based `DateTime` column
   (`core/time_codec.dart`), formatted at a fixed width so plain text ordering agrees with
-  chronological order — this matters for the view queries' `ORDER BY`/range filters, and it keeps
-  the on-disk format identical to what a Postgres sync target would expect.
+  chronological order — this matters for the view queries' `ORDER BY`/range filters.
 - **Postponing an action moves that same row's time forward**; it doesn't create a new row. An
-  `action_occurrences` log records each start/finish/postpone so a habit's history (and eventually
-  a "how overdue is this life area" balance calculation) isn't lost to the overwrite.
+  `action_occurrences` log records each start/finish/postpone so the history isn't lost to the
+  overwrite.
+- **"Done" is derived.** `actions.done` is only a manual flag; whether an action counts as done
+  for filtering is `domain/done_rule.dart`'s `isDoneBefore()` (computed from the end time for
+  scheduled actions), with a SQL twin in `data/queries.dart`.
 
-**The two view queries with real logic** (`data/queries.dart`) are hand-written SQL using
-recursive CTEs, not Drift's query builder:
-- **TODO** — a task is ready to schedule once every one of its predecessors already has a
-  start time (or it has none).
-- **Most Important to Schedule** — ranks unscheduled, unblocked actions by their linked metrics'
-  total weight, then by how many other actions are transitively downstream of finishing them
-  (a single recursive CTE computes this for every action at once, not per-row).
+**Growth directions** (`metrics` table): each direction is boolean, count or hours over a rolling
+window against a target. Progress, urgency and weight are computed in `domain/growth_rules.dart`
+and `domain/metric_service.dart`; the relation graph between directions must stay acyclic.
 
 **Cycle safety:** `domain/dependency_service.dart` rejects a new predecessor → successor edge if
 the successor can already reach the predecessor going forward — i.e. adding it would close a loop.
-This is also a recursive CTE, run once before the edge is inserted.
+This is a recursive CTE, run once before the edge is inserted.
+
+**Performance first:** the glass look is drawn from one pre-rendered background image with cheap
+per-surface draws (no per-surface blur, clip or gradient), list queries filter and page in SQL
+without loading notes, the sections are kept alive instead of rebuilt, and the calendar and
+mindmap build only what is visible. `CLAUDE.md` records the measurements and the dead ends.
+
+## Importing actions from CSV
+
+Use the upload button in the Actions section and choose a Notion export with the columns
+`Name, Datetime, Next actions and time, Previous actions and time, Growth Direction`. Dates are
+day-first (`DD/MM/YYYY`; a date alone makes an all-day action, `DD/MM/YYYY H:mm → H:mm` a timed
+one). A summary lists what was created or skipped, directions that could not be matched, and
+next/previous references that point to actions that exist nowhere.
 
 ## Testing
 
 Domain and query tests run against an in-memory Drift database
-(`AppDatabase.forTesting(NativeDatabase.memory())`); the widget test overrides the database
-provider the same way, so no test touches the real on-disk file.
+(`AppDatabase.forTesting(NativeDatabase.memory())`); widget tests override the database provider
+the same way, so no test touches the real on-disk file.
 
 One gotcha if you add a widget test that mounts a screen using a Drift stream: unmounting that
 tree must be followed by a pump with a **non-zero** duration (e.g.
@@ -114,39 +161,12 @@ tree must be followed by a pump with a **non-zero** duration (e.g.
 stream subscription is cancelled, and a duration-less pump doesn't advance fake time far enough
 for that timer to fire before `flutter_test`'s pending-timer check runs.
 
-## Manual verification (2026-09-27)
+## Data and manual UI checks
 
-Beyond `flutter analyze`/`flutter test`, the built `app/build/windows/x64/runner/Debug/livenow.exe`
-was launched directly and driven with real window/mouse events (not just inspected) to confirm the
-MVP actually works end to end, not only that it compiles:
+The app data (SQLite file, theme and side-bar settings) lives in `%APPDATA%\io.livenow\livenow\`.
+The schema migrates forward on start and cannot be rolled back, so copy that folder before
+installing a build with a newer schema.
 
-- **Shell** — window launches; the `NavigationRail` shows all 7 destinations (Operational, TODO,
-  Most Important, Calendar, Habits, Metrics, Templates); Operational correctly shows the
-  "Nothing scheduled for today." empty state on a fresh database.
-- **Create** — the FAB opens the "New action" dialog; every field renders (Kind,
-  Postpone flexibility, Depth, All day, Start/End pickers, Estimated minutes, Metrics), Name is
-  autofocused, and Save persists the row.
-- **Live queries** — a task created with no schedule and no predecessors immediately appears in
-  **TODO** (via its live Drift stream — no manual refresh), confirming the recursive-CTE
-  "predecessors scheduled/done" queries in `data/queries.dart` and the Riverpod wiring in
-  `ui/providers.dart` work against a real on-disk database, not just the in-memory one the
-  automated tests use.
-- **Action menu** — the tile's menu lists Start, Finish, all 8 postpone options (+1 hour, +5
-  hours, prolong 30 min, after work (18:00), tomorrow morning, next working morning, next week,
-  next Monday morning), and Cancel.
-
-**How this was driven, for next time:** the app is a plain Win32 window, not something
-`SetForegroundWindow` can reliably raise from a script (Windows blocks focus-stealing from
-background processes) and not something `Graphics.CopyFromScreen` can screenshot reliably either
-(it captures whatever's topmost on screen, so an occluding window ends up in the picture instead).
-Two Win32 calls from PowerShell sidestep both problems:
-- **`user32.dll!PrintWindow(hwnd, hdc, 2)`** (`PW_RENDERFULLCONTENT`) renders a window's content
-  straight into a bitmap regardless of z-order or occlusion — use this to screenshot, not
-  `CopyFromScreen`.
-- **`user32.dll!SetWindowPos(hwnd, HWND_TOPMOST, ...)`** actually brings the window above others
-  (unlike `SetForegroundWindow`, it isn't subject to the focus-stealing restriction), which is
-  needed before a simulated `mouse_event` click will land on the right window instead of whatever
-  else is on screen at those coordinates.
-- If the window was ever minimized, its `GetWindowRect` reports the Windows placeholder
-  `-32000,-32000` / `160x28` — call `ShowWindow(hwnd, 9)` (`SW_RESTORE`) first and re-read the
-  rect.
+When driving the app by script (Win32 `PrintWindow` for screenshots, `SetWindowPos` +
+`mouse_event` for clicks), **never run it against your real data**: start it with
+`LIVENOW_DATA_DIR=<empty folder>` so every click lands on a throwaway database.

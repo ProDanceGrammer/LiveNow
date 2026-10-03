@@ -511,4 +511,80 @@ void main() {
     expect(selection(), isEmpty);
     await unmount(tester);
   });
+
+  testWidgets('dragging a selected group onto the all-day strip makes all of '
+      'them all-day with one Undo', (tester) async {
+    await pump(tester);
+    final a = await create(tester, 'A', at(9), at(10));
+    final b = await create(tester, 'B', at(13), at(14));
+    await useDays(tester, 3);
+    container.read(calendarSelectionProvider.notifier).state = {a, b};
+    await tester.pump();
+
+    final g = await tester.startGesture(
+      tester.getCenter(find.byKey(ValueKey('event-$a'))),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.moveBy(const Offset(0, -8));
+    await tester.pump();
+    await g.moveTo(tester.getCenter(find.byKey(const ValueKey('strip-cell-1'))));
+    await tester.pump();
+    await release(tester, g);
+    await settle(tester);
+
+    for (final id in [a, b]) {
+      final r = (await tester.runAsync(
+        () => (db.select(
+          db.actionsTable,
+        )..where((t) => t.id.equals(id))).getSingle(),
+      ))!;
+      expect(r.isAllDay, isTrue, reason: id);
+      expect(dateTimeFromDb(r.startAt), at(0, 0, 1));
+      expect(r.endAt, isNull);
+    }
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo'));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(await times(tester, a), (at(9), at(10)));
+    expect(await times(tester, b), (at(13), at(14)));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await unmount(tester);
+  });
+
+  testWidgets('dragging an all-day chip over the grid rebuilds no blocks', (
+    tester,
+  ) async {
+    await pump(tester);
+    final h = (await tester.runAsync(
+      () => container
+          .read(actionServiceProvider)
+          .createAction(name: 'H', startAt: at(0), isAllDay: true),
+    ))!;
+    await create(tester, 'A', at(9), at(10));
+    await create(tester, 'B', at(13), at(14));
+    await useDays(tester, 3);
+
+    final from = tester.getCenter(find.byKey(ValueKey('allday-$h')));
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    await g.moveBy(const Offset(0, 8));
+    await tester.pump();
+    CalendarPerfCounters.reset();
+    for (var i = 1; i <= 5; i++) {
+      await g.moveTo(Offset(300 + i * 40, 500 + i * 10));
+      await tester.pump();
+    }
+    expect(find.byKey(const ValueKey('chip-ghost')), findsOneWidget);
+    expect(CalendarPerfCounters.blockBuilds, 0);
+    expect(CalendarPerfCounters.layoutRuns, 0);
+    await g.moveTo(const Offset(20, 500)); // drop outside the day columns
+    await release(tester, g);
+    await unmount(tester);
+  });
 }

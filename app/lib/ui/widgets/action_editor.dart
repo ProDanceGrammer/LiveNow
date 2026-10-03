@@ -1,24 +1,27 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/action_urgency.dart';
 import '../../domain/dependency_service.dart';
-import '../../domain/done_rule.dart';
 import '../../domain/duration_rules.dart';
 import '../dialog_stack.dart';
+import '../open_entity.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
-import 'action_menu_button.dart';
+import '../undo.dart';
 import 'action_tile.dart' show formatUrgency;
 import 'date_time_field.dart';
 import 'metric_picker.dart';
 import 'notes_document.dart';
 import 'notes_editor.dart';
+import 'quick_action_bar.dart';
 
 /// Create/edit dialog for a single action: core fields, metric links, and
 /// (when editing) its previous/next action dependencies.
@@ -73,6 +76,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   bool _notesOpen = false; // the Notes section (tile) is open
   bool _notesExpanded = false; // the editor's wide "Expand" mode
   final _notesKey = GlobalKey();
+  StreamSubscription<ActionRow?>? _rowSub;
+  ActionRow? _seen; // the last database row seen (to spot external changes)
 
   bool get _isEditing => widget.existing != null;
 
@@ -101,6 +106,11 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       // dispose it mid-load — which throws and leaves the future forever
       // pending, silently dropping the action's metric selection.
       final db = ref.read(databaseProvider);
+      _seen = existing;
+      _rowSub =
+          (db.select(db.actionsTable)..where((t) => t.id.equals(existing.id)))
+              .watchSingleOrNull()
+              .listen(_onRowChanged);
       (db.select(
         db.actionMetricsTable,
       )..where((t) => t.actionId.equals(existing.id))).get().then((links) {
@@ -113,8 +123,35 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     }
   }
 
+  /// The button row (Start / Finish / Postpone / Continue) writes straight to
+  /// the database and the dialog stays open: pull the new schedule (and a
+  /// renamed `[#n]` name, if the user has not typed over it) into the form.
+  /// Typed notes and every other field are left alone.
+  void _onRowChanged(ActionRow? row) {
+    final prev = _seen;
+    if (row == null || prev == null || !mounted) return;
+    _seen = row;
+    final scheduleChanged =
+        row.startAt != prev.startAt ||
+        row.endAt != prev.endAt ||
+        row.isAllDay != prev.isAllDay;
+    final nameChanged = row.name != prev.name;
+    if (!scheduleChanged && !nameChanged) return;
+    setState(() {
+      if (scheduleChanged) {
+        _startAt = dateTimeFromDb(row.startAt);
+        _endAt = dateTimeFromDb(row.endAt);
+        _isAllDay = row.isAllDay;
+      }
+      if (nameChanged && _nameController.text == prev.name) {
+        _nameController.text = row.name;
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _rowSub?.cancel();
     _nameController.dispose();
     super.dispose();
   }
@@ -127,121 +164,195 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         ? math.min(1100.0, screen.width - 48)
         : math.min(720.0, screen.width - 80);
     final notesHeight = expanded ? math.max(320.0, screen.height - 260) : 320.0;
-    return AlertDialog(
-      title: Text(_isEditing ? 'Edit action' : 'New action'),
-      content: SizedBox(
-        width: math.max(280.0, width),
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  autofocus: true,
-                  // Enter = the Save button.
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => _save(),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                if (_isEditing)
+    // Ctrl+Enter = Save from anywhere in the dialog (the notes editor has its
+    // own command, see NotesEditor.onSave, so it does not swallow the key).
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter, control: true): _save,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+            _save,
+      },
+      child: AlertDialog(
+        title: Text(_isEditing ? 'Edit action' : 'New action'),
+        content: SizedBox(
+          width: math.max(280.0, width),
+          child: SingleChildScrollView(
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: _nameController,
+                    // A hint (not a label) so the word disappears once filled.
+                    decoration: const InputDecoration(hintText: 'Name'),
+                    autofocus: true,
+                    // Enter = the Save button.
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _save(),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
                   Visibility(
                     visible: !expanded,
                     maintainState: true,
-                    child: _buildStatusAndTracking(context),
+                    child: _buildTopSections(context),
                   ),
-                const SizedBox(height: 12),
-                // Collapsed by default (opened only when the action already
-                // has notes). `maintainState: false` keeps the heavy editor
-                // out of the tree until the section is opened; the latest
-                // JSON lives in `_notes`, so collapsing never loses edits.
-                ExpansionTile(
-                  title: const Text('Notes'),
-                  initiallyExpanded: _notesOpen,
-                  maintainState: false,
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: const EdgeInsets.only(bottom: 8),
-                  onExpansionChanged: (open) => setState(() {
-                    _notesOpen = open;
-                    if (!open) _notesExpanded = false;
-                  }),
-                  children: [
-                    NotesEditor(
-                      key: _notesKey,
-                      initialJson: _notes,
-                      onChanged: (json) => _notes = json,
-                      height: notesHeight,
-                      expanded: expanded,
-                      onToggleExpand: () =>
-                          setState(() => _notesExpanded = !_notesExpanded),
-                    ),
-                  ],
-                ),
-                Visibility(
-                  visible: !expanded,
-                  maintainState: true,
-                  child: _buildFormSections(context),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  // Collapsed by default (opened only when the action already
+                  // has notes). `maintainState: false` keeps the heavy editor
+                  // out of the tree until the section is opened; the latest
+                  // JSON lives in `_notes`, so collapsing never loses edits.
+                  ExpansionTile(
+                    title: const Text('Notes'),
+                    initiallyExpanded: _notesOpen,
+                    maintainState: false,
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(bottom: 8),
+                    onExpansionChanged: (open) => setState(() {
+                      _notesOpen = open;
+                      if (!open) _notesExpanded = false;
+                    }),
+                    children: [
+                      NotesEditor(
+                        key: _notesKey,
+                        initialJson: _notes,
+                        onChanged: (json) => _notes = json,
+                        onSave: _save,
+                        height: notesHeight,
+                        expanded: expanded,
+                        onToggleExpand: () =>
+                            setState(() => _notesExpanded = !_notesExpanded),
+                      ),
+                    ],
+                  ),
+                  Visibility(
+                    visible: !expanded,
+                    maintainState: true,
+                    child: _buildBottomSections(context),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(onPressed: _save, child: const Text('Save')),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _save, child: const Text('Save')),
-      ],
     );
   }
 
-  Widget _buildStatusAndTracking(BuildContext context) {
+  /// Everything between the Name field and Notes: the button row, the
+  /// schedule, time tracking, urgency and the growth directions.
+  Widget _buildTopSections(BuildContext context) {
+    final duration = formatDuration(
+      computeActionDuration(
+        startAt: _startAt,
+        endAt: _endAt,
+        legacyEstimatedMinutes: widget.existing?.estimatedMinutes,
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Text(
-              isDoneBefore(
-                    startAt: dateTimeFromDb(widget.existing!.startAt),
-                    endAt: dateTimeFromDb(widget.existing!.endAt),
-                    isAllDay: widget.existing!.isAllDay,
-                    done: widget.existing!.done,
-                  )
-                  ? 'Done'
-                  : 'Open',
-              style: Theme.of(context).textTheme.labelLarge,
+        if (_isEditing)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            // Scaled down (never wrapped or clipped) to fit the dialog.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: QuickActionBar(
+                actionId: widget.existing!.id,
+                onDelete: _deleteAndClose,
+              ),
             ),
-            const Spacer(),
-            ActionMenuButton(actionId: widget.existing!.id),
+          ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 16,
+          runSpacing: 0,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            DateTimeField(
+              label: 'Start',
+              value: _startAt,
+              includeTime: !_isAllDay,
+              onChanged: (v) => setState(() => _startAt = v),
+            ),
+            DateTimeField(
+              label: 'End',
+              value: _endAt,
+              includeTime: !_isAllDay,
+              onChanged: (v) => setState(() => _endAt = v),
+            ),
+            Text(
+              'Duration: $duration',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('All day'),
+                const SizedBox(width: 4),
+                Switch(
+                  value: _isAllDay,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onChanged: (v) => setState(() => _isAllDay = v),
+                ),
+              ],
+            ),
           ],
         ),
-        const SizedBox(height: 4),
-        _TimeTrackingSection(
-          actionId: widget.existing!.id,
-          scheduledStart: _startAt,
+        _buildUrgencyLine(),
+        if (_isEditing)
+          _TimeTrackingSection(
+            actionId: widget.existing!.id,
+            scheduledStart: _startAt,
+          ),
+        ExpansionTile(
+          title: const Text('Growth directions'),
+          tilePadding: EdgeInsets.zero,
+          initiallyExpanded: true,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            MetricPicker(
+              label: '',
+              selectedIds: _selectedMetricIds,
+              onOpen: (m) => openDirectionById(context, ref, m.id),
+              onChanged: (ids) => setState(() => _selectedMetricIds = ids),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildFormSections(BuildContext context) {
+  /// Connected actions (Previous left, Next right) and Manual parameters.
+  Widget _buildBottomSections(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 12),
-        _ParametersPanel(
-          title: 'Manual parameters',
-          // Opened when a schedule came with the dialog (dragged out
-          // on the calendar), so the chosen time is visible.
-          initiallyOpen: widget.initialStart != null,
+        if (_isEditing)
+          ExpansionTile(
+            title: const Text('Connected actions'),
+            tilePadding: EdgeInsets.zero,
+            initiallyExpanded: true,
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            children: [_DependencySection(actionId: widget.existing!.id)],
+          ),
+        ExpansionTile(
+          title: const Text('Manual parameters'),
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
@@ -289,53 +400,19 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
             ),
             const SizedBox(height: 8),
             _buildCountableActivityField(),
-            SwitchListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('All day'),
-              value: _isAllDay,
-              onChanged: (v) => setState(() => _isAllDay = v),
-            ),
-            DateTimeField(
-              label: 'Scheduled start',
-              value: _startAt,
-              includeTime: !_isAllDay,
-              onChanged: (v) => setState(() => _startAt = v),
-            ),
-            const SizedBox(height: 4),
-            DateTimeField(
-              label: 'Scheduled end',
-              value: _endAt,
-              includeTime: !_isAllDay,
-              onChanged: (v) => setState(() => _endAt = v),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Duration: ${formatDuration(computeActionDuration(startAt: _startAt, endAt: _endAt, legacyEstimatedMinutes: widget.existing?.estimatedMinutes))}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
-            const SizedBox(height: 10),
-            MetricPicker(
-              label: 'Growth directions',
-              selectedIds: _selectedMetricIds,
-              onChanged: (ids) => setState(() => _selectedMetricIds = ids),
-            ),
-            _buildUrgencyLine(),
           ],
         ),
-        if (_isEditing)
-          ExpansionTile(
-            title: const Text('Connected actions'),
-            tilePadding: EdgeInsets.zero,
-            initiallyExpanded: true,
-            children: [_DependencySection(actionId: widget.existing!.id)],
-          ),
       ],
     );
+  }
+
+  /// The button row's Delete: run it (Undo snackbar) and close this editor,
+  /// which would otherwise show a row that no longer exists.
+  void _deleteAndClose() {
+    // The helper reads what it needs from `ref`/`context` before its first
+    // await, i.e. before this dialog is gone.
+    unawaited(runUndoableDelete(context, ref, widget.existing!.id));
+    Navigator.of(context).pop();
   }
 
   /// Read-only "Urgency to Keep in Balance": computed live from the directions
@@ -486,38 +563,35 @@ class _TimeTrackingSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final occurrencesAsync = ref.watch(occurrencesOfProvider(actionId));
+    // Shown only once the action has been started at least once.
+    final occurrences =
+        ref.watch(occurrencesOfProvider(actionId)).value ??
+        const <ActionOccurrence>[];
+    if (occurrences.isEmpty) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Time tracking', style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 4),
-        occurrencesAsync.when(
-          data: (occurrences) {
-            if (occurrences.isEmpty) {
-              return const Text('Not started yet.');
-            }
-            final latest = occurrences.first;
-            if (latest.finishedAt == null) {
-              final start = scheduledStart;
-              return Text(
-                start != null
-                    ? 'Currently running — started ${_fmt(start)}'
-                    : 'Currently running',
-              );
-            }
-            final started = dateTimeFromDb(latest.startedAt);
-            final finished = dateTimeFromDb(latest.finishedAt);
-            final text = (started != null && finished != null)
-                ? 'Last: ${_fmt(started)} → ${_fmt(finished)}'
-                : 'Not started yet.';
-            return Text(text);
-          },
-          loading: () => const LinearProgressIndicator(),
-          error: (e, _) => Text('Error: $e'),
-        ),
-      ],
+    final latest = occurrences.first;
+    final String text;
+    if (latest.finishedAt == null) {
+      final start = scheduledStart;
+      text = start != null
+          ? 'Currently running — started ${_fmt(start)}'
+          : 'Currently running';
+    } else {
+      final started = dateTimeFromDb(latest.startedAt);
+      final finished = dateTimeFromDb(latest.finishedAt);
+      text = (started != null && finished != null)
+          ? 'Last: ${_fmt(started)} → ${_fmt(finished)}'
+          : '';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Time tracking', style: Theme.of(context).textTheme.titleSmall),
+          if (text.isNotEmpty) Text(text),
+        ],
+      ),
     );
   }
 
@@ -536,79 +610,82 @@ class _DependencySection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final predecessors = ref.watch(predecessorsOfProvider(actionId));
-    final successors = ref.watch(successorsOfProvider(actionId));
+    final predecessors =
+        ref.watch(predecessorsOfProvider(actionId)).value ??
+        const <ActionRow>[];
+    final successors =
+        ref.watch(successorsOfProvider(actionId)).value ?? const <ActionRow>[];
 
-    return Column(
+    // Previous on the left, Next on the right; an empty side is only a +.
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Previous actions (must happen before this)',
-          style: Theme.of(context).textTheme.titleSmall,
+        Expanded(
+          child: _column(
+            context,
+            ref,
+            title: 'Previous',
+            items: predecessors,
+            isPredecessor: true,
+          ),
         ),
-        const SizedBox(height: 4),
-        predecessors.when(
-          data: (list) => _chipList(context, ref, list, isPredecessor: true),
-          loading: () => const LinearProgressIndicator(),
-          error: (e, _) => Text('Error: $e'),
-        ),
-        TextButton.icon(
-          icon: const Icon(Icons.add),
-          label: const Text('Add previous action'),
-          onPressed: () => _addDependency(context, ref, asPredecessor: true),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Next actions (must happen after this)',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        const SizedBox(height: 4),
-        successors.when(
-          data: (list) => _chipList(context, ref, list, isPredecessor: false),
-          loading: () => const LinearProgressIndicator(),
-          error: (e, _) => Text('Error: $e'),
-        ),
-        TextButton.icon(
-          icon: const Icon(Icons.add),
-          label: const Text('Add next action'),
-          onPressed: () => _addDependency(context, ref, asPredecessor: false),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _column(
+            context,
+            ref,
+            title: 'Next',
+            items: successors,
+            isPredecessor: false,
+          ),
         ),
       ],
     );
   }
 
-  Widget _chipList(
+  Widget _column(
     BuildContext context,
-    WidgetRef ref,
-    List<ActionRow> items, {
+    WidgetRef ref, {
+    required String title,
+    required List<ActionRow> items,
     required bool isPredecessor,
   }) {
-    if (items.isEmpty) return const Text('None');
-    return Wrap(
-      spacing: 8,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final item in items)
-          InputChip(
-            label: Text(item.name),
-            tooltip: 'Open this action',
-            // Stacked on top (not replacing) so unsaved edits in the
-            // current editor aren't lost; closing it returns here.
-            onPressed: () => ActionEditorDialog.show(context, existing: item),
-            onDeleted: () {
-              final deps = ref.read(dependencyServiceProvider);
-              if (isPredecessor) {
-                deps.removeDependency(
-                  predecessorId: item.id,
-                  successorId: actionId,
-                );
-              } else {
-                deps.removeDependency(
-                  predecessorId: actionId,
-                  successorId: item.id,
-                );
-              }
-            },
-          ),
+        Text(title, style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final item in items)
+              InputChip(
+                label: Text(item.name),
+                tooltip: 'Open this action',
+                // Stacked on top (not replacing) so unsaved edits in the
+                // current editor aren't lost; closing it returns here.
+                onPressed: () => openActionById(context, ref, item.id),
+                onDeleted: () {
+                  final deps = ref.read(dependencyServiceProvider);
+                  deps.removeDependency(
+                    predecessorId: isPredecessor ? item.id : actionId,
+                    successorId: isPredecessor ? actionId : item.id,
+                  );
+                },
+              ),
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: isPredecessor
+                  ? 'Add previous action'
+                  : 'Add next action',
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  _addDependency(context, ref, asPredecessor: isPredecessor),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -708,82 +785,6 @@ class _ActionPickerDialogState extends ConsumerState<_ActionPickerDialog> {
           child: const Text('Cancel'),
         ),
       ],
-    );
-  }
-}
-
-/// The "Manual parameters" section: a flat glass panel with a plain header
-/// row that toggles the compact body (no Material ExpansionTile look). The
-/// body is only built while open, as before.
-class _ParametersPanel extends StatefulWidget {
-  const _ParametersPanel({
-    required this.title,
-    required this.children,
-    this.initiallyOpen = false,
-  });
-
-  final String title;
-  final bool initiallyOpen;
-  final List<Widget> children;
-
-  @override
-  State<_ParametersPanel> createState() => _ParametersPanelState();
-}
-
-class _ParametersPanelState extends State<_ParametersPanel> {
-  late bool _open = widget.initiallyOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final g = context.glass;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      // A Material (not a DecoratedBox) so the ListTiles inside can paint ink.
-      child: Material(
-        color: g.dark ? const Color(0x14FFFFFF) : const Color(0xFFE8EFFF),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(GlassTheme.radiusControl),
-          side: BorderSide(color: g.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(GlassTheme.radiusControl),
-              onTap: () => setState(() => _open = !_open),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                    ),
-                    Icon(
-                      _open ? Icons.expand_less : Icons.expand_more,
-                      size: 20,
-                      color: g.textSecondary,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (_open)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: widget.children,
-                ),
-              ),
-          ],
-        ),
-      ),
     );
   }
 }

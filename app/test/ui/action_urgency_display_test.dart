@@ -144,10 +144,6 @@ void main() {
       () => Future<void>.delayed(const Duration(milliseconds: 200)),
     );
     await tester.pump(const Duration(milliseconds: 100));
-    // The direction picker lives in the collapsed 'Manual parameters' section.
-    await tester.tap(find.text('Manual parameters'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Urgency to Keep in Balance: 910'), findsOneWidget);
     await unmount(tester);
   });

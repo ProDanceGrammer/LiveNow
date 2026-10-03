@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import '../core/ids.dart';
+import '../core/settings.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'duration_rules.dart';
@@ -74,7 +76,32 @@ class ScheduleChange {
   final DateTime? startAt;
   final DateTime? endAt;
 
-  const ScheduleChange(this.id, {required this.startAt, required this.endAt});
+  /// The new all-day flag; null leaves the flag as it is. In the `before` list
+  /// of a [MoveManyUndo] it always holds the flag's previous value, so Undo
+  /// restores it.
+  final bool? isAllDay;
+
+  const ScheduleChange(
+    this.id, {
+    required this.startAt,
+    required this.endAt,
+    this.isAllDay,
+  });
+}
+
+/// The `done`/`completed_at` values [ActionService.toggleDone] overwrote.
+class ToggleDoneUndo {
+  final String id;
+  final bool done;
+  final String? completedAt;
+  final String updatedAt;
+
+  const ToggleDoneUndo({
+    required this.id,
+    required this.done,
+    required this.completedAt,
+    required this.updatedAt,
+  });
 }
 
 /// The schedules [ActionService.moveActions] overwrote.
@@ -91,6 +118,10 @@ const Duration _countableAverageWindow = Duration(days: 30);
 /// How far back same-name runs in an action's chain count when it has no
 /// Countable Activity.
 const Duration _chainAverageWindow = Duration(days: 7);
+
+/// How far back finished same-name runs (anywhere, not just in the chain) count
+/// toward [ActionService.predictedDurationFor].
+const Duration _sameNameWindow = Duration(days: 30);
 
 /// Create/edit/start/finish/postpone an action, continue it, and instantiate
 /// one from a saved template.
@@ -306,9 +337,11 @@ class ActionService {
             c.id,
             startAt: dateTimeFromDb(row.startAt),
             endAt: dateTimeFromDb(row.endAt),
+            isAllDay: row.isAllDay,
           ),
         );
         await updateSchedule(c.id, startAt: c.startAt, endAt: c.endAt);
+        if (c.isAllDay != null) await _setAllDayFlag(c.id, c.isAllDay!);
       }
       return MoveManyUndo(before);
     });
@@ -318,8 +351,150 @@ class ActionService {
     return db.transaction(() async {
       for (final c in undo.before) {
         await updateSchedule(c.id, startAt: c.startAt, endAt: c.endAt);
+        if (c.isAllDay != null) await _setAllDayFlag(c.id, c.isAllDay!);
       }
     });
+  }
+
+  Future<void> _setAllDayFlag(String id, bool isAllDay) {
+    return (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+      ActionsTableCompanion(isAllDay: Value(isAllDay)),
+    );
+  }
+
+  /// How long a new run of [actionId] should take: its Countable Activity's
+  /// 30-day average, else the average of finished same-name runs (matched with
+  /// [normalizeForMatch]) over the last 30 days, else its own duration - which
+  /// for an all-day item (no real length) is [defaultActionDuration] (1 hour).
+  /// Reads a lean column list (no notes).
+  Future<Duration> predictedDurationFor(String actionId) async {
+    final nowUtc = DateTime.now().toUtc();
+    final row = await db
+        .customSelect(
+          'SELECT name, start_at, end_at, is_all_day, estimated_minutes, '
+          'countable_activity_id FROM actions WHERE id = ?',
+          variables: [Variable<String>(actionId)],
+          readsFrom: {db.actionsTable},
+        )
+        .getSingle();
+    final name = row.read<String>('name');
+    final isAllDay = row.read<bool>('is_all_day');
+    final own = isAllDay
+        ? defaultActionDuration
+        : computeActionDuration(
+            startAt: dateTimeFromDb(row.readNullable<String>('start_at')),
+            endAt: dateTimeFromDb(row.readNullable<String>('end_at')),
+            legacyEstimatedMinutes: row.readNullable<int>('estimated_minutes'),
+          );
+
+    final cutoff = dateTimeToDb(nowUtc.subtract(_sameNameWindow))!;
+    final runs = await db
+        .customSelect(
+          'SELECT name, start_at, end_at FROM actions '
+          'WHERE done = 1 AND completed_at >= ? AND id <> ? '
+          'AND is_all_day = 0 AND start_at IS NOT NULL '
+          'AND end_at IS NOT NULL',
+          variables: [Variable<String>(cutoff), Variable<String>(actionId)],
+          readsFrom: {db.actionsTable},
+        )
+        .get();
+    final key = normalizeForMatch(name);
+    final samples = <Duration>[];
+    for (final r in runs) {
+      if (normalizeForMatch(r.read<String>('name')) != key) continue;
+      final start = dateTimeFromDb(r.read<String>('start_at'));
+      final end = dateTimeFromDb(r.read<String>('end_at'));
+      if (start == null || end == null || end.isBefore(start)) continue;
+      samples.add(end.difference(start));
+    }
+
+    return predictedDuration(
+      ownDuration: own,
+      countableAverage: await _countableAverage(
+        row.readNullable<String>('countable_activity_id'),
+        nowUtc,
+      ),
+      chainSamples: samples,
+    );
+  }
+
+  /// Turns an all-day action into a timed one starting at [start] for its
+  /// predicted duration ([predictedDurationFor]), in one transaction. Undo
+  /// with [undoMoveActions].
+  Future<MoveManyUndo> scheduleAllDayAt(String id, DateTime start) {
+    return db.transaction(() async {
+      final predicted = await predictedDurationFor(id);
+      final startUtc = start.toUtc();
+      return moveActions([
+        ScheduleChange(
+          id,
+          startAt: startUtc,
+          endAt: startUtc.add(predicted),
+          isAllDay: false,
+        ),
+      ]);
+    });
+  }
+
+  /// Turns an action into an all-day one on [day] (its year/month/day read as
+  /// Istanbul wall-clock): `start_at` is that day's local midnight, `end_at`
+  /// null. Undo with [undoMoveActions].
+  Future<MoveManyUndo> makeAllDay(String id, DateTime day) {
+    final midnight = tz.TZDateTime(_location(), day.year, day.month, day.day);
+    return moveActions([
+      ScheduleChange(
+        id,
+        startAt: midnight.toUtc(),
+        endAt: null,
+        isAllDay: true,
+      ),
+    ]);
+  }
+
+  tz.Location _location() {
+    try {
+      return tz.getLocation(AppSettings.timeZoneName);
+    } on tz.LocationNotFoundException {
+      initPostponeTimeZoneData();
+      return tz.getLocation(AppSettings.timeZoneName);
+    }
+  }
+
+  /// Flips the manual `done` flag (and `completed_at`) only; the schedule and
+  /// occurrence history stay as they are. Undo with [undoToggleDone].
+  Future<ToggleDoneUndo> toggleDone(String id) {
+    final nowText = dateTimeToDb(DateTime.now())!;
+    return db.transaction(() async {
+      final row = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(id))).getSingle();
+      final done = !row.done;
+      await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+        ActionsTableCompanion(
+          done: Value(done),
+          completedAt: Value(done ? nowText : null),
+          updatedAt: Value(nowText),
+        ),
+      );
+      return ToggleDoneUndo(
+        id: id,
+        done: row.done,
+        completedAt: row.completedAt,
+        updatedAt: row.updatedAt,
+      );
+    });
+  }
+
+  Future<void> undoToggleDone(ToggleDoneUndo undo) {
+    return (db.update(
+      db.actionsTable,
+    )..where((t) => t.id.equals(undo.id))).write(
+      ActionsTableCompanion(
+        done: Value(undo.done),
+        completedAt: Value(undo.completedAt),
+        updatedAt: Value(undo.updatedAt),
+      ),
+    );
   }
 
   /// Creates a Countable Activity and returns its id.
@@ -389,17 +564,22 @@ class ActionService {
       final action = await (db.select(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).getSingle();
-      final duration = computeActionDuration(
-        startAt: dateTimeFromDb(action.startAt),
-        endAt: dateTimeFromDb(action.endAt),
-        legacyEstimatedMinutes: action.estimatedMinutes,
-      );
+      // An all-day action has no real length: use the predicted one and move
+      // it onto the timeline (it stops being all-day).
+      final duration = action.isAllDay
+          ? await predictedDurationFor(actionId)
+          : computeActionDuration(
+              startAt: dateTimeFromDb(action.startAt),
+              endAt: dateTimeFromDb(action.endAt),
+              legacyEstimatedMinutes: action.estimatedMinutes,
+            );
       final newEnd = nowUtc.add(duration);
 
       await (db.update(
         db.actionsTable,
       )..where((t) => t.id.equals(actionId))).write(
         ActionsTableCompanion(
+          isAllDay: const Value(false),
           done: const Value(false),
           completedAt: const Value(null),
           startAt: Value(nowText),
@@ -885,6 +1065,15 @@ class ActionService {
       db.actionTemplatesTable,
     )..where((t) => t.id.equals(templateId))).getSingle();
     final payload = jsonDecode(template.payload) as Map<String, dynamic>;
+    // Directions deleted since the template was saved must not break the FK.
+    final existingMetricIds = (await db.select(db.metricsTable).get())
+        .map((m) => m.id)
+        .toSet();
+    final metricIds =
+        ((payload['metricIds'] as List<dynamic>?)?.cast<String>() ??
+                const <String>[])
+            .where(existingMetricIds.contains)
+            .toList();
 
     return createAction(
       name: payload['name'] as String,
@@ -892,8 +1081,7 @@ class ActionService {
       depthLevel: payload['depthLevel'] as String?,
       isAllDay: payload['isAllDay'] as bool? ?? false,
       estimatedMinutes: payload['estimatedMinutes'] as int?,
-      metricIds:
-          (payload['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [],
+      metricIds: metricIds,
     );
   }
 }

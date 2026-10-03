@@ -21,7 +21,7 @@ class ActionTimeLabel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final color = Theme.of(context).colorScheme.secondary;
+    final color = style?.color ?? Theme.of(context).colorScheme.secondary;
     return InkWell(
       onTap: () => QuickTimeEditDialog.editAction(context, ref, action),
       child: Text(

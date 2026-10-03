@@ -150,6 +150,49 @@ void main() {
     });
   });
 
+  group('resizedSchedule across days', () {
+    test('bottom edge can move into the next day', () {
+      final r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: false,
+        dayDelta: 1,
+        minuteDelta: 30,
+      );
+      expect(r.startAt, u(29, 7));
+      expect(r.endAt, u(30, 8, 30));
+    });
+    test('top edge can move into the previous day', () {
+      final r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: true,
+        dayDelta: -1,
+        minuteDelta: -60,
+      );
+      expect(r.startAt, u(28, 6));
+      expect(r.endAt, u(29, 8));
+    });
+    test('crossing the other edge still leaves the 10 minute minimum', () {
+      final r = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: false,
+        dayDelta: -2,
+        minuteDelta: 0,
+      );
+      expect(r.endAt, u(29, 7, 10));
+      final t = resizedSchedule(
+        startAt: u(29, 7),
+        endAt: u(29, 8),
+        fromTop: true,
+        dayDelta: 3,
+        minuteDelta: 0,
+      );
+      expect(t.startAt, u(29, 7, 50));
+    });
+  });
+
   group('packLanes', () {
     List<LaneAssignment<E>> pack(List<E> es) =>
         packLanes<E>(es, startOf: (e) => e.$2, endOf: (e) => e.$3);
@@ -190,6 +233,34 @@ void main() {
       expect(r['a']!.$2, 2);
       expect(r['b']!.$2, 2);
       expect(r['c'], (0, 1));
+    });
+    test('an event expands over lanes that are free for its whole duration', () {
+      final r = pack([
+        ('A', u(29, 5), u(29, 19)), // 08:00-22:00 local
+        ('B', u(29, 5, 30), u(29, 6, 10)), // 08:30-09:10
+        ('C', u(29, 6), u(29, 7)), // 09:00-10:00
+        ('D', u(29, 7, 10), u(29, 8)), // 10:10-11:00
+      ]);
+      final byId = {for (final a in r) a.event.$1: a};
+      for (final a in r) {
+        expect(a.laneCount, 3);
+      }
+      expect((byId['A']!.lane, byId['A']!.span), (0, 1));
+      expect((byId['B']!.lane, byId['B']!.span), (1, 1)); // C blocks lane 2
+      expect((byId['C']!.lane, byId['C']!.span), (2, 1));
+      // D reuses lane 1 and grows over the free lane 2: 2/3 of the width.
+      expect((byId['D']!.lane, byId['D']!.span), (1, 2));
+    });
+    test('span stops at a lane that is busy during the event', () {
+      final r = pack([
+        ('a', u(29, 7), u(29, 9)),
+        ('b', u(29, 8), u(29, 10)),
+        ('c', u(29, 8, 30), u(29, 9)),
+      ]);
+      final byId = {for (final a in r) a.event.$1: a};
+      expect(byId['a']!.span, 1); // b sits in lane 1 while a runs
+      expect(byId['b']!.span, 1);
+      expect(byId['c']!.span, 1);
     });
     test('zero-length events count as the minimum length', () {
       final r = byName(

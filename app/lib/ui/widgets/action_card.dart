@@ -6,6 +6,7 @@ import '../../data/queries.dart';
 import '../current_selection.dart';
 import '../edit_action.dart';
 import '../providers.dart';
+import '../urgency_colors.dart';
 import '../undo.dart';
 import 'glass.dart';
 import '../time_format.dart';
@@ -41,6 +42,19 @@ class ActionCard extends ConsumerWidget {
       currentSelectionProvider.select((s) => s.contains(action.id)),
     );
     final primary = Theme.of(context).colorScheme.primary;
+    final isDone = action.isDoneBefore;
+    // Urgency tint like the calendar: none for done, running or unlinked cards.
+    final tint = (urgency != null && !isDone && !isRunning)
+        ? urgencyColors(
+            urgency,
+            dark: Theme.of(context).brightness == Brightness.dark,
+          )
+        : null;
+    final fg = tint?.fg;
+    final nameStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
+      color: fg,
+      decoration: action.isAllDay && isDone ? TextDecoration.lineThrough : null,
+    );
 
     return GestureDetector(
       onSecondaryTapDown: (d) =>
@@ -77,11 +91,18 @@ class ActionCard extends ConsumerWidget {
                     horizontal: 10,
                     vertical: 6,
                   ),
-                  decoration: selected
+                  decoration: (selected || tint != null)
                       ? BoxDecoration(
-                          color: primary.withValues(alpha: 0.12),
+                          color: selected
+                              ? Color.alphaBlend(
+                                  primary.withValues(alpha: 0.12),
+                                  tint?.bg ?? const Color(0x00000000),
+                                )
+                              : tint!.bg,
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: primary, width: 2),
+                          border: selected
+                              ? Border.all(color: primary, width: 2)
+                              : null,
                         )
                       : null,
                   child: Column(
@@ -90,27 +111,52 @@ class ActionCard extends ConsumerWidget {
                     children: [
                       Row(
                         children: [
-                          Icon(
-                            iconForAction(action, isRunning),
-                            size: 20,
-                            color: isRunning
-                                ? Theme.of(context).colorScheme.primary
-                                : null,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              action.name,
-                              style: Theme.of(context).textTheme.titleSmall,
+                          if (action.isAllDay)
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Checkbox(
+                                key: const ValueKey('allDayCheckbox'),
+                                value: isDone,
+                                visualDensity: VisualDensity.compact,
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
+                                side: fg == null
+                                    ? null
+                                    : BorderSide(color: fg, width: 2),
+                                checkColor: tint?.bg,
+                                fillColor: fg == null
+                                    ? null
+                                    : WidgetStateProperty.resolveWith(
+                                        (s) => s.contains(WidgetState.selected)
+                                            ? fg
+                                            : null,
+                                      ),
+                                onChanged: (_) => runUndoableToggleDone(
+                                  context,
+                                  ref,
+                                  action.id,
+                                ),
+                              ),
+                            )
+                          else
+                            Icon(
+                              iconForAction(action, isRunning),
+                              size: 20,
+                              color: isRunning
+                                  ? Theme.of(context).colorScheme.primary
+                                  : fg,
                             ),
-                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(action.name, style: nameStyle)),
                           if (urgency != null)
                             Padding(
                               padding: const EdgeInsets.only(left: 8),
                               child: Text(
                                 'U ${formatUrgency(urgency)}',
                                 key: const ValueKey('actionUrgencyChip'),
-                                style: Theme.of(context).textTheme.labelSmall,
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(color: fg),
                               ),
                             ),
                         ],
@@ -121,6 +167,7 @@ class ActionCard extends ConsumerWidget {
                           child: ActionTimeLabel(
                             action: action,
                             text: timeLine,
+                            style: fg == null ? null : TextStyle(color: fg),
                           ),
                         ),
                     ],

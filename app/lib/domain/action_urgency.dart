@@ -26,7 +26,6 @@ Map<String, double> actionUrgencies(
     (byAction[actionId] ??= []).add(metricId);
   }
   return {
-    for (final e in byAction.entries)
-      e.key: ?actionUrgency(e.value, stats),
+    for (final e in byAction.entries) e.key: ?actionUrgency(e.value, stats),
   };
 }

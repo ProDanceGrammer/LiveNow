@@ -44,8 +44,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
 
-    // Header shows the TOTAL (120), not the page size.
-    expect(find.text('120'), findsOneWidget);
+    // The header no longer shows a count.
+    expect(find.text('120'), findsNothing);
     final container = ProviderScope.containerOf(
       tester.element(find.byType(CurrentActionsView)),
     );
@@ -67,7 +67,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
     expect(container.read(currentNotDoneProvider).requireValue, hasLength(120));
-    expect(find.text('120'), findsOneWidget);
+    expect(find.text('120'), findsNothing);
     expect(find.text('Show more'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());

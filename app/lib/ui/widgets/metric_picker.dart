@@ -11,6 +11,7 @@ import '../theme/glass_theme.dart';
 /// searchable multi-select. There are hundreds of directions, so a chip per
 /// direction (the old picker) doesn't work.
 class MetricPicker extends ConsumerWidget {
+  /// Heading above the chips; empty = none (the caller supplies its own).
   final String label;
   final Set<String> selectedIds;
   final ValueChanged<Set<String>> onChanged;
@@ -44,8 +45,10 @@ class MetricPicker extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 4),
+        if (label.isNotEmpty) ...[
+          Text(label, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+        ],
         if (chosen.isEmpty)
           Text('None', style: TextStyle(color: context.glass.textSecondary))
         else

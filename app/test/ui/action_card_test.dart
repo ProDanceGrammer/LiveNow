@@ -13,7 +13,7 @@ void main() {
   late AppDatabase db;
   late String actionId;
 
-  Future<void> pumpCard(WidgetTester tester) async {
+  Future<void> pumpCard(WidgetTester tester, {bool allDay = false}) async {
     tester.view.physicalSize = const Size(1400, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -21,9 +21,12 @@ void main() {
     addTearDown(db.close);
     late ActionListItem item;
     await tester.runAsync(() async {
-      actionId = await ProviderContainer(
-        overrides: [databaseProvider.overrideWithValue(db)],
-      ).read(actionServiceProvider).createAction(name: 'Read a Bible');
+      actionId =
+          await ProviderContainer(
+                overrides: [databaseProvider.overrideWithValue(db)],
+              )
+              .read(actionServiceProvider)
+              .createAction(name: 'Read a Bible', isAllDay: allDay);
       item = ActionListItem.fromRow(
         await (db.select(
           db.actionsTable,
@@ -95,6 +98,34 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     });
     expect(await exists(tester), isTrue);
+    await unmount(tester);
+  });
+
+  testWidgets('all-day card has a checkbox that ticks and unticks', (
+    tester,
+  ) async {
+    await pumpCard(tester, allDay: true);
+    final box = find.byKey(const ValueKey('allDayCheckbox'));
+    expect(box, findsOneWidget);
+    expect(tester.widget<Checkbox>(box).value, isFalse);
+
+    Future<bool> doneInDb() async => (await tester.runAsync(
+      () => (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(actionId))).getSingle(),
+    ))!.done;
+
+    await tester.runAsync(() async {
+      await tester.tap(box);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    });
+    expect(await doneInDb(), isTrue);
+    await unmount(tester);
+  });
+
+  testWidgets('timed card has no checkbox', (tester) async {
+    await pumpCard(tester);
+    expect(find.byType(Checkbox), findsNothing);
     await unmount(tester);
   });
 

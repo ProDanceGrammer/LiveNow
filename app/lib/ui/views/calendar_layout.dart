@@ -92,13 +92,16 @@ DateTime calendarAnchorStart(DateTime nowUtc, int dayCount) {
 // ---- lane packing ----------------------------------------------------------
 
 /// Where one event sits among overlapping neighbours: it occupies lane
-/// [lane] of [laneCount] equal-width side-by-side lanes.
+/// [lane] of [laneCount] equal-width side-by-side lanes, and is drawn
+/// [span] lanes wide: it expands rightwards over every lane that stays free
+/// for its whole duration.
 class LaneAssignment<T> {
   final T event;
   final int lane;
   final int laneCount;
+  final int span;
 
-  const LaneAssignment(this.event, this.lane, this.laneCount);
+  const LaneAssignment(this.event, this.lane, this.laneCount, [this.span = 1]);
 }
 
 /// Assigns overlapping timed events of one day to side-by-side lanes.
@@ -125,13 +128,22 @@ List<LaneAssignment<T>> packLanes<T>(
     });
 
   final out = <LaneAssignment<T>>[];
-  var cluster = <(T, int)>[];
+  var cluster = <(T, int, DateTime, DateTime)>[];
   final laneEnds = <DateTime>[];
   DateTime? clusterEnd;
 
   void flush() {
-    for (final (e, lane) in cluster) {
-      out.add(LaneAssignment(e, lane, laneEnds.length));
+    final lanes = laneEnds.length;
+    for (final (e, lane, s, end) in cluster) {
+      var span = 1;
+      // Grow over the next lanes while nobody there overlaps [s, end).
+      while (lane + span < lanes &&
+          !cluster.any(
+            (o) => o.$2 == lane + span && o.$3.isBefore(end) && o.$4.isAfter(s),
+          )) {
+        span++;
+      }
+      out.add(LaneAssignment(e, lane, lanes, span));
     }
     cluster = [];
     laneEnds.clear();
@@ -149,7 +161,7 @@ List<LaneAssignment<T>> packLanes<T>(
     } else {
       laneEnds[lane] = end;
     }
-    cluster.add((e, lane));
+    cluster.add((e, lane, s, end));
     if (clusterEnd == null || end.isAfter(clusterEnd!)) clusterEnd = end;
   }
   flush();
@@ -193,28 +205,45 @@ CalendarSchedule movedSchedule({
 }
 
 /// New schedule after dragging the top ([fromTop] true) or bottom edge by
-/// [minuteDelta] minutes (already snapped). The opposite edge stays put and
-/// the duration never drops below [kMinDurationMinutes]. A start-only action
-/// first gets an end from [computeActionDuration].
+/// [dayDelta] day columns and [minuteDelta] minutes (already snapped). The
+/// moved edge shifts in app-time-zone wall-clock time (so DST days keep the
+/// pointer's wall-clock time), the opposite edge stays put and the duration
+/// never drops below [kMinDurationMinutes]. A start-only action first gets an
+/// end from [computeActionDuration].
 CalendarSchedule resizedSchedule({
   required DateTime startAt,
   DateTime? endAt,
   required bool fromTop,
+  int dayDelta = 0,
   required int minuteDelta,
   int? legacyEstimatedMinutes,
 }) {
   const minLen = Duration(minutes: kMinDurationMinutes);
   final end =
       endAt ?? startAt.add(_durationOf(startAt, null, legacyEstimatedMinutes));
-  final delta = Duration(minutes: minuteDelta);
+
+  DateTime shifted(DateTime utc) {
+    final l = tz.TZDateTime.from(utc, _location);
+    return tz.TZDateTime(
+      _location,
+      l.year,
+      l.month,
+      l.day + dayDelta,
+      l.hour,
+      l.minute + minuteDelta,
+      l.second,
+      l.millisecond,
+      l.microsecond,
+    ).toUtc();
+  }
 
   if (fromTop) {
-    var newStart = startAt.add(delta);
+    var newStart = shifted(startAt);
     final latest = end.subtract(minLen);
     if (newStart.isAfter(latest)) newStart = latest;
     return (startAt: newStart, endAt: end);
   }
-  var newEnd = end.add(delta);
+  var newEnd = shifted(end);
   final earliest = startAt.add(minLen);
   if (newEnd.isBefore(earliest)) newEnd = earliest;
   return (startAt: startAt, endAt: newEnd);

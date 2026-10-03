@@ -129,10 +129,10 @@ ParsedActionsCsv parseActionsCsv(String text) {
 
 final _datetimeRe = RegExp(
   r'^(\d{1,2})/(\d{1,2})/(\d{4})'
-  r'(?:\s+(\d{1,2}):(\d{2})(?:\s*→\s*(\d{1,2}):(\d{2}))?)?$',
+  r'(?:\s+(\d{1,2}):(\d{2})(?:\s*→\s*(?:(\d{1,2})/(\d{1,2})/(\d{4})\s+)?(\d{1,2}):(\d{2}))?)?$',
 );
 
-/// `DD/MM/YYYY` (all-day) or `DD/MM/YYYY H:mm → H:mm` (end optional); null
+/// `DD/MM/YYYY` (all-day) or `DD/MM/YYYY H:mm → [DD/MM/YYYY ]H:mm` (end optional); null
 /// when the cell is empty or unreadable.
 ({DateTime start, DateTime? end, bool isAllDay})? parseDatetimeCell(
   String cell,
@@ -145,8 +145,15 @@ final _datetimeRe = RegExp(
   }
   final start = localWallToUtc(y, mo, d, int.parse(m[4]!), int.parse(m[5]!));
   DateTime? end;
-  if (m[6] != null) {
-    end = localWallToUtc(y, mo, d, int.parse(m[6]!), int.parse(m[7]!));
+  if (m[9] != null) {
+    // The end may carry its own date (`23:00 → 04/10/2026 8:00`).
+    end = localWallToUtc(
+      m[8] != null ? int.parse(m[8]!) : y,
+      m[7] != null ? int.parse(m[7]!) : mo,
+      m[6] != null ? int.parse(m[6]!) : d,
+      int.parse(m[9]!),
+      int.parse(m[10]!),
+    );
     if (!end.isAfter(start)) end = end.add(const Duration(days: 1));
   }
   return (start: start, end: end, isAllDay: false);
@@ -156,8 +163,10 @@ const _mon =
     'January|February|March|April|May|June|July|August|September|October|'
     'November|December';
 final _stampRe = RegExp(
-  '($_mon) ' r'(\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) (AM|PM)'
-  '(?: → (?:($_mon) ' r'(\d{1,2}), (\d{4}) )?(\d{1,2}):(\d{2}) (AM|PM))?',
+  '($_mon) '
+  r'(\d{1,2}), (\d{4}) (\d{1,2}):(\d{2}) (AM|PM)'
+  '(?: → (?:($_mon) '
+  r'(\d{1,2}), (\d{4}) )?(\d{1,2}):(\d{2}) (AM|PM))?',
 );
 
 int _hour24(String h, String ampm) =>

@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/database.dart' show Metric;
+import '../../data/database.dart' show ActionRow, Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
 import '../dialog_stack.dart';
+import '../open_entity.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
 import '../undo.dart';
@@ -97,161 +99,214 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
     final live = _isEditing ? snapshot?.byId[widget.existing!.id] : null;
     final stat = _isEditing ? snapshot?.statOf(widget.existing!.id) : null;
 
-    return AlertDialog(
-      title: Text(
-        _isEditing ? 'Edit growth direction' : 'New growth direction',
-      ),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _name,
-                  decoration: const InputDecoration(labelText: 'Name'),
-                  autofocus: true,
-                  // Enter = the Save button (once the relations have loaded).
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) {
-                    if (_relationsLoaded) _save();
-                  },
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _icon,
-                  decoration: const InputDecoration(
-                    labelText: 'Icon (an emoji, optional)',
-                  ),
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) {
-                    if (_relationsLoaded) _save();
-                  },
-                ),
-                const SizedBox(height: 12),
-                GlassPillSelector<MetricKind>(
-                  label: 'Type',
-                  options: const {
-                    MetricKind.count: 'Number of actions',
-                    MetricKind.hours: 'Hours spent',
-                    MetricKind.boolean: 'Boolean',
-                  },
-                  value: _kind,
-                  onChanged: (v) => setState(() => _kind = v),
-                ),
-                if (numeric) ...[
-                  const SizedBox(height: 12),
-                  GlassPillSelector<MetricWindow>(
-                    label: 'Per',
-                    options: const {
-                      MetricWindow.week: 'Week',
-                      MetricWindow.month: 'Month',
-                      MetricWindow.year: 'Year',
-                      MetricWindow.fiveYears: '5 years',
+    return CallbackShortcuts(
+      // Ctrl+Enter = Save, from any field.
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter, control: true):
+            _saveIfReady,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+            _saveIfReady,
+      },
+      child: AlertDialog(
+        title: Text(
+          _isEditing ? 'Edit growth direction' : 'New growth direction',
+        ),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: _name,
+                    decoration: const InputDecoration(labelText: 'Name'),
+                    autofocus: true,
+                    // Enter = the Save button (once the relations have loaded).
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) {
+                      if (_relationsLoaded) _save();
                     },
-                    value: _window,
-                    onChanged: (v) => setState(() => _window = v),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
-                    controller: _target,
-                    decoration: InputDecoration(
-                      labelText: _kind == MetricKind.hours
-                          ? 'Target (hours)'
-                          : 'Target (actions)',
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                    controller: _icon,
+                    decoration: const InputDecoration(
+                      labelText: 'Icon (an emoji, optional)',
                     ),
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) {
                       if (_relationsLoaded) _save();
                     },
-                    validator: (v) {
-                      final n = double.tryParse(
-                        (v ?? '').trim().replaceAll(',', '.'),
-                      );
-                      return (n == null || n <= 0) ? 'A number above 0' : null;
+                  ),
+                  const SizedBox(height: 12),
+                  GlassPillSelector<MetricKind>(
+                    label: 'Type',
+                    options: const {
+                      MetricKind.count: 'Number of actions',
+                      MetricKind.hours: 'Hours spent',
+                      MetricKind.boolean: 'Boolean',
                     },
+                    value: _kind,
+                    onChanged: (v) => setState(() => _kind = v),
                   ),
-                ],
-                CheckboxListTile(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(GlassTheme.radiusChip),
-                  ),
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  title: const Text('Main growth direction (weight 1000)'),
-                  value: _isMain,
-                  onChanged: (v) => setState(() => _isMain = v ?? false),
-                ),
-                if (_isEditing && live != null && stat != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      'Weight ${live.weight.round()} · level ${live.importanceLevel}'
-                      ' · progress ${stat.progress.toStringAsFixed(1)}%'
-                      ' · urgency ${stat.urgency.toStringAsFixed(1)}',
-                      style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: context.glass.textSecondary),
+                  if (numeric) ...[
+                    const SizedBox(height: 12),
+                    GlassPillSelector<MetricWindow>(
+                      label: 'Per',
+                      options: const {
+                        MetricWindow.week: 'Week',
+                        MetricWindow.month: 'Month',
+                        MetricWindow.year: 'Year',
+                        MetricWindow.fiveYears: '5 years',
+                      },
+                      value: _window,
+                      onChanged: (v) => setState(() => _window = v),
                     ),
-                  ),
-                if (!_relationsLoaded)
-                  const LinearProgressIndicator()
-                else ...[
-                  MetricPicker(
-                    label: 'Depends on (sub-directions that build it)',
-                    selectedIds: _dependsOn,
-                    excludeId: widget.existing?.id,
-                    onOpen: _openRelated,
-                    onChanged: (ids) => setState(() => _dependsOn = ids),
-                  ),
-                  const SizedBox(height: 8),
-                  MetricPicker(
-                    label: 'Leads to (larger goals it feeds)',
-                    selectedIds: _leadsTo,
-                    excludeId: widget.existing?.id,
-                    onOpen: _openRelated,
-                    onChanged: (ids) => setState(() => _leadsTo = ids),
-                  ),
-                ],
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _target,
+                      decoration: InputDecoration(
+                        labelText: _kind == MetricKind.hours
+                            ? 'Target (hours)'
+                            : 'Target (actions)',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) {
+                        if (_relationsLoaded) _save();
+                      },
+                      validator: (v) {
+                        final n = double.tryParse(
+                          (v ?? '').trim().replaceAll(',', '.'),
+                        );
+                        return (n == null || n <= 0)
+                            ? 'A number above 0'
+                            : null;
+                      },
+                    ),
+                  ],
+                  CheckboxListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        GlassTheme.radiusChip,
                       ),
                     ),
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Main growth direction (weight 1000)'),
+                    value: _isMain,
+                    onChanged: (v) => setState(() => _isMain = v ?? false),
                   ),
-              ],
+                  if (_isEditing && live != null && stat != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Weight ${live.weight.round()} · level ${live.importanceLevel}'
+                        ' · progress ${stat.progress.toStringAsFixed(1)}%'
+                        ' · urgency ${stat.urgency.toStringAsFixed(1)}',
+                        style: Theme.of(context).textTheme.bodySmall
+                            ?.copyWith(color: context.glass.textSecondary),
+                      ),
+                    ),
+                  if (!_relationsLoaded)
+                    const LinearProgressIndicator()
+                  else ...[
+                    MetricPicker(
+                      label: 'Depends on (sub-directions that build it)',
+                      selectedIds: _dependsOn,
+                      excludeId: widget.existing?.id,
+                      onOpen: _openRelated,
+                      onChanged: (ids) => setState(() => _dependsOn = ids),
+                    ),
+                    const SizedBox(height: 8),
+                    MetricPicker(
+                      label: 'Leads to (larger goals it feeds)',
+                      selectedIds: _leadsTo,
+                      excludeId: widget.existing?.id,
+                      onOpen: _openRelated,
+                      onChanged: (ids) => setState(() => _leadsTo = ids),
+                    ),
+                  ],
+                  if (_isEditing) _buildLinkedActions(context),
+                  if (_error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
-      ),
-      actions: [
-        if (_isEditing)
+        actions: [
+          if (_isEditing)
+            TextButton(
+              onPressed: _delete,
+              child: Text(
+                'Delete',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
           TextButton(
-            onPressed: _delete,
-            child: Text(
-              'Delete',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
           ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _relationsLoaded ? _save : null,
-          child: const Text('Save'),
-        ),
+          FilledButton(
+            onPressed: _relationsLoaded ? _save : null,
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _saveIfReady() {
+    if (_relationsLoaded) _save();
+  }
+
+  /// The actions linked to this direction; each chip opens that action's
+  /// editor on top of this dialog (every related entity is openable).
+  Widget _buildLinkedActions(BuildContext context) {
+    final id = widget.existing!.id;
+    final linked = [
+      for (final (metricId, action)
+          in ref.watch(metricLinkedActionsProvider).value ??
+              const <(String, ActionRow)>[])
+        if (metricId == id) action,
+    ]..sort((a, b) => a.name.compareTo(b.name));
+    return ExpansionTile(
+      title: Text('Linked actions (${linked.length})'),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (linked.isEmpty)
+          Text('None', style: TextStyle(color: context.glass.textSecondary))
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final a in linked)
+                ActionChip(
+                  label: Text(a.name),
+                  tooltip: 'Open this action',
+                  onPressed: () => openActionById(context, ref, a.id),
+                ),
+            ],
+          ),
       ],
     );
   }

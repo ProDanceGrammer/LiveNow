@@ -139,6 +139,104 @@ void _onRelease(WidgetRef ref, String id) {
   if (collapse) selectOnlyCalendarEvent(ref, id);
 }
 
+/// An all-day chip being dragged towards the time grid: the chip's action and
+/// where the pointer is (global coordinates).
+typedef _ChipDrag = ({ActionListItem item, Offset pos});
+
+/// Drag state shared by the all-day strip and the time grid (siblings under
+/// [CalendarView]), so a chip can be dragged down into the grid and a timed
+/// block up into the strip. Pointer moves only touch these notifiers, never
+/// the 300 blocks.
+class _CrossDrag {
+  /// The all-day chip being dragged (null = none); the grid draws its ghost.
+  final chip = ValueNotifier<_ChipDrag?>(null);
+
+  /// Day column of the all-day strip a timed block is hovering over while it
+  /// is dragged (null = not over the strip); the strip highlights that cell.
+  final stripTarget = ValueNotifier<int?>(null);
+
+  /// On the strip's root box, to hit-test it in global coordinates.
+  final stripKey = GlobalKey(debugLabel: 'all-day strip');
+
+  /// Set by the grid: called with the chip and the global drop position.
+  void Function(ActionListItem item, Offset pos)? onChipDrop;
+
+  ActionListItem? _pressed;
+  Offset? _pressPos;
+  bool _routed = false;
+
+  void dispose() {
+    _unroute();
+    chip.dispose();
+    stripTarget.dispose();
+  }
+
+  /// The strip day column under [global], or null when it is not over the
+  /// strip's day cells.
+  int? stripDayAt(Offset global, double dayWidth, int dayCount) {
+    final box = stripKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    final local = box.globalToLocal(global);
+    final x = local.dx - _kGutter;
+    if (local.dy < 0 || local.dy > box.size.height) return null;
+    if (x < 0 || x >= dayWidth * dayCount) return null;
+    return (x / dayWidth).floor().clamp(0, dayCount - 1);
+  }
+
+  void press(ActionListItem item, PointerDownEvent e) {
+    _pressed = null;
+    if ((e.buttons & kPrimaryButton) == 0 || isAdditiveCalendarClick()) return;
+    _pressed = item;
+    _pressPos = e.position;
+  }
+
+  /// A press on a chip turns into a drag after a few pixels of movement.
+  void move(Offset pos) {
+    final item = _pressed;
+    if (item == null || chip.value != null) return;
+    if ((pos - _pressPos!).distance < 6) return;
+    _pressed = null;
+    _pressDragged = true;
+    chip.value = (item: item, pos: pos);
+    if (!_routed) {
+      _routed = true;
+      GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
+    }
+  }
+
+  void release() => _pressed = null;
+
+  void _unroute() {
+    if (!_routed) return;
+    _routed = false;
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
+  }
+
+  void _onPointer(PointerEvent e) {
+    final d = chip.value;
+    if (d == null) {
+      _unroute();
+      return;
+    }
+    if (e is PointerMoveEvent) {
+      chip.value = (item: d.item, pos: e.position);
+    } else if (e is PointerUpEvent) {
+      _unroute();
+      chip.value = null;
+      onChipDrop?.call(d.item, e.position);
+    } else if (e is PointerCancelEvent) {
+      _unroute();
+      chip.value = null;
+    }
+  }
+}
+
+final _crossDragProvider = Provider<_CrossDrag>((ref) {
+  final c = _CrossDrag();
+  ref.onDispose(c.dispose);
+  return c;
+});
+
 /// The Google-Calendar-style time grid: a header (navigation + 2..7 day
 /// selector), a day header row, an all-day strip and a scrolling 24 h grid
 /// where timed actions can be dragged (move) and edge-dragged (resize).
@@ -225,6 +323,23 @@ class _CalendarInput extends ConsumerStatefulWidget {
   ConsumerState<_CalendarInput> createState() => _CalendarInputState();
 }
 
+const _digitKeys = [
+  LogicalKeyboardKey.digit2,
+  LogicalKeyboardKey.digit3,
+  LogicalKeyboardKey.digit4,
+  LogicalKeyboardKey.digit5,
+  LogicalKeyboardKey.digit6,
+  LogicalKeyboardKey.digit7,
+];
+const _numpadKeys = [
+  LogicalKeyboardKey.numpad2,
+  LogicalKeyboardKey.numpad3,
+  LogicalKeyboardKey.numpad4,
+  LogicalKeyboardKey.numpad5,
+  LogicalKeyboardKey.numpad6,
+  LogicalKeyboardKey.numpad7,
+];
+
 class _CalendarInputState extends ConsumerState<_CalendarInput> {
   /// Scroll distance that counts as one day: one mouse-wheel notch reports
   /// 100, a touchpad sends many small deltas that accumulate to the same step.
@@ -290,6 +405,13 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
               shiftCalendarDays(ref, -1),
           const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
               shiftCalendarDays(ref, 1),
+          // 2..7 (also on the numpad) set the number of day columns.
+          for (var n = 2; n <= 7; n++) ...{
+            SingleActivator(_digitKeys[n - 2]): () =>
+                setCalendarDayCount(ref, n),
+            SingleActivator(_numpadKeys[n - 2]): () =>
+                setCalendarDayCount(ref, n),
+          },
           const SingleActivator(LogicalKeyboardKey.delete): _deleteSelected,
           const SingleActivator(LogicalKeyboardKey.escape): () =>
               clearCalendarSelection(ref),
@@ -623,7 +745,10 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
       final d = dayIndexOf(a.startAt!, start);
       if (d >= 0 && d < dayCount) byDay.putIfAbsent(d, () => []).add(a);
     }
+    final cross = ref.read(_crossDragProvider);
+    final primary = Theme.of(context).colorScheme.primary;
     return Container(
+      key: cross.stripKey,
       constraints: const BoxConstraints(minHeight: 30, maxHeight: 96),
       decoration: BoxDecoration(
         // A slightly tinted translucent band.
@@ -653,13 +778,10 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
                     ),
                   ),
                   for (var i = 0; i < dayCount; i++)
-                    Container(
-                      width: dayWidth,
-                      constraints: const BoxConstraints(minHeight: 30),
-                      padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
-                      decoration: BoxDecoration(
-                        border: Border(left: BorderSide(color: line)),
-                      ),
+                    // Only the cell's tint listens to the drag target; the
+                    // chips are passed as a prebuilt child.
+                    ValueListenableBuilder<int?>(
+                      valueListenable: cross.stripTarget,
                       child: Column(
                         children: [
                           for (final a in byDay[i] ?? const <ActionListItem>[])
@@ -669,6 +791,19 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
                               running: running.contains(a.id),
                             ),
                         ],
+                      ),
+                      builder: (context, target, chips) => Container(
+                        key: ValueKey('strip-cell-$i'),
+                        width: dayWidth,
+                        constraints: const BoxConstraints(minHeight: 30),
+                        padding: const EdgeInsets.fromLTRB(2, 3, 2, 3),
+                        decoration: BoxDecoration(
+                          color: target == i
+                              ? primary.withValues(alpha: 0.22)
+                              : null,
+                          border: Border(left: BorderSide(color: line)),
+                        ),
+                        child: chips,
                       ),
                     ),
                 ],
@@ -747,13 +882,22 @@ class _AllDayChip extends ConsumerWidget {
     final selected = ref.watch(
       calendarSelectionProvider.select((s) => s.contains(item.id)),
     );
+    final cross = ref.read(_crossDragProvider);
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: _HoverToolbarHost(
         actionId: item.id,
         child: Listener(
-          onPointerDown: (e) => _onPress(ref, item.id, e),
-          onPointerUp: (_) => _onRelease(ref, item.id),
+          onPointerDown: (e) {
+            _onPress(ref, item.id, e);
+            cross.press(item, e);
+          },
+          // A press that travels becomes a drag towards the time grid.
+          onPointerMove: (e) => cross.move(e.position),
+          onPointerUp: (_) {
+            cross.release();
+            _onRelease(ref, item.id);
+          },
           child: Material(
             color: bg,
             shape: RoundedRectangleBorder(
@@ -768,19 +912,43 @@ class _AllDayChip extends ConsumerWidget {
               onTap: () {},
               onDoubleTap: () => openActionEditor(context, ref, item.id),
               child: Container(
-                height: 22,
+                height: 18,
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
+                padding: const EdgeInsets.only(left: 2, right: 6),
                 alignment: Alignment.centerLeft,
-                child: Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: fg,
-                    decoration: done ? TextDecoration.lineThrough : null,
-                  ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: Checkbox(
+                        key: ValueKey('chip-check-${item.id}'),
+                        value: done,
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        side: BorderSide(color: fg, width: 1.5),
+                        checkColor: bg,
+                        fillColor: WidgetStateProperty.resolveWith(
+                          (s) => s.contains(WidgetState.selected) ? fg : null,
+                        ),
+                        onChanged: (_) =>
+                            runUndoableToggleDone(context, ref, item.id),
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: fg,
+                          decoration: done ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -859,43 +1027,40 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
     }
   }
 
+  /// The child's top-right corner in overlay coordinates, read fresh from the
+  /// render tree (a scroll moves the child without a new layout callback), or
+  /// null while it is off-screen: its top edge above the enclosing scroll
+  /// viewport (the bar would otherwise be pinned over the header), or the
+  /// whole child below the viewport.
+  Offset? _cornerIfVisible(Size childSize) {
+    final box = context.findRenderObject();
+    final overlay = Overlay.maybeOf(context)?.context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    final ancestor = overlay is RenderBox ? overlay : null;
+    final corner = box.localToGlobal(
+      Offset(childSize.width, 0),
+      ancestor: ancestor,
+    );
+    final viewport = Scrollable.maybeOf(context)?.context.findRenderObject();
+    if (viewport is RenderBox && viewport.attached && viewport.hasSize) {
+      final top = viewport.localToGlobal(Offset.zero, ancestor: ancestor).dy;
+      final bottom = top + viewport.size.height;
+      if (corner.dy < top || corner.dy > bottom) return null;
+    }
+    return corner;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final position = Scrollable.maybeOf(context)?.position;
     return OverlayPortal.overlayChildLayoutBuilder(
       controller: _portal,
       overlayChildBuilder: (_, info) {
         if (widget.suppressed) return const SizedBox.shrink();
-        // Above the child's top-right corner, overlapping it by 3 px so the
-        // pointer never crosses a gap between child and toolbar.
-        final corner = MatrixUtils.transformPoint(
-          info.childPaintTransform,
-          Offset(info.childSize.width, 0),
-        );
-        return Positioned(
-          left: math.max(0, corner.dx - _kToolbarWidth),
-          top: math.max(0, corner.dy - _kToolbarHeight + 3),
-          child: MouseRegion(
-            onEnter: (_) {
-              _overBar = true;
-              _sync();
-            },
-            onExit: (_) {
-              _overBar = false;
-              _sync();
-            },
-            child: _Toolbar(
-              onStart: () => _run('Started', (s) => s.start(widget.actionId)),
-              onFinish: () =>
-                  _run('Finished', (s) => s.finish(widget.actionId)),
-              onContinue: () =>
-                  runUndoableContinue(context, ref, widget.actionId),
-              onWeek: () => _run(
-                'Postponed to next week',
-                (s) => s.postpone(widget.actionId, PostponeRule.nextWeek),
-              ),
-              onDelete: _delete,
-            ),
-          ),
+        // Re-evaluated on every scroll of the enclosing viewport.
+        return ListenableBuilder(
+          listenable: position ?? Listenable.merge(const []),
+          builder: (_, _) => _positioned(info.childSize),
         );
       },
       child: MouseRegion(
@@ -908,6 +1073,37 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
           _sync();
         },
         child: widget.child,
+      ),
+    );
+  }
+
+  Widget _positioned(Size childSize) {
+    // Above the child's top-right corner, overlapping it by 3 px so the
+    // pointer never crosses a gap between child and toolbar.
+    final corner = _cornerIfVisible(childSize);
+    if (corner == null) return const SizedBox.shrink();
+    return Positioned(
+      left: math.max(0, corner.dx - _kToolbarWidth),
+      top: math.max(0, corner.dy - _kToolbarHeight + 3),
+      child: MouseRegion(
+        onEnter: (_) {
+          _overBar = true;
+          _sync();
+        },
+        onExit: (_) {
+          _overBar = false;
+          _sync();
+        },
+        child: _Toolbar(
+          onStart: () => _run('Started', (s) => s.start(widget.actionId)),
+          onFinish: () => _run('Finished', (s) => s.finish(widget.actionId)),
+          onContinue: () => runUndoableContinue(context, ref, widget.actionId),
+          onWeek: () => _run(
+            'Postponed to next week',
+            (s) => s.postpone(widget.actionId, PostponeRule.nextWeek),
+          ),
+          onDelete: _delete,
+        ),
       ),
     );
   }
@@ -1116,6 +1312,7 @@ class _Drag {
   final int grabbedColumn;
   final int lane;
   final int laneCount;
+  final int span;
   final _DragKind kind;
 
   /// Everything that moves: [grabbed] first, then (for a move of one of
@@ -1134,6 +1331,7 @@ class _Drag {
     required this.grabbedColumn,
     required this.lane,
     required this.laneCount,
+    required this.span,
     required this.kind,
     required this.members,
     required this.originRangeStart,
@@ -1146,6 +1344,7 @@ class _Drag {
     grabbedColumn: grabbedColumn,
     lane: lane,
     laneCount: laneCount,
+    span: span,
     kind: kind,
     members: members,
     originRangeStart: originRangeStart,
@@ -1224,13 +1423,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   @override
   void initState() {
     super.initState();
+    _cross = ref.read(_crossDragProvider)..onChipDrop = _chipDrop;
     _tick = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
   }
 
+  late final _CrossDrag _cross;
+
   @override
   void dispose() {
+    _cross.onChipDrop = null;
+    _cross.stripTarget.value = null;
     _tick?.cancel();
     _endMarquee();
     _marqueeN.dispose();
@@ -1257,6 +1461,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !controller.hasClients) return;
       final target = minuteAtFocal * _pxPerMinute - focal;
+      controller.jumpTo(target.clamp(0.0, controller.position.maxScrollExtent));
+    });
+  }
+
+  /// "Today": after the range has re-anchored, scrolls so the now-line sits
+  /// at the viewport's vertical centre (clamped, so near midnight it pins to
+  /// the top/bottom edge).
+  void _scrollToNow() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final controller = _scrollController;
+      if (!mounted || controller == null || !controller.hasClients) return;
+      final target = _px(_minutesNow()) - _viewportHeight / 2;
       controller.jumpTo(target.clamp(0.0, controller.position.maxScrollExtent));
     });
   }
@@ -1403,6 +1619,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       grabbedColumn: p.event.day,
       lane: p.lane,
       laneCount: p.laneCount,
+      span: p.span,
       kind: kind,
       members: members,
       originRangeStart: widget.start,
@@ -1414,10 +1631,54 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
   void _dragUpdate(Offset pos) {
     final d = _drag;
-    if (d != null && !_committing) _dragN.value = d.at(pos);
+    if (d == null || _committing) return;
+    // A timed block dragged up over the all-day strip highlights that day.
+    if (d.kind == _DragKind.move) {
+      _cross.stripTarget.value = _cross.stripDayAt(
+        pos,
+        widget.dayWidth,
+        widget.dayCount,
+      );
+    }
+    _dragN.value = d.at(pos);
+  }
+
+  /// The grid cell under a global [pos]: (day column, snapped minute of day),
+  /// or null outside the grid's viewport / day columns. Uses the scroll offset
+  /// and [_pxPerMinute], so it is right at any zoom and scroll.
+  (int, int)? _gridCellAt(Offset pos) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    final local = box.globalToLocal(pos);
+    final x = local.dx - _kGutter;
+    if (local.dy < 0 || local.dy > box.size.height) return null;
+    if (x < 0 || x >= widget.dayWidth * widget.dayCount) return null;
+    final day = (x / widget.dayWidth).floor().clamp(0, widget.dayCount - 1);
+    final minutes = pxToMinutes(
+      local.dy + _scrollOffsetNow,
+      pxPerMinute: _pxPerMinute,
+    );
+    final snapped = ((minutes / kSnapMinutes).round() * kSnapMinutes).clamp(
+      0,
+      1440 - kSnapMinutes,
+    );
+    return (day, snapped);
+  }
+
+  /// An all-day chip was dropped: over a grid cell it becomes a timed action
+  /// starting there (duration predicted, else 1 h - the service decides).
+  void _chipDrop(ActionListItem item, Offset pos) {
+    final cell = _gridCellAt(pos);
+    if (cell == null) return;
+    final start = calendarAddDays(
+      widget.start,
+      cell.$1,
+    ).add(Duration(minutes: cell.$2));
+    runUndoableScheduleAllDayAt(context, ref, item.id, start);
   }
 
   void _clearDrag() {
+    _cross.stripTarget.value = null;
     _dragN.value = null;
     _draggedIds.value = null;
     _committing = false;
@@ -1438,14 +1699,15 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final dx = d.current.dx - d.origin.dx;
     var minutes = snapMinutes(dy, pxPerMinute: _pxPerMinute);
 
+    final scrolled = dayIndexOf(widget.start, d.originRangeStart);
+    final column = (d.grabbedColumn + (dx / widget.dayWidth).round()).clamp(
+      0,
+      widget.dayCount - 1,
+    );
+    final dayDelta = scrolled + column - d.grabbedColumn;
+
     switch (d.kind) {
       case _DragKind.move:
-        final scrolled = dayIndexOf(widget.start, d.originRangeStart);
-        final column = (d.grabbedColumn + (dx / widget.dayWidth).round()).clamp(
-          0,
-          widget.dayCount - 1,
-        );
-        final dayDelta = scrolled + column - d.grabbedColumn;
         final hi = durMin <= 1440 - startMin ? 1440 - startMin - durMin : 0;
         minutes = minutes.clamp(-startMin, hi);
         return [
@@ -1463,29 +1725,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
             ),
         ];
       case _DragKind.resizeTop:
-        return [
-          (
-            item: item,
-            schedule: resizedSchedule(
-              startAt: start,
-              endAt: item.endAt,
-              fromTop: true,
-              minuteDelta: math.max(minutes, -startMin),
-              legacyEstimatedMinutes: item.estimatedMinutes,
-            ),
-          ),
-        ];
       case _DragKind.resizeBottom:
-        final endRel = startMin + durMin;
-        final dayEndRel = ((endRel - 1) ~/ 1440 + 1) * 1440;
+        // The edge may cross days: the horizontal distance picks the day, the
+        // vertical one the minutes; the 10-minute floor is in resizedSchedule.
         return [
           (
             item: item,
             schedule: resizedSchedule(
               startAt: start,
               endAt: item.endAt,
-              fromTop: false,
-              minuteDelta: math.min(minutes, dayEndRel - endRel),
+              fromTop: d.kind == _DragKind.resizeTop,
+              dayDelta: dayDelta,
+              minuteDelta: minutes,
               legacyEstimatedMinutes: item.estimatedMinutes,
             ),
           ),
@@ -1496,6 +1747,11 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   Future<void> _dragEnd() async {
     final d = _drag;
     if (d == null || _committing) return;
+    final stripDay = d.kind == _DragKind.move ? _cross.stripTarget.value : null;
+    if (stripDay != null) {
+      await _dropOnStrip(d, stripDay);
+      return;
+    }
     final changes = <ScheduleChange>[];
     for (final m in _preview(d)) {
       final item = m.item;
@@ -1550,6 +1806,49 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     }
   }
 
+  /// Timed blocks dropped on the all-day strip's day cell become all-day
+  /// there (one Undo restores their times and the flag). A group drag turns
+  /// every timed member all-day; members that already are all-day stay put.
+  Future<void> _dropOnStrip(_Drag d, int day) async {
+    final timed = [
+      for (final m in d.members)
+        if (!m.isAllDay) m,
+    ];
+    if (timed.isEmpty) {
+      _clearDrag();
+      return;
+    }
+    _committing = true;
+    final dayStart = calendarAddDays(widget.start, day);
+    try {
+      if (timed.length == 1) {
+        await runUndoableMakeAllDay(
+          context,
+          ref,
+          timed.single.id,
+          _local(dayStart),
+        );
+      } else {
+        await runUndoableMoveMany(
+          context,
+          ref,
+          [
+            for (final m in timed)
+              ScheduleChange(
+                m.id,
+                startAt: dayStart,
+                endAt: null,
+                isAllDay: true,
+              ),
+          ],
+          description: 'Made ${timed.length} events all-day',
+        );
+      }
+    } finally {
+      if (mounted) _clearDrag();
+    }
+  }
+
   // -- build --
 
   @override
@@ -1562,6 +1861,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       if (_drag == null && !_committing) clearCalendarSelection(ref);
     }
 
+    ref.listen<int>(calendarScrollToNowProvider, (_, _) => _scrollToNow());
     ref.listen<DateTime>(calendarRangeStartProvider, clearOnRangeChange);
     ref.listen<int>(calendarDayCountProvider, clearOnRangeChange);
     // A refresh drops selected ids that no longer exist (deleted or moved away).
@@ -1662,15 +1962,25 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       Positioned.fill(
         child: IgnorePointer(
           child: ListenableBuilder(
-            listenable: Listenable.merge([_dragN, _newRangeN, _marqueeN]),
+            listenable: Listenable.merge([
+              _dragN,
+              _newRangeN,
+              _marqueeN,
+              _cross.chip,
+              _cross.stripTarget,
+            ]),
             builder: (context, _) {
               final drag = _drag;
               final range = _newRange;
               final marquee = _marqueeN.value;
+              final chip = _cross.chip.value;
               return Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  if (drag != null) ..._ghosts(drag, dayStarts),
+                  // Over the all-day strip the target cell is the feedback.
+                  if (drag != null && _cross.stripTarget.value == null)
+                    ..._ghosts(drag, dayStarts),
+                  if (chip != null) ..._chipGhost(scheme, chip.pos),
                   if (range != null) _createPreview(scheme, range),
                   if (marquee != null)
                     Positioned.fromRect(
@@ -1825,6 +2135,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       return cached.widget;
     }
     final laneW = widget.dayWidth / p.laneCount;
+    final blockW = laneW * p.span - 2;
     final height = math.max(_kMinBlockHeight, _px(seg.lenMin));
     final key = seg.isStart
         ? ValueKey('event-${seg.item.id}')
@@ -1833,7 +2144,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       key: key,
       left: p.lane * laneW,
       top: _px(seg.topMin),
-      width: laneW - 2,
+      width: blockW,
       height: height,
       child: _DragScoped(
         dragged: _draggedIds,
@@ -1844,7 +2155,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           child: _EventBlock(
             seg: seg,
             height: height,
-            width: laneW - 2,
+            width: blockW,
             running: running,
             dragging: dragging,
             onDragStart: (kind, pos) => _dragStart(p, kind, pos),
@@ -1863,10 +2174,11 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     return built;
   }
 
-  /// One ghost per dragged timed event, all inside the one ghost layer (no
-  /// extra layers per block). The grabbed event keeps its lane; the others
-  /// are drawn full column width. All-day chips have no ghost in the grid,
-  /// and a ghost whose day is outside the visible range is simply not drawn.
+  /// One ghost per day slice of every dragged timed event (an event crossing
+  /// midnight, e.g. after a cross-day resize, shows a piece in each visible
+  /// day), all inside the one ghost layer. The grabbed event keeps its lane
+  /// and span; the others are drawn full column width. All-day chips have no
+  /// ghost in the grid, and slices outside the visible range are not drawn.
   List<Widget> _ghosts(_Drag drag, List<DateTime> dayStarts) {
     final scheme = Theme.of(context).colorScheme;
     final ghosts = <Widget>[];
@@ -1874,30 +2186,55 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       if (m.item.isAllDay) continue;
       final s = m.schedule;
       final grabbed = m.item.id == drag.grabbed.id;
-      var day = dayIndexOf(s.startAt, widget.start);
-      if (grabbed) day = day.clamp(0, widget.dayCount - 1);
-      if (day < 0 || day >= widget.dayCount) continue;
-      final topMin = s.startAt.difference(dayStarts[day]).inMinutes;
-      final endMin = math.min(
-        1440,
-        s.endAt.difference(dayStarts[day]).inMinutes,
-      );
-      final lanes = grabbed ? drag.laneCount : 1;
-      final laneW = widget.dayWidth / lanes;
-      ghosts.add(
-        Positioned(
-          key: grabbed
-              ? const ValueKey('drag-ghost')
-              : ValueKey('drag-ghost-${m.item.id}'),
-          left: day * widget.dayWidth + (grabbed ? drag.lane : 0) * laneW,
-          top: _px(topMin),
-          width: laneW - 2,
-          height: math.max(_kMinBlockHeight, _px(endMin - topMin)),
-          child: _rangeBox(scheme, '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}'),
-        ),
-      );
+      final range = '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}';
+      final laneW = widget.dayWidth / (grabbed ? drag.laneCount : 1);
+      var first = true;
+      for (var day = 0; day < widget.dayCount; day++) {
+        final ds = dayStarts[day];
+        final de = dayStarts[day + 1];
+        if (!s.startAt.isBefore(de) || !s.endAt.isAfter(ds)) continue;
+        final from = s.startAt.isAfter(ds) ? s.startAt : ds;
+        final to = s.endAt.isBefore(de) ? s.endAt : de;
+        final topMin = from.difference(ds).inSeconds / 60;
+        final lenMin = to.difference(from).inSeconds / 60;
+        final base = grabbed ? 'drag-ghost' : 'drag-ghost-${m.item.id}';
+        ghosts.add(
+          Positioned(
+            key: ValueKey(first ? base : '$base-d$day'),
+            left: day * widget.dayWidth + (grabbed ? drag.lane : 0) * laneW,
+            top: _px(topMin),
+            width: laneW * (grabbed ? drag.span : 1) - 2,
+            height: math.max(_kMinBlockHeight, _px(lenMin)),
+            child: _rangeBox(scheme, range),
+          ),
+        );
+        first = false;
+      }
     }
     return ghosts;
+  }
+
+  /// Ghost of an all-day chip being dragged over the grid: a one-hour block
+  /// (the real length is predicted when dropped) at the snapped start.
+  List<Widget> _chipGhost(ColorScheme scheme, Offset pos) {
+    final cell = _gridCellAt(pos);
+    if (cell == null) return const [];
+    final (day, minute) = cell;
+    final start = calendarAddDays(
+      widget.start,
+      day,
+    ).add(Duration(minutes: minute));
+    final end = start.add(const Duration(hours: 1));
+    return [
+      Positioned(
+        key: const ValueKey('chip-ghost'),
+        left: day * widget.dayWidth,
+        top: _px(minute),
+        width: widget.dayWidth - 2,
+        height: math.max(_kMinBlockHeight, _px(60)),
+        child: _rangeBox(scheme, '${_hhmm(start)} – ${_hhmm(end)}'),
+      ),
+    ];
   }
 
   /// The translucent rubber-band rectangle (two solid draw ops).
@@ -2027,7 +2364,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         final box = Rect.fromLTWH(
           d * widget.dayWidth + p.lane * laneW,
           _px(seg.topMin),
-          laneW - 2,
+          laneW * p.span - 2,
           math.max(_kMinBlockHeight, _px(seg.lenMin)),
         );
         if (box.overlaps(r)) hits.add(seg.item.id);
@@ -2266,7 +2603,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         ? scheme.onSurfaceVariant
         : uc?.fg ?? scheme.onPrimaryContainer;
     final name = TextStyle(
-      fontSize: 12,
+      fontSize: 9,
       fontWeight: FontWeight.w600,
       color: fg,
       decoration: done ? TextDecoration.lineThrough : null,
@@ -2278,21 +2615,21 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     // continues past midnight doesn't read "00:00", and the end is visible
     // without opening the event. The end is the one the block is drawn to.
     final timeRange = seg.timeRange;
-    final padTop = height >= 20 ? 3.0 : 0.0;
+    final padTop = height >= 16 ? 3.0 : 0.0;
 
     // The label is ONE paragraph. A block gets a ClipRect only when its text
     // is taller than it; otherwise nothing needs clipping.
     Widget label;
     var clip = false;
-    if (height >= 34) {
-      // Title (w600 12 px, up to two lines) then the time on its own line
-      // (11 px normal): one TextSpan tree = one paragraph.
+    if (height >= 26) {
+      // Title (w600 9 px, up to two lines) then the time on its own line
+      // (8 px normal): one TextSpan tree = one paragraph.
       final children = [
         TextSpan(text: '${item.name}\n'),
         TextSpan(
           text: timeRange,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: 8,
             fontWeight: FontWeight.w400,
             color: fg,
             decoration: TextDecoration.none,
@@ -2306,7 +2643,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
           style: DefaultTextStyle.of(context).style.merge(name),
           children: children,
         ),
-        '${textWidth.toStringAsFixed(1)}|${scaler.scale(12)}|${item.name}|$timeRange',
+        '${textWidth.toStringAsFixed(1)}|${scaler.scale(9)}|${item.name}|$timeRange',
         textWidth,
         scaler,
       );
@@ -2334,7 +2671,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
                 overflow: TextOverflow.ellipsis,
                 style: name,
               ),
-              Text(timeRange, style: TextStyle(fontSize: 11, color: fg)),
+              Text(timeRange, style: TextStyle(fontSize: 8, color: fg)),
             ],
           ),
         );
@@ -2345,9 +2682,9 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         '${item.name} · $timeRange',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: name.copyWith(fontSize: 11),
+        style: name,
       );
-      clip = height < 16;
+      clip = height < 12;
     }
     Widget content = Padding(
       padding: EdgeInsets.fromLTRB(6, padTop, 6, 0),
