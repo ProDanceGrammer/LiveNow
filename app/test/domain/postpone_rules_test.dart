@@ -12,6 +12,9 @@ import 'package:livenow/domain/postpone_rules.dart';
 DateTime istanbul(int y, int m, int d, [int h = 0, int min = 0]) =>
     DateTime.utc(y, m, d, h - 3, min);
 
+ActionSchedule hourLong(DateTime start) =>
+    ActionSchedule(startAt: start, endAt: start.add(const Duration(hours: 1)));
+
 void main() {
   setUpAll(initPostponeTimeZoneData);
 
@@ -94,66 +97,192 @@ void main() {
   });
 
   group('afterWork (18:00)', () {
-    test('before 18:00 today -> today 18:00', () {
-      final now = istanbul(2024, 1, 1, 10);
+    test('start before 18:00 -> same day 18:00, duration kept', () {
       final next = applyPostponeRule(
         PostponeRule.afterWork,
-        const ActionSchedule(),
-        nowUtc: now,
-      );
-      expect(next.startAt, istanbul(2024, 1, 1, 18));
-    });
-
-    test('after 18:00 today -> tomorrow 18:00', () {
-      final now = istanbul(2024, 1, 1, 20);
-      final next = applyPostponeRule(
-        PostponeRule.afterWork,
-        const ActionSchedule(),
-        nowUtc: now,
+        hourLong(istanbul(2024, 1, 2, 10)),
+        nowUtc: istanbul(2024, 1, 1, 9),
       );
       expect(next.startAt, istanbul(2024, 1, 2, 18));
+      expect(next.endAt, istanbul(2024, 1, 2, 19));
+    });
+
+    test('start at/after 18:00 -> next day 18:00', () {
+      for (final h in [18, 20]) {
+        final next = applyPostponeRule(
+          PostponeRule.afterWork,
+          hourLong(istanbul(2024, 1, 2, h)),
+          nowUtc: istanbul(2024, 1, 1, 9),
+        );
+        expect(next.startAt, istanbul(2024, 1, 3, 18));
+      }
+    });
+
+    test('unscheduled uses now as base', () {
+      final early = applyPostponeRule(
+        PostponeRule.afterWork,
+        const ActionSchedule(),
+        nowUtc: istanbul(2024, 1, 1, 10),
+      );
+      expect(early.startAt, istanbul(2024, 1, 1, 18));
+      final late = applyPostponeRule(
+        PostponeRule.afterWork,
+        const ActionSchedule(),
+        nowUtc: istanbul(2024, 1, 1, 20),
+      );
+      expect(late.startAt, istanbul(2024, 1, 2, 18));
     });
   });
 
-  test('morning always means tomorrow 09:00, any weekday', () {
-    final now = istanbul(2024, 1, 5, 22); // Friday night
-    final next = applyPostponeRule(
-      PostponeRule.morning,
-      const ActionSchedule(),
-      nowUtc: now,
-    );
-    expect(next.startAt, istanbul(2024, 1, 6, 9)); // Saturday, not skipped
+  group('morning (09:00)', () {
+    test('start before 09:00 -> same day 09:00, duration kept', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 12, 8)),
+        nowUtc: istanbul(2024, 1, 3, 10),
+      );
+      expect(next.startAt, istanbul(2024, 1, 12, 9));
+      expect(next.endAt, istanbul(2024, 1, 12, 10));
+    });
+
+    test('start after 09:00 -> next day 09:00', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 12, 14)),
+        nowUtc: istanbul(2024, 1, 3, 10),
+      );
+      expect(next.startAt, istanbul(2024, 1, 13, 9));
+    });
+
+    test('double press: 08:00 -> same day 09:00 -> next day 09:00', () {
+      final now = istanbul(2024, 1, 3, 10);
+      final first = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 12, 8)),
+        nowUtc: now,
+      );
+      expect(first.startAt, istanbul(2024, 1, 12, 9));
+      final second = applyPostponeRule(
+        PostponeRule.morning,
+        first,
+        nowUtc: now,
+      );
+      expect(second.startAt, istanbul(2024, 1, 13, 9));
+      expect(second.endAt, istanbul(2024, 1, 13, 10));
+    });
+
+    test('overdue action follows its own date, not now', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 1, 8)),
+        nowUtc: istanbul(2024, 1, 3, 10),
+      );
+      expect(next.startAt, istanbul(2024, 1, 1, 9));
+    });
+
+    test('unscheduled uses now; any weekday (Friday night -> Saturday)', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        const ActionSchedule(),
+        nowUtc: istanbul(2024, 1, 5, 22),
+      );
+      expect(next.startAt, istanbul(2024, 1, 6, 9));
+    });
+
+    test('month rollover is wall-clock safe', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 31, 23)),
+        nowUtc: istanbul(2024, 1, 3, 10),
+      );
+      expect(next.startAt, istanbul(2024, 2, 1, 9));
+    });
   });
 
-  test('workingMorning skips the weekend: Friday -> Monday 09:00', () {
-    final now = istanbul(2024, 1, 5, 10); // Friday
-    final next = applyPostponeRule(
-      PostponeRule.workingMorning,
-      const ActionSchedule(),
-      nowUtc: now,
-    );
-    expect(next.startAt, istanbul(2024, 1, 8, 9)); // Monday
+  group('workingMorning', () {
+    test('Friday after 09:00 -> Monday 09:00', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 5, 10)),
+        nowUtc: istanbul(2024, 1, 1, 9),
+      );
+      expect(next.startAt, istanbul(2024, 1, 8, 9));
+      expect(next.endAt, istanbul(2024, 1, 8, 10));
+    });
+
+    test('Friday before 09:00 -> same Friday 09:00', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 5, 8)),
+        nowUtc: istanbul(2024, 1, 1, 9),
+      );
+      expect(next.startAt, istanbul(2024, 1, 5, 9));
+    });
+
+    test('Saturday early -> Monday (non-working same day skipped)', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 6, 8)),
+        nowUtc: istanbul(2024, 1, 1, 9),
+      );
+      expect(next.startAt, istanbul(2024, 1, 8, 9));
+    });
+
+    test('unscheduled uses now (Friday 10:00 -> Monday)', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        const ActionSchedule(),
+        nowUtc: istanbul(2024, 1, 5, 10),
+      );
+      expect(next.startAt, istanbul(2024, 1, 8, 9));
+    });
+
+    test('overdue action follows its own date', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 1, 8)),
+        nowUtc: istanbul(2024, 1, 5, 10),
+      );
+      expect(next.startAt, istanbul(2024, 1, 1, 9));
+    });
   });
 
   group('nextMondayMorning', () {
     test('on a Monday, jumps to next week (never today)', () {
-      final now = istanbul(2024, 1, 1, 8); // Monday, before 09:00
       final next = applyPostponeRule(
         PostponeRule.nextMondayMorning,
-        const ActionSchedule(),
-        nowUtc: now,
+        hourLong(istanbul(2024, 1, 1, 8)),
+        nowUtc: istanbul(2024, 1, 1, 7),
+      );
+      expect(next.startAt, istanbul(2024, 1, 8, 9));
+      expect(next.endAt, istanbul(2024, 1, 8, 10));
+    });
+
+    test('mid-week start -> the coming Monday', () {
+      final next = applyPostponeRule(
+        PostponeRule.nextMondayMorning,
+        hourLong(istanbul(2024, 1, 3, 12)),
+        nowUtc: istanbul(2024, 1, 1, 7),
       );
       expect(next.startAt, istanbul(2024, 1, 8, 9));
     });
 
-    test('mid-week, jumps to the coming Monday', () {
-      final now = istanbul(2024, 1, 3, 12); // Wednesday
+    test('unscheduled uses now', () {
       final next = applyPostponeRule(
         PostponeRule.nextMondayMorning,
         const ActionSchedule(),
-        nowUtc: now,
+        nowUtc: istanbul(2024, 1, 3, 12),
       );
       expect(next.startAt, istanbul(2024, 1, 8, 9));
+    });
+
+    test('overdue action follows its own date', () {
+      final next = applyPostponeRule(
+        PostponeRule.nextMondayMorning,
+        hourLong(istanbul(2023, 12, 20, 8)),
+        nowUtc: istanbul(2024, 1, 3, 12),
+      );
+      expect(next.startAt, istanbul(2023, 12, 25, 9));
     });
   });
 

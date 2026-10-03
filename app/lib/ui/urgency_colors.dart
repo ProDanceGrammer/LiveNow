@@ -39,7 +39,44 @@ Color urgencyForeground(Color background) {
 }
 
 /// Background and text colours for urgency [u] in a light or [dark] theme.
-({Color bg, Color fg}) urgencyColors(double u, {required bool dark}) {
-  final bg = urgencyBackground(urgencyBand(u), dark: dark);
+({Color bg, Color fg}) urgencyColors(double u, {required bool dark}) =>
+    urgencyColorsForBand(urgencyBand(u), dark: dark);
+
+/// [urgencyColors] for an already-resolved [band] (lets callers watch only the
+/// band, so a number that stays inside its band causes no rebuild).
+({Color bg, Color fg}) urgencyColorsForBand(
+  UrgencyBand band, {
+  required bool dark,
+}) {
+  final bg = urgencyBackground(band, dark: dark);
+  return (bg: bg, fg: urgencyForeground(bg));
+}
+
+/// Muted version of [urgencyColors] for DONE actions: the same band colour
+/// blended ~40 % over [surface] (default: the theme's page surface, white on
+/// light / near-black on dark), with whichever text colour reads best on the
+/// blended result (contrast >= 4.5).
+({Color bg, Color fg}) urgencyColorsMuted(
+  double urgency, {
+  required bool dark,
+  Color? surface,
+}) => urgencyColorsMutedForBand(
+  urgencyBand(urgency),
+  dark: dark,
+  surface: surface,
+);
+
+/// [urgencyColorsMuted] for an already-resolved [band].
+({Color bg, Color fg}) urgencyColorsMutedForBand(
+  UrgencyBand band, {
+  required bool dark,
+  Color? surface,
+}) {
+  final base =
+      surface ?? (dark ? const Color(0xFF0F172A) : const Color(0xFFFFFFFF));
+  final bg = Color.alphaBlend(
+    urgencyBackground(band, dark: dark).withValues(alpha: 0.4),
+    base,
+  );
   return (bg: bg, fg: urgencyForeground(bg));
 }

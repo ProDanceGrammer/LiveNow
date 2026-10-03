@@ -8,23 +8,27 @@ void main() {
   setUp(resetStackedDialogsForTest);
 
   Future<void> pumpHost(WidgetTester tester) async {
-    await tester.pumpWidget(MaterialApp(
-      home: Builder(builder: (c) {
-        ctx = c;
-        return const Scaffold(body: Text('base'));
-      }),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (c) {
+            ctx = c;
+            return const Scaffold(body: Text('base'));
+          },
+        ),
+      ),
+    );
   }
 
-  Future<void> open(WidgetTester tester, String label,
-      {VoidCallback? onTap}) async {
+  Future<void> open(
+    WidgetTester tester,
+    String label, {
+    VoidCallback? onTap,
+  }) async {
     showStackedDialog<void>(
       context: ctx,
       builder: (_) => AlertDialog(
-        content: TextButton(
-          onPressed: onTap ?? () {},
-          child: Text(label),
-        ),
+        content: TextButton(onPressed: onTap ?? () {}, child: Text(label)),
       ),
     );
     await tester.pumpAndSettle();
@@ -46,8 +50,9 @@ void main() {
     expect(find.byType(AlertDialog), findsNWidgets(3));
   });
 
-  testWidgets('closing the top dialog keeps the lower one and its dim',
-      (tester) async {
+  testWidgets('closing the top dialog keeps the lower one and its dim', (
+    tester,
+  ) async {
     await pumpHost(tester);
     await open(tester, 'A');
     await open(tester, 'B');
@@ -58,8 +63,9 @@ void main() {
     expect(openStackedDialogCount, 1);
   });
 
-  testWidgets('closing all resets depth so a new dialog dims again',
-      (tester) async {
+  testWidgets('closing all resets depth so a new dialog dims again', (
+    tester,
+  ) async {
     await pumpHost(tester);
     await open(tester, 'A');
     await open(tester, 'B');
@@ -73,8 +79,9 @@ void main() {
     expect(dimmingBarriers(tester), 1);
   });
 
-  testWidgets('transparent upper barrier still blocks taps below',
-      (tester) async {
+  testWidgets('transparent upper barrier still blocks taps below', (
+    tester,
+  ) async {
     var tapped = false;
     await pumpHost(tester);
     showStackedDialog<void>(

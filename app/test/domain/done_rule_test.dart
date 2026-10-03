@@ -19,18 +19,21 @@ void main() {
   });
 
   group('scheduled, not all-day (timed)', () {
-    test('is done once end_at is in the past, regardless of the manual flag', () {
-      final past = DateTime.now().toUtc().subtract(const Duration(hours: 1));
-      expect(
-        isDoneBefore(
-          startAt: past.subtract(const Duration(hours: 1)),
-          endAt: past,
-          isAllDay: false,
-          done: false,
-        ),
-        isTrue,
-      );
-    });
+    test(
+      'is done once end_at is in the past, regardless of the manual flag',
+      () {
+        final past = DateTime.now().toUtc().subtract(const Duration(hours: 1));
+        expect(
+          isDoneBefore(
+            startAt: past.subtract(const Duration(hours: 1)),
+            endAt: past,
+            isAllDay: false,
+            done: false,
+          ),
+          isTrue,
+        );
+      },
+    );
 
     test('is not done while end_at is still in the future, even if the manual flag is true', () {
       final future = DateTime.now().toUtc().add(const Duration(hours: 1));
@@ -67,12 +70,15 @@ void main() {
       );
     });
 
-    test('mirrors the manual done flag when false, even with a past end_at', () {
-      final past = DateTime.now().toUtc().subtract(const Duration(days: 1));
-      expect(
-        isDoneBefore(startAt: past, endAt: past, isAllDay: true, done: false),
-        isFalse,
-      );
-    });
+    test(
+      'mirrors the manual done flag when false, even with a past end_at',
+      () {
+        final past = DateTime.now().toUtc().subtract(const Duration(days: 1));
+        expect(
+          isDoneBefore(startAt: past, endAt: past, isAllDay: true, done: false),
+          isFalse,
+        );
+      },
+    );
   });
 }

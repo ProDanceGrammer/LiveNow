@@ -8,6 +8,7 @@ import '../core/settings.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'duration_rules.dart';
+import 'notes_plain_text.dart';
 import 'postpone_rules.dart';
 import 'sequence_naming.dart';
 
@@ -160,6 +161,7 @@ class ActionService {
               estimatedMinutes: Value(estimatedMinutes),
               countableActivityId: Value(countableActivityId),
               notes: Value(notes),
+              notesText: Value(notesPlainText(notes)),
               createdAt: nowText,
               updatedAt: nowText,
             ),
@@ -206,6 +208,10 @@ class ActionService {
         endAt: Value(dateTimeToDb(endAt)),
         isAllDay: Value(isAllDay),
         notes: notes,
+        // Derived search text kept in step with the notes (absent = untouched).
+        notesText: notes.present
+            ? Value(notesPlainText(notes.value))
+            : const Value.absent(),
         updatedAt: Value(nowText),
       ),
     );
@@ -514,6 +520,17 @@ class ActionService {
     return id;
   }
 
+  /// The id of the Countable Activity named [name] (case-insensitive),
+  /// creating it when none exists. Lets a template act as an activity.
+  Future<String> countableActivityForTemplate(String name) async {
+    final wanted = name.trim().toLowerCase();
+    final all = await db.select(db.countableActivitiesTable).get();
+    for (final a in all) {
+      if (a.name.trim().toLowerCase() == wanted) return a.id;
+    }
+    return createCountableActivity(name.trim());
+  }
+
   /// Links [actionId] to a Countable Activity (null clears the link).
   Future<void> setCountableActivity(String actionId, String? activityId) {
     return (db.update(
@@ -770,6 +787,7 @@ class ActionService {
               countableActivityId: Value(source.countableActivityId),
               // The whole description carries over as it is (ticks kept).
               notes: Value(source.notes),
+              notesText: Value(source.notesText),
               createdAt: nowText,
               updatedAt: nowText,
             ),
@@ -1061,11 +1079,140 @@ class ActionService {
   }
 
   Future<String> createFromTemplate(String templateId) async {
+    final payload = await _templatePayload(templateId);
+    final a = await _templateArgs(payload);
+    return createAction(
+      name: a.name,
+      postponeFlex: a.postponeFlex,
+      depthLevel: a.depthLevel,
+      isAllDay: a.isAllDay,
+      estimatedMinutes: a.estimatedMinutes,
+      notes: a.notes,
+      metricIds: a.metricIds,
+    );
+  }
+
+  /// Quick "Start now" from a template. Timed: runs from now for the
+  /// template's duration, with an open occurrence (like [start]). All-day:
+  /// an all-day action for today, not done. Returns the new action's id.
+  Future<String> createFromTemplateStarted(String templateId) =>
+      _createFromTemplateNow(templateId, finished: false);
+
+  /// Quick "Finish now" from a template. Timed: ran for the duration up to
+  /// now, done, with a closed occurrence (like [finish]). All-day: an all-day
+  /// action for today, done (like [toggleDone]). Returns the new action's id.
+  Future<String> createFromTemplateFinished(String templateId) =>
+      _createFromTemplateNow(templateId, finished: true);
+
+  Future<String> _createFromTemplateNow(
+    String templateId, {
+    required bool finished,
+  }) async {
+    final nowUtc = DateTime.now().toUtc();
+    final nowText = dateTimeToDb(nowUtc)!;
+    final payload = await _templatePayload(templateId);
+    final a = await _templateArgs(payload);
+
+    // Read-only: a template must not create a countable activity by itself.
+    final wanted = a.name.trim().toLowerCase();
+    String? activityId;
+    for (final c in await db.select(db.countableActivitiesTable).get()) {
+      if (c.name.trim().toLowerCase() == wanted) {
+        activityId = c.id;
+        break;
+      }
+    }
+
+    return db.transaction(() async {
+      final DateTime? startAt;
+      final DateTime? endAt;
+      var occStart = nowUtc;
+      if (a.isAllDay) {
+        final today = tz.TZDateTime.now(_location());
+        startAt = tz.TZDateTime(
+          _location(),
+          today.year,
+          today.month,
+          today.day,
+        ).toUtc();
+        endAt = null;
+      } else {
+        final minutes = a.estimatedMinutes;
+        final duration = (minutes != null && minutes > 0)
+            ? Duration(minutes: minutes)
+            : (await _countableAverage(activityId, nowUtc) ??
+                  defaultActionDuration);
+        if (finished) {
+          occStart = nowUtc.subtract(duration);
+          startAt = occStart;
+          endAt = nowUtc;
+        } else {
+          startAt = nowUtc;
+          endAt = nowUtc.add(duration);
+        }
+      }
+
+      final id = await createAction(
+        name: a.name,
+        postponeFlex: a.postponeFlex,
+        depthLevel: a.depthLevel,
+        startAt: startAt,
+        endAt: endAt,
+        isAllDay: a.isAllDay,
+        estimatedMinutes: a.estimatedMinutes,
+        countableActivityId: activityId,
+        notes: a.notes,
+        metricIds: a.metricIds,
+      );
+
+      if (finished) {
+        await (db.update(
+          db.actionsTable,
+        )..where((t) => t.id.equals(id))).write(
+          ActionsTableCompanion(
+            done: const Value(true),
+            completedAt: Value(nowText),
+          ),
+        );
+      }
+      if (finished || !a.isAllDay) {
+        await db
+            .into(db.actionOccurrencesTable)
+            .insert(
+              ActionOccurrencesTableCompanion.insert(
+                id: newId(),
+                actionId: id,
+                startedAt: Value(dateTimeToDb(occStart)),
+                finishedAt: finished ? Value(nowText) : const Value.absent(),
+                outcome: finished ? const Value('done') : const Value.absent(),
+              ),
+            );
+      }
+      return id;
+    });
+  }
+
+  Future<Map<String, dynamic>> _templatePayload(String templateId) async {
     final template = await (db.select(
       db.actionTemplatesTable,
     )..where((t) => t.id.equals(templateId))).getSingle();
-    final payload = jsonDecode(template.payload) as Map<String, dynamic>;
-    // Directions deleted since the template was saved must not break the FK.
+    return jsonDecode(template.payload) as Map<String, dynamic>;
+  }
+
+  /// The createAction arguments a template payload describes. Directions
+  /// deleted since the template was saved are filtered out (FK safety).
+  Future<
+    ({
+      String name,
+      String postponeFlex,
+      String? depthLevel,
+      bool isAllDay,
+      int? estimatedMinutes,
+      String? notes,
+      List<String> metricIds,
+    })
+  >
+  _templateArgs(Map<String, dynamic> payload) async {
     final existingMetricIds = (await db.select(db.metricsTable).get())
         .map((m) => m.id)
         .toSet();
@@ -1074,13 +1221,13 @@ class ActionService {
                 const <String>[])
             .where(existingMetricIds.contains)
             .toList();
-
-    return createAction(
+    return (
       name: payload['name'] as String,
       postponeFlex: payload['postponeFlex'] as String? ?? 'flexible',
       depthLevel: payload['depthLevel'] as String?,
       isAllDay: payload['isAllDay'] as bool? ?? false,
       estimatedMinutes: payload['estimatedMinutes'] as int?,
+      notes: payload['notes'] as String?,
       metricIds: metricIds,
     );
   }

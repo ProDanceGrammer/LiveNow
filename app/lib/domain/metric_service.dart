@@ -404,6 +404,35 @@ class MetricService {
     });
   }
 
+  /// Links [actionId] to [metricId]. A no-op when the pair is already linked.
+  Future<void> linkAction(String actionId, String metricId) {
+    return db.transaction(() async {
+      final exists =
+          await (db.select(db.actionMetricsTable)..where(
+                (t) => t.actionId.equals(actionId) & t.metricId.equals(metricId),
+              ))
+              .get();
+      if (exists.isNotEmpty) return;
+      await db
+          .into(db.actionMetricsTable)
+          .insert(
+            ActionMetricsTableCompanion.insert(
+              id: newId(),
+              actionId: actionId,
+              metricId: metricId,
+            ),
+          );
+    });
+  }
+
+  /// Removes only the [actionId] - [metricId] link (the rows themselves stay).
+  Future<void> unlinkAction(String actionId, String metricId) {
+    return (db.delete(db.actionMetricsTable)..where(
+          (t) => t.actionId.equals(actionId) & t.metricId.equals(metricId),
+        ))
+        .go();
+  }
+
   Future<void> _insertEdge(String metricId, String dependsOnId) {
     return db
         .into(db.metricDependenciesTable)

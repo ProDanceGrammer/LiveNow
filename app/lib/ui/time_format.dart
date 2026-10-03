@@ -91,3 +91,35 @@ String? formatTimeRange(
   final s = side(startUtc);
   return endUtc == null ? s : '$s → ${side(endUtc)}';
 }
+
+const _monthAbbr = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
+];
+
+/// Compact schedule for list rows: `3 Oct 13:00-14:40`; the year follows the
+/// month as `'YY` only when it is not the current year (`3 Oct 27' 13:00-14:40`).
+/// All-day = the date only; no end = the start time only; an end on another
+/// day appends its date. Null when [startUtc] is null.
+String? formatShortSchedule(
+  DateTime? startUtc,
+  DateTime? endUtc, {
+  bool isAllDay = false,
+  DateTime? nowUtc,
+}) {
+  if (startUtc == null) return null;
+  final thisYear = wallFromUtc(nowUtc ?? DateTime.now().toUtc()).year;
+  String date(DateTime w) {
+    final y = w.year == thisYear ? '' : " ${twoDigits(w.year % 100)}'";
+    return '${w.day} ${_monthAbbr[w.month - 1]}$y';
+  }
+
+  final s = wallFromUtc(startUtc);
+  if (isAllDay) return date(s);
+  final head = '${date(s)} ${formatTime(s)}';
+  if (endUtc == null) return head;
+  final e = wallFromUtc(endUtc);
+  return sameWallDay(s, e)
+      ? '$head-${formatTime(e)}'
+      : '$head-${date(e)} ${formatTime(e)}';
+}

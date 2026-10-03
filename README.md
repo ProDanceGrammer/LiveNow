@@ -19,7 +19,10 @@ planned but not started — the local schema is already designed for that (see
     All-day actions have a checkbox (done, struck through), can be dragged into the time grid
     (duration = the action's average/predicted time, else 1 hour) and Start puts them on the
     now-line; a timed event dragged into a day's all-day strip becomes all-day there.
-  - **All** — every action in one list, with a search box.
+  - **All** — every action in one list, last edited first by default. Search by name, notes
+    and/or growth directions, sort by several fields at once (ascending/descending, e.g. urgency
+    then start time) and filter by name, growth directions, previous/next actions, duration and
+    urgency.
   - **Import CSV** (upload button next to the tabs) — reads a Notion export of actions (name,
     date/time, next/previous actions, growth directions), links the actions and directions, and
     skips rows that already exist, so re-importing the same file is safe.
@@ -33,10 +36,18 @@ planned but not started — the local schema is already designed for that (see
   duration and All day, urgency, growth directions, notes, previous/next actions in two columns,
   and manual parameters. Related actions and directions open from every edit menu; `Ctrl+Enter`
   saves.
-- **Templates** store a name, average duration and growth directions; they affect growth
+- Growth directions show their emoji on calendar events and Current Actions cards, urgency is
+  shown everywhere as a scales-on-fire icon (hover: "Urgency to Keep in Balance"), and actions can
+  be linked to a direction right from the direction's edit menu.
+- Hover a growth-direction emoji on an event or card to see the direction's name; the growth
+  direction menu shows level, progress with a bar, weight, urgency and the fact reached so far.
+- **Templates** (searchable, sorted by name ignoring emojis, with Start now / Finish now buttons)
+  store a name, average duration, notes and growth directions; they affect growth
   directions only after **Use** creates an action. **Import CSV** on the Templates screen loads
   templates from a Notion export. Current Actions colours cards by urgency.
-- **Undo** (snackbar / Ctrl+Z) for destructive and state-changing operations.
+- **Undo** (a toast shown above every dialog, or Ctrl+Z) for destructive and state-changing
+  operations, including the buttons inside the edit menu. Postponing to the next morning / after
+  work uses the action's own date.
 - Light and dark glass look, a collapsible icon-only side bar, and Istanbul wall-clock time for
   all scheduling rules.
 

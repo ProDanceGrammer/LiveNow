@@ -9,13 +9,17 @@
 /// The list queries filter in SQL with the same rule — keep `doneBeforeSql()`
 /// in `data/queries.dart` in sync (`test/data/list_queries_test.dart` checks
 /// that they agree).
+/// [nowUtc] pins "now" (the board passes the same instant to SQL and cards).
 bool isDoneBefore({
   required DateTime? startAt,
   required DateTime? endAt,
   required bool isAllDay,
   required bool done,
+  DateTime? nowUtc,
 }) {
   if (startAt == null) return done;
-  if (!isAllDay) return endAt != null && endAt.isBefore(DateTime.now().toUtc());
+  if (!isAllDay) {
+    return endAt != null && endAt.isBefore(nowUtc ?? DateTime.now().toUtc());
+  }
   return done;
 }

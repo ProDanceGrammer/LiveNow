@@ -8,11 +8,16 @@ import '../../core/ids.dart';
 import '../../data/database.dart';
 import '../../domain/template_import_service.dart';
 import '../dialog_stack.dart';
+import '../open_entity.dart';
+import '../widgets/app_toast.dart';
 import '../providers.dart';
 import '../widgets/action_import_summary_dialog.dart';
 import 'actions_section.dart' show actionsCsvPickerProvider;
 import '../widgets/glass.dart';
 import '../widgets/metric_picker.dart';
+import '../widgets/notes_document.dart';
+import '../widgets/notes_editor.dart';
+import '../widgets/section_block.dart';
 
 final templateImportServiceProvider = Provider<TemplateImportService>(
   (ref) => TemplateImportService(ref.watch(databaseProvider)),
@@ -20,78 +25,118 @@ final templateImportServiceProvider = Provider<TemplateImportService>(
 
 /// Saved quick-entry presets: "Use" instantiates a new action from one in a
 /// single tap.
-class TemplatesScreen extends ConsumerWidget {
+class TemplatesScreen extends ConsumerStatefulWidget {
   const TemplatesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TemplatesScreen> createState() => _TemplatesScreenState();
+}
+
+class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
     final templatesAsync = ref.watch(templatesProvider);
 
     return Scaffold(
       body: Column(
         children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: TextButton.icon(
-                key: const ValueKey('import-templates-csv'),
-                icon: const Icon(Icons.upload_file),
-                label: const Text('Import CSV'),
-                onPressed: () => _importCsv(context, ref),
-              ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('templates-search'),
+                    decoration: const InputDecoration(
+                      hintText: 'Search templates',
+                      prefixIcon: Icon(Icons.search),
+                      isDense: true,
+                    ),
+                    onChanged: (v) => setState(() => _query = v.toLowerCase()),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton.icon(
+                  key: const ValueKey('import-templates-csv'),
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Import CSV'),
+                  onPressed: () => _importCsv(context, ref),
+                ),
+              ],
             ),
           ),
           Expanded(
             child: templatesAsync.when(
-              data: (templates) => templates.isEmpty
-                  ? const Center(child: Text('No templates yet.'))
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: templates.length,
-                      itemBuilder: (context, i) {
-                        final t = templates[i];
-                        final tile = ListTile(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+              data: (all) {
+                if (all.isEmpty) {
+                  return const Center(child: Text('No templates yet.'));
+                }
+                final templates = _query.isEmpty
+                    ? all
+                    : [
+                        for (final t in all)
+                          if (t.name.toLowerCase().contains(_query)) t,
+                      ];
+                if (templates.isEmpty) {
+                  return const Center(child: Text('No matches'));
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: templates.length,
+                  itemBuilder: (context, i) {
+                    final t = templates[i];
+                    final tile = ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      title: Text(t.name),
+                      subtitle: _durationLabel(t) == null
+                          ? null
+                          : Text(_durationLabel(t)!),
+                      onTap: () => _showEditor(context, existing: t),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            key: ValueKey('template-start-${t.id}'),
+                            icon: const Icon(Icons.play_arrow),
+                            tooltip: 'Start now',
+                            onPressed: () => _run(context, ref, t, false),
                           ),
-                          title: Text(t.name),
-                          subtitle: _durationLabel(t) == null
-                              ? null
-                              : Text(_durationLabel(t)!),
-                          onTap: () => _showEditor(context, existing: t),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              FilledButton.tonal(
-                                onPressed: () => _use(context, ref, t),
-                                child: const Text('Use'),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                tooltip: 'Delete',
-                                onPressed: () => _delete(ref, t.id),
-                              ),
-                            ],
+                          IconButton(
+                            key: ValueKey('template-finish-${t.id}'),
+                            icon: const Icon(Icons.stop),
+                            tooltip: 'Finish now',
+                            onPressed: () => _run(context, ref, t, true),
                           ),
-                        );
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            tooltip: 'Delete',
+                            onPressed: () => _confirmDelete(context, ref, t),
                           ),
-                          child: GlassSurface(
-                            radius: 16,
-                            shadow: false,
-                            blurWindow: false,
-                            child: Material(
-                              type: MaterialType.transparency,
-                              child: tile,
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+                        ],
+                      ),
+                    );
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      child: GlassSurface(
+                        radius: 16,
+                        shadow: false,
+                        blurWindow: false,
+                        child: Material(
+                          type: MaterialType.transparency,
+                          child: tile,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text('Error: $e')),
             ),
@@ -131,16 +176,31 @@ class TemplatesScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _use(
+  /// Start now ([finished] false) or Finish now (true): creates the action
+  /// from the template; the toast's Undo deletes it again.
+  Future<void> _run(
     BuildContext context,
     WidgetRef ref,
     ActionTemplate t,
+    bool finished,
   ) async {
-    await ref.read(actionServiceProvider).createFromTemplate(t.id);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Created "${t.name}"')));
-    }
+    // Looked up before the await (the tile may be gone afterwards).
+    final overlay = rootOverlayOf(context);
+    final service = ref.read(actionServiceProvider);
+    final id = finished
+        ? await service.createFromTemplateFinished(t.id)
+        : await service.createFromTemplateStarted(t.id);
+    showAppToast(
+      overlay,
+      leading: finished ? 'Finished "' : 'Started "',
+      name: t.name,
+      trailing: '"',
+      onNameTap: () {
+        if (context.mounted) openActionById(context, ref, id);
+      },
+      actionLabel: 'Undo',
+      onAction: () => service.deleteAction(id),
+    );
   }
 
   Future<void> _showEditor(BuildContext context, {ActionTemplate? existing}) {
@@ -148,6 +208,37 @@ class TemplatesScreen extends ConsumerWidget {
       context: context,
       builder: (_) => _TemplateEditorDialog(existing: existing),
     );
+  }
+
+  /// Deleting is final (no Undo), so ask first.
+  Future<void> _confirmDelete(
+    BuildContext context,
+    WidgetRef ref,
+    ActionTemplate t,
+  ) async {
+    final ok = await showStackedDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete template?'),
+        content: Text('"${t.name}" will be deleted and cannot be restored.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('confirm-delete-template'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _delete(ref, t.id);
   }
 
   Future<void> _delete(WidgetRef ref, String id) {
@@ -174,6 +265,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
   late final TextEditingController _minutesController;
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
+  String? _notes;
 
   @override
   void initState() {
@@ -191,6 +283,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
       text: (payload?['estimatedMinutes'] as int?)?.toString() ?? '',
     );
     _isAllDay = payload?['isAllDay'] as bool? ?? false;
+    _notes = payload?['notes'] as String?;
     _selectedMetricIds =
         ((payload?['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
             .toSet();
@@ -208,7 +301,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
     return AlertDialog(
       title: Text(widget.existing == null ? 'New template' : 'Edit template'),
       content: SizedBox(
-        width: 420,
+        width: 560,
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
@@ -228,12 +321,22 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('All day'),
-                  value: _isAllDay,
-                  onChanged: (v) => setState(() => _isAllDay = v),
+                const SizedBox(height: 12),
+                // Compact (text + switch only) so its hover area stays small
+                // and never overlaps the neighbouring fields.
+                Row(
+                  children: [
+                    const Text('All day'),
+                    const SizedBox(width: 4),
+                    Switch(
+                      key: const ValueKey('template-all-day'),
+                      value: _isAllDay,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => setState(() => _isAllDay = v),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 12),
                 TextFormField(
                   key: const ValueKey('template-duration'),
                   controller: _minutesController,
@@ -253,6 +356,32 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
                   label: 'Growth directions',
                   selectedIds: _selectedMetricIds,
                   onChanged: (ids) => setState(() => _selectedMetricIds = ids),
+                ),
+                // Collapsed unless the template already has notes;
+                // `maintainState: false` keeps the editor out of the tree
+                // until opened (the latest JSON lives in `_notes`).
+                SectionBlock(
+                  padding: kSectionTileBlockPadding,
+                  child: ExpansionTile(
+                    key: const ValueKey('template-notes-section'),
+                    title: const Text('Notes'),
+                    shape: const Border(),
+                    collapsedShape: const Border(),
+                    initiallyExpanded:
+                        _notes != null &&
+                        !notesDocumentIsEmpty(notesDocumentFromJson(_notes)),
+                    maintainState: false,
+                    tilePadding: kSectionTilePadding,
+                    childrenPadding: kSectionChildrenPadding,
+                    children: [
+                      NotesEditor(
+                        initialJson: _notes,
+                        onChanged: (json) => _notes = json,
+                        onSave: _save,
+                        height: 260,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -279,6 +408,9 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
       'estimatedMinutes': ?int.tryParse(_minutesController.text.trim()),
       'isAllDay': _isAllDay,
       'metricIds': _selectedMetricIds.toList(),
+      // Notes document JSON (copied into the action by
+      // ActionService.createFromTemplate); omitted when empty.
+      'notes': ?_notes,
     });
 
     await db

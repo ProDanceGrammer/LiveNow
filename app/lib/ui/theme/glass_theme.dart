@@ -23,6 +23,7 @@ class GlassTheme extends ThemeExtension<GlassTheme> {
     required this.lavender,
     required this.green,
     required this.pink,
+    required this.urgencyIcon,
     this.blurSigma = 18,
   });
 
@@ -63,6 +64,12 @@ class GlassTheme extends ThemeExtension<GlassTheme> {
   final Color green;
   final Color pink;
 
+  /// Violet of the urgency parameter icon (everywhere except the Balance
+  /// board header). Contrast >= 3:1 on the glass surfaces and the urgency band
+  /// backgrounds (worst case: dark theme on the deep yellow band, 3.17:1;
+  /// light theme on the red band, 3.57:1); see `test/ui/urgency_icon_contrast_test.dart`.
+  final Color urgencyIcon;
+
   /// Blur of the pre-rendered background that surfaces show through.
   final double blurSigma;
 
@@ -93,6 +100,7 @@ class GlassTheme extends ThemeExtension<GlassTheme> {
     lavender: Color(0xFF8470F0),
     green: Color(0xFF3FC48F),
     pink: Color(0xFFF07BAA),
+    urgencyIcon: Color(0xFF5B3BD0),
   );
 
   static const darkTheme = GlassTheme(
@@ -118,6 +126,7 @@ class GlassTheme extends ThemeExtension<GlassTheme> {
     lavender: Color(0xFFA99CF5),
     green: Color(0xFF74D9AB),
     pink: Color(0xFFF2A3C3),
+    urgencyIcon: Color(0xFFD4C8FF),
   );
 
   @override
@@ -139,6 +148,7 @@ class GlassTheme extends ThemeExtension<GlassTheme> {
     Color? lavender,
     Color? green,
     Color? pink,
+    Color? urgencyIcon,
     double? blurSigma,
   }) => GlassTheme(
     dark: dark ?? this.dark,
@@ -158,6 +168,7 @@ class GlassTheme extends ThemeExtension<GlassTheme> {
     lavender: lavender ?? this.lavender,
     green: green ?? this.green,
     pink: pink ?? this.pink,
+    urgencyIcon: urgencyIcon ?? this.urgencyIcon,
     blurSigma: blurSigma ?? this.blurSigma,
   );
 

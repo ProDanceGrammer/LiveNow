@@ -59,6 +59,7 @@ class ActionsSection extends ConsumerStatefulWidget {
 class _ActionsSectionState extends ConsumerState<ActionsSection>
     with SingleTickerProviderStateMixin {
   final _visited = <ActionsSub>{};
+  bool _calendarShown = false;
   late final TabController _tabs;
 
   static Widget _viewFor(ActionsSub sub) => switch (sub) {
@@ -116,6 +117,17 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
   @override
   Widget build(BuildContext context) {
     _visited.add(widget.sub);
+    // The shell hides inactive sections with a disabled TickerMode, so this
+    // is "the Actions section is on screen". Hand keyboard focus to the
+    // Calendar whenever it becomes the shown view (after this frame, once
+    // ExcludeFocus has been lifted from it).
+    final shown = widget.sub == ActionsSub.calendar && TickerMode.valuesOf(context).enabled;
+    if (shown && !_calendarShown) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.read(calendarFocusRequestProvider.notifier).state++;
+      });
+    }
+    _calendarShown = shown;
     return Column(
       children: [
         Row(

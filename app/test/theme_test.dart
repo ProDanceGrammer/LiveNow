@@ -7,10 +7,23 @@ import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/main.dart';
 import 'package:livenow/ui/providers.dart';
+import 'package:livenow/ui/theme/app_theme.dart';
 import 'package:livenow/ui/theme_mode.dart';
 
 void main() {
   setUpAll(initPostponeTimeZoneData);
+
+  test('list and expansion tile themes use rounded shapes', () {
+    for (final b in Brightness.values) {
+      final t = buildAppTheme(b);
+      expect(t.listTileTheme.shape, isA<RoundedRectangleBorder>());
+      expect(t.expansionTileTheme.shape, isA<RoundedRectangleBorder>());
+      expect(
+        t.expansionTileTheme.collapsedShape,
+        isA<RoundedRectangleBorder>(),
+      );
+    }
+  });
 
   testWidgets('dark mode toggles via provider, menu and Ctrl+Shift+L', (
     tester,

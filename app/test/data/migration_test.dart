@@ -310,13 +310,14 @@ void main() {
     );
   }
 
-  test('v7 database upgrades to v8: priority column gone, data and indexes intact',
-      () async {
-    final db = AppDatabase.forTesting(
-      NativeDatabase.memory(
-        setup: (raw) {
-          raw.execute(_countableActivitiesV2);
-          raw.execute('''
+  test(
+    'v7 database upgrades to v8: priority column gone, data and indexes intact',
+    () async {
+      final db = AppDatabase.forTesting(
+        NativeDatabase.memory(
+          setup: (raw) {
+            raw.execute(_countableActivitiesV2);
+            raw.execute('''
             CREATE TABLE actions (
               id TEXT NOT NULL PRIMARY KEY,
               name TEXT NOT NULL,
@@ -339,66 +340,166 @@ void main() {
               CHECK (priority IS NULL OR priority IN ('A1','B2')),
               CHECK (postpone_flex IN ('flexible','hard','impossible'))
             )''');
+            raw.execute(_metricsV6);
+            raw.execute(_metricDependenciesV3);
+            raw.execute(_actionMetricsOld);
+            raw.execute(
+              'CREATE TABLE action_dependencies ('
+              'id TEXT NOT NULL PRIMARY KEY, '
+              'predecessor_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE, '
+              'successor_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE)',
+            );
+            raw.execute(
+              'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
+            );
+            raw.execute(
+              'CREATE INDEX idx_actions_allday_start ON actions (is_all_day, start_at)',
+            );
+            raw.execute('CREATE INDEX idx_actions_start ON actions (start_at)');
+            raw.execute(
+              "INSERT INTO actions (id, name, priority, postpone_flex, created_at, updated_at) "
+              "VALUES ('a1', 'One', 'B2', 'hard', 't', 't'), "
+              "('a2', 'Two', NULL, 'flexible', 't', 't')",
+            );
+            raw.execute("INSERT INTO metrics (id, name) VALUES ('m1', 'Dir')");
+            raw.execute(
+              "INSERT INTO action_metrics (id, action_id, metric_id) "
+              "VALUES ('l1', 'a1', 'm1')",
+            );
+            raw.execute(
+              "INSERT INTO action_dependencies (id, predecessor_id, successor_id) "
+              "VALUES ('d1', 'a1', 'a2')",
+            );
+            raw.execute('PRAGMA user_version = 7');
+            raw.execute('PRAGMA foreign_keys = ON');
+          },
+        ),
+      );
+      addTearDown(db.close);
+
+      final cols = await db.customSelect('PRAGMA table_info(actions)').get();
+      expect(
+        cols.map((c) => c.read<String>('name')),
+        isNot(contains('priority')),
+      );
+
+      final actions = await db.select(db.actionsTable).get();
+      expect(actions.map((a) => (a.id, a.name, a.postponeFlex)), [
+        ('a1', 'One', 'hard'),
+        ('a2', 'Two', 'flexible'),
+      ]);
+      expect(await db.select(db.actionMetricsTable).get(), hasLength(1));
+      expect(await db.select(db.actionDependenciesTable).get(), hasLength(1));
+
+      final idx = await db
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name LIKE 'idx_actions_%'",
+          )
+          .get();
+      expect(idx.map((r) => r.read<String>('name')).toSet(), {
+        'idx_actions_done_start',
+        'idx_actions_allday_start',
+        'idx_actions_start',
+      });
+    },
+  );
+
+  test('v8 database upgrades to v9: notes_text added and backfilled', () async {
+    const notes =
+        '{"document":{"type":"page","children":[{"type":"paragraph",'
+        '"data":{"delta":[{"insert":"Перевірити ПОШТУ"}]}}]}}';
+    final db = AppDatabase.forTesting(
+      NativeDatabase.memory(
+        setup: (raw) {
+          raw.execute(_countableActivitiesV2);
+          raw.execute('''
+            CREATE TABLE actions (
+              id TEXT NOT NULL PRIMARY KEY,
+              name TEXT NOT NULL,
+              done INTEGER NOT NULL DEFAULT 0,
+              postpone_flex TEXT NOT NULL DEFAULT 'flexible',
+              depth_level TEXT NULL,
+              start_at TEXT NULL,
+              end_at TEXT NULL,
+              is_all_day INTEGER NOT NULL DEFAULT 0,
+              estimated_minutes INTEGER NULL,
+              result_note TEXT NULL,
+              notes TEXT NULL,
+              completed_at TEXT NULL,
+              sequence_number INTEGER NULL,
+              countable_activity_id TEXT NULL REFERENCES countable_activities(id)
+                ON DELETE SET NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )''');
           raw.execute(_metricsV6);
           raw.execute(_metricDependenciesV3);
           raw.execute(_actionMetricsOld);
           raw.execute(
-            'CREATE TABLE action_dependencies ('
-            'id TEXT NOT NULL PRIMARY KEY, '
-            'predecessor_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE, '
-            'successor_id TEXT NOT NULL REFERENCES actions(id) ON DELETE CASCADE)',
+            "INSERT INTO actions (id, name, notes, created_at, updated_at) "
+            "VALUES ('a1', 'With notes', '${notes.replaceAll("'", "''")}', 't', 't'), "
+            "('a2', 'No notes', NULL, 't', 't'), "
+            "('a3', 'Corrupt', 'not json', 't', 't')",
           );
-          raw.execute(
-            'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
-          );
-          raw.execute(
-            'CREATE INDEX idx_actions_allday_start ON actions (is_all_day, start_at)',
-          );
-          raw.execute('CREATE INDEX idx_actions_start ON actions (start_at)');
-          raw.execute(
-            "INSERT INTO actions (id, name, priority, postpone_flex, created_at, updated_at) "
-            "VALUES ('a1', 'One', 'B2', 'hard', 't', 't'), "
-            "('a2', 'Two', NULL, 'flexible', 't', 't')",
-          );
-          raw.execute(
-            "INSERT INTO metrics (id, name) VALUES ('m1', 'Dir')",
-          );
-          raw.execute(
-            "INSERT INTO action_metrics (id, action_id, metric_id) "
-            "VALUES ('l1', 'a1', 'm1')",
-          );
-          raw.execute(
-            "INSERT INTO action_dependencies (id, predecessor_id, successor_id) "
-            "VALUES ('d1', 'a1', 'a2')",
-          );
-          raw.execute('PRAGMA user_version = 7');
+          raw.execute('PRAGMA user_version = 8');
           raw.execute('PRAGMA foreign_keys = ON');
         },
       ),
     );
     addTearDown(db.close);
 
-    final cols = await db.customSelect('PRAGMA table_info(actions)').get();
-    expect(cols.map((c) => c.read<String>('name')), isNot(contains('priority')));
+    final rows = {
+      for (final a in await db.select(db.actionsTable).get()) a.id: a,
+    };
+    expect(rows['a1']!.notes, notes);
+    expect(rows['a1']!.notesText, 'перевірити пошту');
+    expect(rows['a2']!.notesText, isNull);
+    expect(rows['a3']!.notesText, isNull);
+    expect(rows['a3']!.name, 'Corrupt');
+  });
 
-    final actions = await db.select(db.actionsTable).get();
-    expect(actions.map((a) => (a.id, a.name, a.postponeFlex)), [
-      ('a1', 'One', 'hard'),
-      ('a2', 'Two', 'flexible'),
-    ]);
-    expect(await db.select(db.actionMetricsTable).get(), hasLength(1));
-    expect(await db.select(db.actionDependenciesTable).get(), hasLength(1));
-
-    final idx = await db
-        .customSelect(
-          "SELECT name FROM sqlite_master WHERE type='index' "
-          "AND name LIKE 'idx_actions_%'",
-        )
-        .get();
-    expect(
-      idx.map((r) => r.read<String>('name')).toSet(),
-      {'idx_actions_done_start', 'idx_actions_allday_start', 'idx_actions_start'},
+  test('v7 -> v9 rebuild keeps rows and adds notes_text', () async {
+    final db = AppDatabase.forTesting(
+      NativeDatabase.memory(
+        setup: (raw) {
+          raw.execute(_countableActivitiesV2);
+          raw.execute('''
+            CREATE TABLE actions (
+              id TEXT NOT NULL PRIMARY KEY,
+              name TEXT NOT NULL,
+              done INTEGER NOT NULL DEFAULT 0,
+              priority TEXT NULL,
+              postpone_flex TEXT NOT NULL DEFAULT 'flexible',
+              depth_level TEXT NULL,
+              start_at TEXT NULL,
+              end_at TEXT NULL,
+              is_all_day INTEGER NOT NULL DEFAULT 0,
+              estimated_minutes INTEGER NULL,
+              result_note TEXT NULL,
+              notes TEXT NULL,
+              completed_at TEXT NULL,
+              sequence_number INTEGER NULL,
+              countable_activity_id TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )''');
+          raw.execute(_metricsV6);
+          raw.execute(_metricDependenciesV3);
+          raw.execute(_actionMetricsOld);
+          raw.execute(
+            "INSERT INTO actions (id, name, notes, created_at, updated_at) "
+            "VALUES ('a1', 'One', "
+            "'{\"document\":{\"type\":\"page\",\"children\":[{\"type\":\"paragraph\","
+            "\"data\":{\"delta\":[{\"insert\":\"Hello\"}]}}]}}', 't', 't')",
+          );
+          raw.execute('PRAGMA user_version = 7');
+        },
+      ),
     );
+    addTearDown(db.close);
+    final a = (await db.select(db.actionsTable).get()).single;
+    expect((a.name, a.notesText), ('One', 'hello'));
   });
 
   test('v1 database (upgraded to v8) still gets the v2 columns and activities table', () async {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
+import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/undo.dart';
 import 'package:livenow/ui/widgets/quick_action_bar.dart';
@@ -60,7 +61,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
   }
 
-  testWidgets('undo snackbar auto-dismisses after 5s and clears lastUndo', (
+  testWidgets('undo toast auto-dismisses after 5s and clears lastUndo', (
     tester,
   ) async {
     await pumpHarness(tester);
@@ -73,7 +74,6 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
     });
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400)); // enter animation
     expect(find.text('Renamed'), findsOneWidget);
     expect(container.read(lastUndoProvider), isNotNull);
 
@@ -81,19 +81,61 @@ void main() {
     expect(find.text('Renamed'), findsOneWidget);
     expect(container.read(lastUndoProvider), isNotNull);
 
-    await tester.pump(
-      const Duration(milliseconds: 700),
-    ); // past 5s (timer starts after enter animation)
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pumpAndSettle();
-    // runUndoable was started inside runAsync (real zone), so its closed.then
-    // continuation runs on the real event loop: yield to it.
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 50)),
-    );
+    await tester.pump(const Duration(milliseconds: 700)); // past 5s
+    await tester.pump();
     expect(find.text('Renamed'), findsNothing);
     expect(container.read(lastUndoProvider), isNull);
 
+    await unmount(tester);
+  });
+
+  testWidgets('the Undo toast is above an open dialog and can be clicked', (
+    tester,
+  ) async {
+    await pumpHarness(tester);
+    final context = tester.element(find.text('go'));
+    // Open a dialog, then trigger the undoable operation from inside it.
+    showStackedDialog<void>(
+      context: context,
+      builder: (_) => Consumer(
+        builder: (dialogContext, ref, _) => AlertDialog(
+          content: TextButton(
+            onPressed: () => runUndoable(
+              dialogContext,
+              ref,
+              actionId,
+              'Renamed',
+              () =>
+                  (db.update(
+                    db.actionsTable,
+                  )..where((t) => t.id.equals(actionId))).write(
+                    const ActionsTableCompanion(name: Value('changed')),
+                  ),
+            ),
+            child: const Text('go in dialog'),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.runAsync(() async {
+      await tester.tap(find.text('go in dialog'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+    expect(find.text('Renamed'), findsOneWidget);
+    expect(find.text('Undo').hitTestable(), findsOneWidget);
+    expect(await currentName(tester), 'changed');
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo'));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    });
+    await tester.pump();
+    expect(await currentName(tester), 'original');
+    expect(find.text('Undo'), findsNothing);
+    resetStackedDialogsForTest();
     await unmount(tester);
   });
 

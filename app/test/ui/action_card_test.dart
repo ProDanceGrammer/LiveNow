@@ -7,6 +7,7 @@ import 'package:livenow/data/database.dart';
 import 'package:livenow/data/queries.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/action_card.dart';
+import 'package:livenow/ui/widgets/round_check.dart';
 import 'package:livenow/ui/widgets/glass_icon_tile.dart';
 
 void main() {
@@ -107,7 +108,7 @@ void main() {
     await pumpCard(tester, allDay: true);
     final box = find.byKey(const ValueKey('allDayCheckbox'));
     expect(box, findsOneWidget);
-    expect(tester.widget<Checkbox>(box).value, isFalse);
+    expect(tester.widget<RoundCheck>(box).value, isFalse);
 
     Future<bool> doneInDb() async => (await tester.runAsync(
       () => (db.select(
@@ -125,7 +126,7 @@ void main() {
 
   testWidgets('timed card has no checkbox', (tester) async {
     await pumpCard(tester);
-    expect(find.byType(Checkbox), findsNothing);
+    expect(find.byType(RoundCheck), findsNothing);
     await unmount(tester);
   });
 
@@ -327,6 +328,85 @@ void main() {
     await g.moveTo(const Offset(2, 700));
     await tester.pump();
     expect(tiles(tester), 0);
+    await unmount(tester);
+  });
+  testWidgets('direction emojis show bottom-right, beside the time line', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final withTime = ActionListItem(
+      id: 'a1',
+      name: 'Timed',
+      done: false,
+      isAllDay: false,
+      startAt: DateTime.utc(2026, 1, 5, 9),
+      endAt: DateTime.utc(2026, 1, 5, 10),
+    );
+    final bare = ActionListItem(
+      id: 'a2',
+      name: 'Bare',
+      done: false,
+      isAllDay: true,
+    );
+    final plain = ActionListItem(
+      id: 'a3',
+      name: 'Plain',
+      done: false,
+      isAllDay: true,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          actionDirectionIconsProvider.overrideWithValue({
+            'a1': '\u{1F4AA}\u{1F4DA}',
+            'a2': '\u{1F3C3}',
+          }),
+          actionDirectionNamesProvider.overrideWithValue({
+            'a1': ['Fitness and reading'],
+            'a2': ['Running'],
+          }),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                ActionCard(action: withTime),
+                ActionCard(action: bare),
+                ActionCard(action: plain),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final timed = find.text('\u{1F4AA}\u{1F4DA}');
+    expect(timed, findsOneWidget);
+    expect(find.text('\u{1F3C3}'), findsOneWidget);
+    // Right half of the card, same row as the time label.
+    final card = tester.getRect(find.byType(ActionCard).first);
+    expect(tester.getCenter(timed).dx, greaterThan(card.center.dx));
+    expect(card.height, lessThan(80));
+    // Hovering the emoji shows the direction's name as a tooltip.
+    expect(find.text('Running'), findsNothing);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(find.text('\u{1F3C3}')));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('Running'), findsOneWidget);
+    await mouse.moveTo(const Offset(1300, 850));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Running'), findsNothing);
+    // The icon-less all-day card has no second row at all.
+    expect(
+      tester.getSize(find.byType(ActionCard).last).height,
+      lessThan(tester.getSize(find.byType(ActionCard).at(1)).height),
+    );
     await unmount(tester);
   });
 }

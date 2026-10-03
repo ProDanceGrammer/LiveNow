@@ -12,6 +12,7 @@ import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/screens/growth_directions_screen.dart';
 import 'package:livenow/ui/widgets/metric_picker.dart';
+import 'package:livenow/ui/widgets/param_icons.dart';
 
 void main() {
   setUpAll(initPostponeTimeZoneData);
@@ -391,7 +392,7 @@ void main() {
       );
       await settle(tester);
 
-      await tester.tap(find.text('Add…'));
+      await tester.tap(find.byTooltip('Add…'));
       await animate(tester);
       await tester.enterText(find.byType(TextField), 'sleep');
       await tester.pump();
@@ -407,4 +408,29 @@ void main() {
       await unmount(tester);
     });
   });
+  testWidgets(
+    'Balance headers: icon + word for Direction, icons with tooltips',
+    (tester) async {
+      await pumpScreen(
+        tester,
+        seed: (m, a) => seedWeekly(m, a, [('Alpha', 0)]),
+      );
+
+      expect(find.byType(ParamLabel), findsWidgets);
+      expect(find.text('Direction'), findsWidgets);
+      for (final tip in [
+        'Urgency to Keep in Balance',
+        'Progress',
+        'Weight',
+        'Level',
+      ]) {
+        expect(find.byTooltip(tip), findsWidgets, reason: tip);
+      }
+      // Icon-only columns: no words any more.
+      expect(find.text('Urgency'), findsNothing);
+      expect(find.text('Lvl'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await unmount(tester);
+    },
+  );
 }

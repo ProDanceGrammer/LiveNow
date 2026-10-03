@@ -525,4 +525,35 @@ void main() {
       },
     );
   });
+
+  group('linkAction / unlinkAction', () {
+    test('idempotent link, unlink only that pair, cascade-safe', () async {
+      final actions = ActionService(db);
+      final a = await actions.createAction(name: 'A');
+      final b = await actions.createAction(name: 'B');
+      final m1 = await service.saveMetric(name: 'M1', kind: MetricKind.boolean);
+      final m2 = await service.saveMetric(name: 'M2', kind: MetricKind.boolean);
+
+      await service.linkAction(a, m1);
+      await service.linkAction(a, m1);
+      await service.linkAction(a, m2);
+      await service.linkAction(b, m1);
+      Future<Set<(String, String)>> links() async =>
+          (await db.select(db.actionMetricsTable).get())
+              .map((l) => (l.actionId, l.metricId))
+              .toSet();
+      expect(await db.select(db.actionMetricsTable).get(), hasLength(3));
+
+      await service.unlinkAction(a, m1);
+      expect(await links(), {(a, m2), (b, m1)});
+      await service.unlinkAction(a, m1); // no-op
+      expect(await links(), {(a, m2), (b, m1)});
+      // Rows themselves stay.
+      expect(await db.select(db.actionsTable).get(), hasLength(2));
+      expect(await db.select(db.metricsTable).get(), hasLength(2));
+
+      await service.deleteMetric(m2);
+      expect(await links(), {(b, m1)});
+    });
+  });
 }

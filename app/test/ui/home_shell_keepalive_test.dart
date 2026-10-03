@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
@@ -254,6 +255,42 @@ void main() {
     expect(_title('Growth directions'), findsOneWidget);
     expect(find.byTooltip('New action'), findsNothing);
 
+    await _unmount(tester);
+  });
+
+  testWidgets('Calendar takes keyboard focus as soon as it is shown', (
+    tester,
+  ) async {
+    await _pumpApp(tester);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(InstantRail)),
+    );
+    expect(container.read(calendarDayCountProvider), 7);
+
+    // Open the Calendar tab and press a digit WITHOUT clicking inside it.
+    await tester.tap(_switchLabel('Calendar'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.pump();
+    expect(container.read(calendarDayCountProvider), 3);
+
+    // Away to Current and back: focus is handed over again.
+    await tester.tap(_switchLabel('Current Actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(_switchLabel('Calendar'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit5);
+    await tester.pump();
+    expect(container.read(calendarDayCountProvider), 5);
+
+    // Another section and back to Actions (Calendar still active).
+    await tester.tap(find.text('Templates'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Actions').first);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
+    await tester.pump();
+    expect(container.read(calendarDayCountProvider), 4);
     await _unmount(tester);
   });
 }

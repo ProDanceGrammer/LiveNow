@@ -527,7 +527,9 @@ void main() {
     );
     await g.moveBy(const Offset(0, -8));
     await tester.pump();
-    await g.moveTo(tester.getCenter(find.byKey(const ValueKey('strip-cell-1'))));
+    await g.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('strip-cell-1'))),
+    );
     await tester.pump();
     await release(tester, g);
     await settle(tester);
@@ -555,6 +557,43 @@ void main() {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 100)),
     );
+    await unmount(tester);
+  });
+
+  testWidgets('dragging an all-day chip across the strip rebuilds no blocks', (
+    tester,
+  ) async {
+    await pump(tester);
+    final h = (await tester.runAsync(
+      () => container
+          .read(actionServiceProvider)
+          .createAction(name: 'H', startAt: at(0), isAllDay: true),
+    ))!;
+    await create(tester, 'A', at(9), at(10));
+    await useDays(tester, 3);
+
+    final from = tester.getCenter(find.byKey(ValueKey('allday-$h')));
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    await g.moveBy(const Offset(0, 8));
+    await tester.pump();
+    CalendarPerfCounters.reset();
+    for (final i in [1, 2, 1]) {
+      await g.moveTo(
+        tester.getCenter(find.byKey(ValueKey('strip-cell-$i'))) +
+            const Offset(30, 0),
+      );
+      await tester.pump();
+    }
+    expect(find.byKey(const ValueKey('chip-ghost')), findsNothing);
+    expect(CalendarPerfCounters.blockBuilds, 0);
+    expect(CalendarPerfCounters.layoutRuns, 0);
+    // Back on its own cell: nothing is written.
+    await g.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('strip-cell-0'))) +
+          const Offset(30, 0),
+    );
+    await release(tester, g);
+    expect(find.text('Undo'), findsNothing);
     await unmount(tester);
   });
 

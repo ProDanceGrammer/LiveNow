@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/legacy.dart'
 import '../domain/action_service.dart' show ScheduleChange;
 import '../domain/growth_rules.dart' show metricLabel;
 import 'providers.dart';
+import 'widgets/app_toast.dart';
 
 class _UndoEntry {
   /// Puts back whatever the quick-action changed.
@@ -14,14 +15,14 @@ class _UndoEntry {
 }
 
 /// The most recent undoable quick-action, while its ~5-second window (the
-/// same window as the snackbar offering it) is still open. Both the
-/// snackbar's "Undo" button and the global Ctrl+Z shortcut just run this
+/// same window as the toast offering it) is still open. Both the
+/// toast's "Undo" button and the global Ctrl+Z shortcut just run this
 /// entry's revert; either one clears it afterward.
 final lastUndoProvider = StateProvider<Object?>((ref) => null);
 
 /// Wraps a quick-action call (Start/Finish/Postpone/...) so it can be
 /// undone: snapshots the action's full row + occurrence history first, runs
-/// the operation, then offers a Notion-style "Undo" snackbar for 5 seconds
+/// the operation, then offers a Notion-style "Undo" toast for 5 seconds
 /// (and arms Ctrl+Z for the same window).
 Future<void> runUndoable(
   BuildContext context,
@@ -36,13 +37,13 @@ Future<void> runUndoable(
   // only shows open items, or Delete) remove this action's card from the
   // list it's currently shown in, which can unmount this widget by the time
   // the write finishes — and using `ref` after that throws. The
-  // ScaffoldMessengerState itself belongs to the stable Scaffold ancestor,
-  // and the notifier lives in the ProviderScope, so both stay valid.
-  final messenger = ScaffoldMessenger.of(context);
+  // root OverlayState belongs to the root navigator and the notifier lives in
+  // the ProviderScope, so both stay valid.
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
   final snapshot = await service.snapshot(actionId);
   await operation();
-  _offerUndo(messenger, lastUndo, description, () => service.restore(snapshot));
+  _offerUndo(overlay, lastUndo, description, () => service.restore(snapshot));
 }
 
 /// "Continue with Same Action", undoable like the other quick actions. It
@@ -54,11 +55,11 @@ Future<void> runUndoableContinue(
   String sourceId,
 ) async {
   final service = ref.read(actionServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
   final result = await service.continueSameAction(sourceId);
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     'Continued as a new action',
     () => service.undoContinue(result.undo),
@@ -66,7 +67,7 @@ Future<void> runUndoableContinue(
 }
 
 /// Deletes an action right away and offers Undo (no confirmation dialog —
-/// the Undo snackbar is the safety net). Like [runUndoableContinue], it
+/// the Undo toast is the safety net). Like [runUndoableContinue], it
 /// can't use [runUndoable]: the snapshot must also cover the action's links.
 Future<void> runUndoableDelete(
   BuildContext context,
@@ -76,14 +77,14 @@ Future<void> runUndoableDelete(
   final service = ref.read(actionServiceProvider);
   // Looked up before deleting: the card/block this context belongs to
   // disappears with the action, after which `ref` can't be used.
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
   final selected = ref.read(calendarSelectedActionProvider.notifier);
 
   final undo = await service.deleteAction(actionId);
   if (selected.state == actionId) selected.state = null;
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     'Deleted "${undo.action.name}"',
     () => service.undoDelete(undo),
@@ -103,7 +104,7 @@ Future<void> runUndoableDeleteMany(
   final ids = actionIds.toList();
   if (ids.isEmpty) return;
   final service = ref.read(actionServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
   final selected = ref.read(calendarSelectedActionProvider.notifier);
 
@@ -111,7 +112,7 @@ Future<void> runUndoableDeleteMany(
   if (undo.count == 0) return;
   if (ids.contains(selected.state)) selected.state = null;
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     undo.count == 1
         ? 'Deleted "${undo.parts.first.action.name}"'
@@ -131,13 +132,13 @@ Future<void> runUndoableMoveMany(
   final list = changes.toList();
   if (list.isEmpty) return;
   final service = ref.read(actionServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   final undo = await service.moveActions(list);
   if (undo.before.isEmpty) return;
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     description ??
         (undo.before.length == 1
@@ -155,12 +156,12 @@ Future<void> runUndoableToggleDone(
   String actionId,
 ) async {
   final service = ref.read(actionServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   final undo = await service.toggleDone(actionId);
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     undo.done ? 'Marked not done' : 'Marked done',
     () => service.undoToggleDone(undo),
@@ -176,12 +177,12 @@ Future<void> runUndoableScheduleAllDayAt(
   DateTime start,
 ) async {
   final service = ref.read(actionServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   final undo = await service.scheduleAllDayAt(actionId, start);
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     'Scheduled',
     () => service.undoMoveActions(undo),
@@ -197,12 +198,12 @@ Future<void> runUndoableMakeAllDay(
   DateTime day,
 ) async {
   final service = ref.read(actionServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   final undo = await service.makeAllDay(actionId, day);
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     'Made all-day',
     () => service.undoMoveActions(undo),
@@ -218,12 +219,12 @@ Future<void> runUndoableDeleteMetric(
   String metricId,
 ) async {
   final service = ref.read(metricServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   final undo = await service.deleteMetric(metricId);
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     'Deleted "${metricLabel(undo.metric.name, undo.metric.icon)}"',
     () => service.undoDelete(undo),
@@ -240,12 +241,12 @@ Future<void> runUndoableRemoveRelation(
   required String description,
 }) async {
   final service = ref.read(metricServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   await service.removeRelation(fromId: fromId, toId: toId);
   _offerUndo(
-    messenger,
+    overlay,
     lastUndo,
     description,
     () => service.addRelation(fromId: fromId, toId: toId),
@@ -264,18 +265,18 @@ Future<void> runUndoableLayout(
   VoidCallback? afterUndo,
 }) async {
   final service = ref.read(metricServiceProvider);
-  final messenger = ScaffoldMessenger.of(context);
+  final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(lastUndoProvider.notifier);
 
   await apply();
-  _offerUndo(messenger, lastUndo, description, () async {
+  _offerUndo(overlay, lastUndo, description, () async {
     await service.restorePositions(previous);
     afterUndo?.call();
   });
 }
 
 void _offerUndo(
-  ScaffoldMessengerState messenger,
+  OverlayState overlay,
   StateController<Object?> lastUndo,
   String description,
   Future<void> Function() revert,
@@ -283,29 +284,24 @@ void _offerUndo(
   final entry = _UndoEntry(revert);
   lastUndo.state = entry;
 
-  // Replace rather than queue: only this entry is actually undoable, so a
-  // still-queued snackbar from an earlier quick action would offer an
-  // "Undo" that no longer restores what it claims to.
-  messenger.hideCurrentSnackBar();
-  final controller = messenger.showSnackBar(
-    SnackBar(
-      content: Text(description),
-      // SnackBars with an action persist by default (duration ignored).
-      persist: false,
-      duration: const Duration(seconds: 5),
-      action: SnackBarAction(
-        label: 'Undo',
-        onPressed: () => _undoLast(lastUndo),
-      ),
-    ),
+  // Shown in the root overlay (above dialogs, still clickable). A new toast
+  // replaces the previous one: only this entry is actually undoable.
+  showUndoToast(
+    overlay,
+    description,
+    onUndo: () => _undoLast(lastUndo),
+    onClosed: () {
+      try {
+        if (identical(lastUndo.state, entry)) lastUndo.state = null;
+      } catch (_) {
+        // The provider container is already gone.
+      }
+    },
   );
-  controller.closed.then((_) {
-    if (identical(lastUndo.state, entry)) lastUndo.state = null;
-  });
 }
 
 /// Reverts the most recent undoable quick-action, if its window hasn't
-/// closed yet. Used by the global Ctrl+Z shortcut; the snackbar's "Undo"
+/// closed yet. Used by the global Ctrl+Z shortcut; the toast's "Undo"
 /// button does the same through [_undoLast].
 Future<void> performUndo(WidgetRef ref) =>
     _undoLast(ref.read(lastUndoProvider.notifier));

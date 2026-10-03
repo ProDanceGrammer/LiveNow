@@ -41,6 +41,10 @@ class ActionsTable extends Table {
   /// editor in the action dialog; `result_note` stays a separate, unused
   /// plain "outcome" field.
   TextColumn get notes => text().nullable()();
+
+  /// Lower-cased plain text of [notes], derived (see `notesPlainText`) and
+  /// written next to it; only used by the All list's notes search.
+  TextColumn get notesText => text().nullable()();
   TextColumn get completedAt => text().nullable()();
 
   /// Position in a "Continue with Same Action" chain (`[#2] Read a Bible`).

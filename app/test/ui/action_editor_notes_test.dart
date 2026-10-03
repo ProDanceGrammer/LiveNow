@@ -106,20 +106,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   }
 
-  ExpansionTile notesTile(WidgetTester tester) => tester.widget<ExpansionTile>(
-    find.widgetWithText(ExpansionTile, 'Notes'),
-  );
+  ExpansionTile notesTile(WidgetTester tester) =>
+      tester.widget<ExpansionTile>(find.widgetWithText(ExpansionTile, 'Notes'));
 
   NotesEditorState notesState(WidgetTester tester) =>
       tester.state<NotesEditorState>(find.byType(NotesEditor));
 
-  String notesText(WidgetTester tester) => notesState(tester)
-      .editorState
-      .document
-      .root
-      .children
-      .map((n) => n.delta?.toPlainText() ?? '')
-      .join('\n');
+  String notesText(WidgetTester tester) =>
+      notesState(tester).editorState.document.root.children
+          .map((n) => n.delta?.toPlainText() ?? '')
+          .join('\n');
 
   Future<void> typeIntoNotes(WidgetTester tester, String text) async {
     final s = notesState(tester).editorState;
@@ -290,29 +286,30 @@ void main() {
     await teardown(tester);
   });
 
-  testWidgets('expand, type, collapse, expand again keeps text; Save stores it', (
-    tester,
-  ) async {
-    setup(tester);
-    await open(tester);
-    await tester.enterText(find.byType(TextFormField).first, 'Typed');
-    await expandNotes(tester);
-    await typeIntoNotes(tester, 'hello');
-    await tester.tap(find.text('Notes'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(NotesEditor), findsNothing);
-    await tester.tap(find.text('Notes'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(NotesEditor), findsOneWidget);
-    expect(notesText(tester), 'hello');
-    await save(tester);
-    final row = await reload(tester);
-    expect(row.notes, isNotNull);
-    expect(row.notes, contains('hello'));
-    await teardown(tester);
-  });
+  testWidgets(
+    'expand, type, collapse, expand again keeps text; Save stores it',
+    (tester) async {
+      setup(tester);
+      await open(tester);
+      await tester.enterText(find.byType(TextFormField).first, 'Typed');
+      await expandNotes(tester);
+      await typeIntoNotes(tester, 'hello');
+      await tester.tap(find.text('Notes'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(NotesEditor), findsNothing);
+      await tester.tap(find.text('Notes'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(NotesEditor), findsOneWidget);
+      expect(notesText(tester), 'hello');
+      await save(tester);
+      final row = await reload(tester);
+      expect(row.notes, isNotNull);
+      expect(row.notes, contains('hello'));
+      await teardown(tester);
+    },
+  );
 
   testWidgets('clearing all text then Save stores null', (tester) async {
     setup(tester);
@@ -329,32 +326,33 @@ void main() {
     await teardown(tester);
   });
 
-  testWidgets('never opening Notes leaves them null; opened notes survive Save', (
-    tester,
-  ) async {
-    setup(tester);
-    await open(tester);
-    await tester.enterText(find.byType(TextFormField).first, 'Plain');
-    await save(tester);
-    expect((await reload(tester)).notes, isNull);
-    await teardown(tester);
+  testWidgets(
+    'never opening Notes leaves them null; opened notes survive Save',
+    (tester) async {
+      setup(tester);
+      await open(tester);
+      await tester.enterText(find.byType(TextFormField).first, 'Plain');
+      await save(tester);
+      expect((await reload(tester)).notes, isNull);
+      await teardown(tester);
 
-    final row = await tester.runAsync(
-      () => db.select(db.actionsTable).getSingle(),
-    );
-    await tester.runAsync(
-      () => (db.update(db.actionsTable)).write(
-        ActionsTableCompanion(notes: Value(_json1)),
-      ),
-    );
-    final withNotes = await reload(tester);
-    expect(withNotes.id, row!.id);
-    await open(tester, existing: withNotes);
-    await tester.enterText(find.byType(TextFormField).first, 'Renamed');
-    await save(tester);
-    expect((await reload(tester)).notes, _json1);
-    await teardown(tester);
-  });
+      final row = await tester.runAsync(
+        () => db.select(db.actionsTable).getSingle(),
+      );
+      await tester.runAsync(
+        () =>
+            (db.update(db.actionsTable))
+                .write(ActionsTableCompanion(notes: Value(_json1))),
+      );
+      final withNotes = await reload(tester);
+      expect(withNotes.id, row!.id);
+      await open(tester, existing: withNotes);
+      await tester.enterText(find.byType(TextFormField).first, 'Renamed');
+      await save(tester);
+      expect((await reload(tester)).notes, _json1);
+      await teardown(tester);
+    },
+  );
 
   testWidgets('Expand mode needs the section open and survives collapse', (
     tester,

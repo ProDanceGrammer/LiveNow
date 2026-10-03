@@ -10,6 +10,7 @@ import '../widgets/glass.dart';
 import '../widgets/growth_direction_dialog.dart';
 import '../widgets/metric_picker.dart' show describeDirection;
 import '../widgets/mindmap_view.dart';
+import '../widgets/param_icons.dart';
 
 /// Asks the user for saved Notion pages (.htm) and returns their texts (empty
 /// = cancelled). Several files are allowed: a saved page only contains the
@@ -304,36 +305,45 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                 child: Row(
                   children: [
-                    Expanded(child: Text('Direction', style: headerStyle)),
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: ParamLabel(Param.direction, style: headerStyle),
+                      ),
+                    ),
                     SizedBox(
                       width: 72,
-                      child: Text(
-                        'Urgency',
-                        style: headerStyle,
-                        textAlign: TextAlign.right,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: ParamIcon(
+                          Param.urgency,
+                          size: 22,
+                          color: theme.colorScheme.onSurface,
+                        ),
                       ),
                     ),
-                    SizedBox(
+                    const SizedBox(
                       width: 120,
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 12),
-                        child: Text('Progress', style: headerStyle),
+                        padding: EdgeInsets.only(left: 12),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: ParamIcon(Param.progress),
+                        ),
                       ),
                     ),
-                    SizedBox(
+                    const SizedBox(
                       width: 56,
-                      child: Text(
-                        'Weight',
-                        style: headerStyle,
-                        textAlign: TextAlign.right,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: ParamIcon(Param.weight),
                       ),
                     ),
-                    SizedBox(
+                    const SizedBox(
                       width: 32,
-                      child: Text(
-                        'Lvl',
-                        style: headerStyle,
-                        textAlign: TextAlign.right,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: ParamIcon(Param.level),
                       ),
                     ),
                   ],
@@ -384,6 +394,7 @@ class _BalanceRowTile extends StatelessWidget {
     final m = row.metric;
     final s = row.stat;
     return InkWell(
+      borderRadius: BorderRadius.circular(12),
       onTap: () => GrowthDirectionDialog.show(context, existing: m),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -556,6 +567,7 @@ class _ListTabState extends ConsumerState<_ListTab> {
                       const SizedBox(width: 12),
                       DropdownButton<_Sort>(
                         dropdownColor: context.glass.fillDialog,
+                        borderRadius: BorderRadius.circular(14),
                         value: _sort,
                         items: const [
                           DropdownMenuItem(
@@ -580,6 +592,7 @@ class _ListTabState extends ConsumerState<_ListTab> {
                       const SizedBox(width: 12),
                       DropdownButton<MetricKind?>(
                         dropdownColor: context.glass.fillDialog,
+                        borderRadius: BorderRadius.circular(14),
                         value: _kind,
                         items: const [
                           DropdownMenuItem(
@@ -628,10 +641,25 @@ class _ListTabState extends ConsumerState<_ListTab> {
                                       ),
                                     ),
                                     title: Text(m.label),
-                                    subtitle: Text(
-                                      '${describeDirection(m)}'
-                                      '${m.isMain ? ' · main' : ''}'
-                                      ' · weight ${m.weight.round()}',
+                                    subtitle: Text.rich(
+                                      TextSpan(
+                                        children: [
+                                          TextSpan(
+                                            text:
+                                                '${describeDirection(m)}'
+                                                '${m.isMain ? ' · main' : ''}'
+                                                ' · ',
+                                          ),
+                                          WidgetSpan(
+                                            alignment:
+                                                PlaceholderAlignment.middle,
+                                            child: ParamValue.weight(
+                                              '${m.weight.round()}',
+                                              size: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                     trailing: SizedBox(
                                       width: 190,
@@ -644,9 +672,21 @@ class _ListTabState extends ConsumerState<_ListTab> {
                                             ),
                                           ),
                                           Expanded(
-                                            child: Text(
-                                              'U ${_fmt(s.urgency)}',
-                                              textAlign: TextAlign.right,
+                                            child: Align(
+                                              alignment: Alignment.centerRight,
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                child: ParamValue.urgency(
+                                                  _fmt(s.urgency),
+                                                  size: 18,
+                                                  style: DefaultTextStyle.of(
+                                                    context,
+                                                  ).style,
+                                                  color: DefaultTextStyle.of(
+                                                    context,
+                                                  ).style.color,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ],

@@ -1,4 +1,5 @@
 import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/ui/theme/app_theme.dart';
@@ -32,7 +33,9 @@ void main() {
       expect(tester.getSize(find.byType(InkWell)), const Size(28, 28));
 
       final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await gesture.addPointer(location: tester.getCenter(find.byType(InkWell)));
+      await gesture.addPointer(
+        location: tester.getCenter(find.byType(InkWell)),
+      );
       await tester.pump(const Duration(seconds: 1));
       expect(find.text('Start'), findsOneWidget);
       await gesture.removePointer();

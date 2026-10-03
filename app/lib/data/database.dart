@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../domain/notes_plain_text.dart';
 import 'tables.dart';
 
 part 'database.g.dart';
@@ -27,7 +28,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -84,10 +85,48 @@ class AppDatabase extends _$AppDatabase {
         // Drops actions.priority. A plain DROP COLUMN fails because of its
         // CHECK constraint, so the table is rebuilt (indexes are recreated by
         // drift; foreign keys are off during the rebuild so links survive).
-        await m.alterTable(TableMigration(actionsTable));
+        // notes_text is new to the rebuilt table when coming from < 9 (it is
+        // listed so the copy does not look for it in the old table).
+        await m.alterTable(
+          TableMigration(
+            actionsTable,
+            newColumns: from < 9 ? [actionsTable.notesText] : const [],
+          ),
+        );
+      }
+      if (from >= 8 && from < 9) {
+        await m.addColumn(actionsTable, actionsTable.notesText);
+      }
+      if (from < 9) {
+        await _backfillNotesText();
       }
     },
   );
+
+  /// One-off (schema v9): derives `notes_text` from every existing `notes`
+  /// value, in id-ordered batches so memory stays flat with thousands of rows.
+  Future<void> _backfillNotesText() async {
+    const batchSize = 200;
+    var lastId = '';
+    while (true) {
+      final rows = await customSelect(
+        'SELECT id, notes FROM actions '
+        'WHERE notes IS NOT NULL AND id > ? ORDER BY id LIMIT $batchSize',
+        variables: [Variable.withString(lastId)],
+      ).get();
+      if (rows.isEmpty) return;
+      for (final r in rows) {
+        final id = r.read<String>('id');
+        lastId = id;
+        final text = notesPlainText(r.read<String>('notes'));
+        if (text == null) continue;
+        await customStatement(
+          'UPDATE actions SET notes_text = ? WHERE id = ?',
+          [text, id],
+        );
+      }
+    }
+  }
 }
 
 /// Where the database file lives: the app-support folder, or — for automated

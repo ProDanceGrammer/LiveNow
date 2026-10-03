@@ -13,8 +13,11 @@ import '../time_format.dart';
 import 'action_tile.dart'
     show formatActionDuration, formatUrgency, iconForAction;
 import 'action_time_label.dart';
+import 'direction_badge.dart';
 import 'hover_toolbar.dart';
+import 'param_icons.dart';
 import 'quick_action_bar.dart';
+import 'round_check.dart';
 
 /// One card on the Current Actions board: name, its current time range
 /// (`start_at` -> `end_at` — kept in sync with the real started/finished
@@ -37,18 +40,22 @@ class ActionCard extends ConsumerWidget {
     final urgency = ref.watch(
       actionUrgencyProvider.select((m) => m[action.id]),
     );
+    final icons = ref.watch(
+      actionDirectionIconsProvider.select((m) => m[action.id]),
+    );
     final timeLine = _formatTimeLine(action);
     final selected = ref.watch(
       currentSelectionProvider.select((s) => s.contains(action.id)),
     );
     final primary = Theme.of(context).colorScheme.primary;
-    final isDone = action.isDoneBefore;
-    // Urgency tint like the calendar: none for done, running or unlinked cards.
-    final tint = (urgency != null && !isDone && !isRunning)
-        ? urgencyColors(
-            urgency,
-            dark: Theme.of(context).brightness == Brightness.dark,
-          )
+    final isDone = action.isDoneAt(ref.watch(currentBoardNowProvider));
+    // Urgency tint like the calendar: running and unlinked cards get none;
+    // done cards get the same band, muted.
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final tint = (urgency != null && !isRunning)
+        ? (isDone
+              ? urgencyColorsMuted(urgency, dark: dark)
+              : urgencyColors(urgency, dark: dark))
         : null;
     final fg = tint?.fg;
     final nameStyle = Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -115,24 +122,18 @@ class ActionCard extends ConsumerWidget {
                             SizedBox(
                               width: 24,
                               height: 24,
-                              child: Checkbox(
+                              child: RoundCheck(
                                 key: const ValueKey('allDayCheckbox'),
                                 value: isDone,
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                                side: fg == null
-                                    ? null
-                                    : BorderSide(color: fg, width: 2),
-                                checkColor: tint?.bg,
-                                fillColor: fg == null
-                                    ? null
-                                    : WidgetStateProperty.resolveWith(
-                                        (s) => s.contains(WidgetState.selected)
-                                            ? fg
-                                            : null,
-                                      ),
-                                onChanged: (_) => runUndoableToggleDone(
+                                size: 16,
+                                hit: 24,
+                                color:
+                                    fg ??
+                                    Theme.of(context).colorScheme.onSurface,
+                                checkColor:
+                                    tint?.bg ??
+                                    Theme.of(context).colorScheme.surface,
+                                onTap: () => runUndoableToggleDone(
                                   context,
                                   ref,
                                   action.id,
@@ -152,22 +153,41 @@ class ActionCard extends ConsumerWidget {
                           if (urgency != null)
                             Padding(
                               padding: const EdgeInsets.only(left: 8),
-                              child: Text(
-                                'U ${formatUrgency(urgency)}',
+                              child: ParamValue.urgency(
+                                formatUrgency(urgency),
                                 key: const ValueKey('actionUrgencyChip'),
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(color: fg),
+                                size: 19,
+                                style: Theme.of(context).textTheme.labelSmall,
+                                color:
+                                    fg ?? Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                         ],
                       ),
-                      if (timeLine != null)
+                      if (timeLine != null || (icons != null && icons.isNotEmpty))
                         Padding(
-                          padding: const EdgeInsets.only(left: 28, top: 2),
-                          child: ActionTimeLabel(
-                            action: action,
-                            text: timeLine,
-                            style: fg == null ? null : TextStyle(color: fg),
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              if (timeLine != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 28),
+                                  child: ActionTimeLabel(
+                                    action: action,
+                                    text: timeLine,
+                                    style: fg == null
+                                        ? null
+                                        : TextStyle(color: fg),
+                                  ),
+                                ),
+                              const Spacer(),
+                              if (icons != null && icons.isNotEmpty)
+                                DirectionBadge(
+                                  key: const ValueKey('actionCardIcons'),
+                                  actionId: action.id,
+                                  icons: icons,
+                                ),
+                            ],
                           ),
                         ),
                     ],

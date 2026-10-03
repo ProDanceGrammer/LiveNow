@@ -318,4 +318,22 @@ void main() {
       '2026-10-02 14:30 → 2026-10-02 15:30',
     );
   });
+
+  test('formatShortSchedule: compact, year only when not current', () {
+    final now = DateTime.utc(2026, 10, 3, 9);
+    String? f(DateTime? a, DateTime? b, {bool allDay = false}) =>
+        formatShortSchedule(a, b, isAllDay: allDay, nowUtc: now);
+    final s = DateTime.utc(2026, 10, 3, 10, 0); // 13:00
+    final e = DateTime.utc(2026, 10, 3, 11, 40); // 14:40
+    expect(f(s, e), '3 Oct 13:00-14:40');
+    expect(
+      f(DateTime.utc(2027, 10, 3, 10), DateTime.utc(2027, 10, 3, 11, 40)),
+      "3 Oct 27' 13:00-14:40",
+    );
+    expect(f(s, null), '3 Oct 13:00');
+    expect(f(s, e, allDay: true), '3 Oct');
+    expect(f(DateTime.utc(2027, 1, 5), null, allDay: true), "5 Jan 27'");
+    expect(f(s, DateTime.utc(2026, 10, 4, 6)), '3 Oct 13:00-4 Oct 09:00');
+    expect(f(null, e), isNull);
+  });
 }

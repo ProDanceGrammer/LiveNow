@@ -23,9 +23,13 @@ class MetricPicker extends ConsumerWidget {
   /// still removes it).
   final ValueChanged<Metric>? onOpen;
 
+  /// Longer explanation shown as a tooltip on the heading.
+  final String? labelTooltip;
+
   const MetricPicker({
     super.key,
     required this.label,
+    this.labelTooltip,
     required this.selectedIds,
     required this.onChanged,
     this.excludeId,
@@ -42,11 +46,46 @@ class MetricPicker extends ConsumerWidget {
         if (byId[id] != null) byId[id]!,
     ]..sort((a, b) => a.name.compareTo(b.name));
 
+    Future<void> openSearch() async {
+      final result = await showStackedDialog<Set<String>>(
+        context: context,
+        builder: (_) => _MetricSearchDialog(
+          metrics: [
+            for (final m in metrics)
+              if (m.id != excludeId) m,
+          ],
+          initial: selectedIds,
+        ),
+      );
+      if (result != null) onChanged(result);
+    }
+
+    final hasHeader = label.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (label.isNotEmpty) ...[
-          Text(label, style: Theme.of(context).textTheme.titleSmall),
+        if (hasHeader) ...[
+          Row(
+            children: [
+              Expanded(
+                child: labelTooltip == null
+                    ? Text(label, style: Theme.of(context).textTheme.titleSmall)
+                    : Tooltip(
+                        message: labelTooltip!,
+                        child: Text(
+                          label,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'Add…',
+                visualDensity: VisualDensity.compact,
+                onPressed: openSearch,
+              ),
+            ],
+          ),
           const SizedBox(height: 4),
         ],
         if (chosen.isEmpty)
@@ -65,23 +104,12 @@ class MetricPicker extends ConsumerWidget {
                 ),
             ],
           ),
-        TextButton.icon(
-          icon: const Icon(Icons.add),
-          label: const Text('Add…'),
-          onPressed: () async {
-            final result = await showStackedDialog<Set<String>>(
-              context: context,
-              builder: (_) => _MetricSearchDialog(
-                metrics: [
-                  for (final m in metrics)
-                    if (m.id != excludeId) m,
-                ],
-                initial: selectedIds,
-              ),
-            );
-            if (result != null) onChanged(result);
-          },
-        ),
+        if (!hasHeader)
+          TextButton.icon(
+            icon: const Icon(Icons.add),
+            label: const Text('Add…'),
+            onPressed: openSearch,
+          ),
       ],
     );
   }

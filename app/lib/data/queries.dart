@@ -17,6 +17,11 @@ class ActionListItem {
   final bool isAllDay;
   final int? estimatedMinutes;
 
+  /// Last edit / creation time (the All list sorts on them); null where the
+  /// query did not select them.
+  final DateTime? updatedAt;
+  final DateTime? createdAt;
+
   const ActionListItem({
     required this.id,
     required this.name,
@@ -25,6 +30,8 @@ class ActionListItem {
     this.endAt,
     required this.isAllDay,
     this.estimatedMinutes,
+    this.updatedAt,
+    this.createdAt,
   });
 
   /// Value equality, so an unchanged query result can be recognised and
@@ -39,11 +46,22 @@ class ActionListItem {
           startAt == other.startAt &&
           endAt == other.endAt &&
           isAllDay == other.isAllDay &&
-          estimatedMinutes == other.estimatedMinutes;
+          estimatedMinutes == other.estimatedMinutes &&
+          updatedAt == other.updatedAt &&
+          createdAt == other.createdAt;
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, done, startAt, endAt, isAllDay, estimatedMinutes);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    done,
+    startAt,
+    endAt,
+    isAllDay,
+    estimatedMinutes,
+    updatedAt,
+    createdAt,
+  );
 
   /// Whether this action counts as done for filtering/board-column purposes
   /// — see `domain/done_rule.dart`.
@@ -54,6 +72,15 @@ class ActionListItem {
     done: done,
   );
 
+  /// [isDoneBefore] evaluated at the pinned instant [nowUtc].
+  bool isDoneAt(DateTime nowUtc) => done_rule.isDoneBefore(
+    startAt: startAt,
+    endAt: endAt,
+    isAllDay: isAllDay,
+    done: done,
+    nowUtc: nowUtc,
+  );
+
   factory ActionListItem.fromRow(ActionRow row) => ActionListItem(
     id: row.id,
     name: row.name,
@@ -62,6 +89,8 @@ class ActionListItem {
     endAt: dateTimeFromDb(row.endAt),
     isAllDay: row.isAllDay,
     estimatedMinutes: row.estimatedMinutes,
+    updatedAt: DateTime.tryParse(row.updatedAt)?.toUtc(),
+    createdAt: DateTime.tryParse(row.createdAt)?.toUtc(),
   );
 
   factory ActionListItem.fromQueryRow(QueryRow row) => ActionListItem(
@@ -72,7 +101,16 @@ class ActionListItem {
     endAt: dateTimeFromDb(row.readNullable<String>('end_at')),
     isAllDay: row.read<bool>('is_all_day'),
     estimatedMinutes: row.readNullable<int>('estimated_minutes'),
+    updatedAt: _lenientTime(row, 'updated_at'),
+    createdAt: _lenientTime(row, 'created_at'),
   );
+
+  /// The audit timestamps are optional extras: absent column or unparseable
+  /// text (hand-made test rows) just means "unknown".
+  static DateTime? _lenientTime(QueryRow row, String column) {
+    if (!row.data.containsKey(column)) return null;
+    return DateTime.tryParse(row.readNullable<String>(column) ?? '')?.toUtc();
+  }
 }
 
 /// Quiet period after which a burst of writes is collapsed into one list
@@ -118,7 +156,10 @@ class ViewQueries {
   /// that need a full [ActionRow] (built with `notes`/`resultNote` null).
   late final List<String> _rowColumns = [
     for (final c in db.actionsTable.$columns)
-      if (c.$name != 'notes' && c.$name != 'result_note') c.$name,
+      if (c.$name != 'notes' &&
+          c.$name != 'notes_text' &&
+          c.$name != 'result_note')
+        c.$name,
   ];
 
   Stream<List<ActionListItem>> _items(
@@ -197,8 +238,67 @@ class ViewQueries {
   }
 
   /// All actions regardless of status, most recently updated first.
-  Stream<List<ActionListItem>> watchAllActions() =>
-      _items('SELECT $_itemColumns FROM actions ORDER BY updated_at DESC');
+  Stream<List<ActionListItem>> watchAllActions() => _items(
+    'SELECT $_itemColumns, updated_at, created_at FROM actions '
+    'ORDER BY updated_at DESC',
+  );
+
+  /// Lean link maps for the All list's filters (only subscribed while a
+  /// filter needs them): action id -> ids of its growth directions.
+  Stream<Map<String, Set<String>>> watchActionMetricIds() => _idMap(
+    'SELECT action_id AS k, metric_id AS v FROM action_metrics',
+    {db.actionMetricsTable},
+  );
+
+  /// action id -> ids of its predecessors.
+  Stream<Map<String, Set<String>>> watchPredecessorIds() => _idMap(
+    'SELECT successor_id AS k, predecessor_id AS v FROM action_dependencies',
+    {db.actionDependenciesTable},
+  );
+
+  /// action id -> ids of its successors.
+  Stream<Map<String, Set<String>>> watchSuccessorIds() => _idMap(
+    'SELECT predecessor_id AS k, successor_id AS v FROM action_dependencies',
+    {db.actionDependenciesTable},
+  );
+
+  Stream<Map<String, Set<String>>> _idMap(
+    String sql,
+    Set<TableInfo> readsFrom,
+  ) => debounced(
+    db
+        .customSelect(sql, readsFrom: readsFrom)
+        .watch()
+        .map((rows) {
+          final map = <String, Set<String>>{};
+          for (final r in rows) {
+            (map[r.read<String>('k')] ??= {}).add(r.read<String>('v'));
+          }
+          return map;
+        }),
+    kListDebounce,
+  );
+
+  /// Ids of actions whose plain-text notes contain [lowerQuery] (already
+  /// lower-cased by the caller; `%`, `_` and `\` are escaped here). The
+  /// notes text itself is never selected.
+  Stream<Set<String>> watchNotesMatchIds(String lowerQuery) {
+    final escaped = lowerQuery
+        .replaceAll(r'\', r'\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
+    return debounced(
+      db
+          .customSelect(
+            r"SELECT id FROM actions WHERE notes_text LIKE ? ESCAPE '\'",
+            variables: [Variable.withString('%$escaped%')],
+            readsFrom: {db.actionsTable},
+          )
+          .watch()
+          .map((rows) => {for (final r in rows) r.read<String>('id')}),
+      kListDebounce,
+    );
+  }
 
   /// Not-done actions as [ActionRow]s without the heavy text columns (the
   /// predecessor/successor picker).

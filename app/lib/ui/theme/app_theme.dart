@@ -304,10 +304,13 @@ ThemeData buildAppTheme(Brightness brightness) {
     listTileTheme: ListTileThemeData(
       iconColor: g.textSecondary,
       textColor: g.textPrimary,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
-    expansionTileTheme: const ExpansionTileThemeData(
-      shape: Border(),
-      collapsedShape: Border(),
+    expansionTileTheme: ExpansionTileThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      collapsedShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
     ),
   );
 }

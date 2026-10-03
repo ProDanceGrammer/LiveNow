@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:drift/drift.dart' show BooleanExpressionOperators;
+import 'package:drift/drift.dart' show BooleanExpressionOperators, Value;
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -10,10 +10,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/ui/calendar_selection.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/theme/glass_theme.dart';
 import 'package:livenow/ui/views/calendar_layout.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
+import 'package:livenow/ui/widgets/round_check.dart';
 
 void main() {
   setUpAll(initPostponeTimeZoneData);
@@ -957,7 +959,7 @@ void main() {
           matching: find.text('Holiday'),
         ),
       );
-      expect(tester.widget<Checkbox>(box).value, isFalse);
+      expect(tester.widget<RoundCheck>(box).value, isFalse);
       expect(name().style?.decoration, isNull);
 
       await tester.runAsync(() async {
@@ -966,12 +968,12 @@ void main() {
       });
       await afterWrite(tester);
       expect((await row(tester, id)).done, isTrue);
-      expect(tester.widget<Checkbox>(box).value, isTrue);
+      expect(tester.widget<RoundCheck>(box).value, isTrue);
       expect(name().style?.decoration, TextDecoration.lineThrough);
 
       await tapUndo(tester);
       expect((await row(tester, id)).done, isFalse);
-      expect(tester.widget<Checkbox>(box).value, isFalse);
+      expect(tester.widget<RoundCheck>(box).value, isFalse);
       await finish(tester);
     });
 
@@ -1072,6 +1074,107 @@ void main() {
       await finish(tester);
     });
 
+    Color? stripCellColor(WidgetTester tester, int i) =>
+        (tester
+                    .widget<Container>(find.byKey(ValueKey('strip-cell-$i')))
+                    .decoration
+                as BoxDecoration)
+            .color;
+
+    testWidgets('dragging an all-day chip to another day keeps it all-day', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(
+        tester,
+        name: 'Holiday',
+        startAt: at(0),
+        isAllDay: true,
+      );
+      await tester.runAsync(
+        () => (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+          const ActionsTableCompanion(done: Value(true)),
+        ),
+      );
+      await useDays(tester, 3);
+      await tester.pump();
+      expect(stripCellColor(tester, 2), isNull);
+
+      await dragTo(
+        tester,
+        tester.getCenter(find.byKey(ValueKey('allday-$id'))),
+        tester.getCenter(find.byKey(const ValueKey('strip-cell-2'))),
+        during: () async {
+          expect(stripCellColor(tester, 2), isNotNull, reason: 'target tint');
+          expect(stripCellColor(tester, 1), isNull);
+          expect(find.byKey(const ValueKey('chip-ghost')), findsNothing);
+        },
+      );
+      expect(stripCellColor(tester, 2), isNull);
+      var r = await row(tester, id);
+      expect(r.isAllDay, isTrue);
+      expect(r.done, isTrue);
+      expect(r.endAt, isNull);
+      expect(dateTimeFromDb(r.startAt), at(0).add(const Duration(days: 2)));
+      expect(find.byKey(ValueKey('allday-$id')), findsOneWidget);
+
+      await tapUndo(tester);
+      r = await row(tester, id);
+      expect(r.isAllDay, isTrue);
+      expect(r.done, isTrue);
+      expect(dateTimeFromDb(r.startAt), at(0));
+      await finish(tester);
+    });
+
+    testWidgets('a chip dropped on its own strip cell changes nothing', (
+      tester,
+    ) async {
+      await pump(tester);
+      final id = await create(tester, startAt: at(0), isAllDay: true);
+      await useDays(tester, 3);
+      final c = tester.getCenter(find.byKey(const ValueKey('strip-cell-0')));
+      await dragTo(
+        tester,
+        tester.getCenter(find.byKey(ValueKey('allday-$id'))),
+        c + const Offset(30, 0),
+      );
+      final r = await row(tester, id);
+      expect(r.isAllDay, isTrue);
+      expect(dateTimeFromDb(r.startAt), at(0));
+      expect(find.text('Undo'), findsNothing);
+      await finish(tester);
+    });
+
+    testWidgets('dragging a selected chip moves the whole selection', (
+      tester,
+    ) async {
+      await pump(tester);
+      final a = await create(tester, name: 'A', startAt: at(0), isAllDay: true);
+      final b = await create(tester, name: 'B', startAt: at(10), endAt: at(11));
+      await useDays(tester, 3);
+      container.read(calendarSelectionProvider.notifier).state = {a, b};
+      await tester.pump();
+      await dragTo(
+        tester,
+        tester.getCenter(find.byKey(ValueKey('allday-$a'))),
+        tester.getCenter(find.byKey(const ValueKey('strip-cell-1'))),
+      );
+      const day = Duration(days: 1);
+      final ra = await row(tester, a);
+      expect(ra.isAllDay, isTrue);
+      expect(ra.endAt, isNull);
+      expect(dateTimeFromDb(ra.startAt), at(0).add(day));
+      final rb = await row(tester, b);
+      expect(rb.isAllDay, isFalse);
+      expect(dateTimeFromDb(rb.startAt), at(10).add(day));
+      expect(dateTimeFromDb(rb.endAt), at(11).add(day));
+
+      await tapUndo(tester);
+      expect(dateTimeFromDb((await row(tester, a)).startAt), at(0));
+      expect(dateTimeFromDb((await row(tester, b)).startAt), at(10));
+      await finish(tester);
+    });
+
     testWidgets('dragging a timed block onto a strip cell makes it all-day', (
       tester,
     ) async {
@@ -1080,9 +1183,7 @@ void main() {
       await useDays(tester, 3);
       Color? cellColor(int i) =>
           (tester
-                      .widget<Container>(
-                        find.byKey(ValueKey('strip-cell-$i')),
-                      )
+                      .widget<Container>(find.byKey(ValueKey('strip-cell-$i')))
                       .decoration
                   as BoxDecoration)
               .color;
@@ -1171,7 +1272,9 @@ void main() {
         endAt: at(11),
       );
       await useDays(tester, 3);
-      final dayW = tester.getSize(find.byKey(const ValueKey('day-header-0'))).width;
+      final dayW = tester
+          .getSize(find.byKey(const ValueKey('day-header-0')))
+          .width;
       double width(String id) =>
           tester.getSize(find.byKey(ValueKey('event-$id'))).width;
       double left(String id) =>
@@ -1184,7 +1287,7 @@ void main() {
       await unmount(tester);
     });
 
-    testWidgets('event text is 9 px (name) and 8 px (time)', (tester) async {
+    testWidgets('event text is 10 px (name) and 8 px (time)', (tester) async {
       await pump(tester);
       final id = await create(tester, startAt: at(10), endAt: at(12));
       await useDays(tester, 3);
@@ -1196,7 +1299,7 @@ void main() {
       );
       // Text wraps our span in the default style's span.
       final root = (rich.text as TextSpan).children!.first as TextSpan;
-      expect(root.style!.fontSize, 9);
+      expect(root.style!.fontSize, 10);
       expect((root.children!.last as TextSpan).style!.fontSize, 8);
       await unmount(tester);
     });
@@ -1217,10 +1320,7 @@ void main() {
       );
       final r = await row(tester, id);
       expect(dateTimeFromDb(r.startAt), at(10));
-      expect(
-        dateTimeFromDb(r.endAt),
-        at(11, 20).add(const Duration(days: 1)),
-      );
+      expect(dateTimeFromDb(r.endAt), at(11, 20).add(const Duration(days: 1)));
       await unmount(tester);
     });
 
@@ -1276,10 +1376,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       final r = await row(tester, id);
-      expect(
-        dateTimeFromDb(r.endAt),
-        at(1).add(const Duration(days: 2)),
-      );
+      expect(dateTimeFromDb(r.endAt), at(1).add(const Duration(days: 2)));
       await tester.pump(const Duration(seconds: 6));
       await unmount(tester);
     });
@@ -1313,36 +1410,39 @@ void main() {
       await unmount(tester);
     });
 
-    testWidgets('hover toolbar hides while the event top is above the viewport', (
-      tester,
-    ) async {
-      await pump(tester);
-      container.read(calendarVisibleHoursProvider.notifier).state = 6;
-      final id = await create(tester, startAt: at(3), endAt: at(8));
-      await useDays(tester, 3);
-      final position = gridPosition(tester);
-      final px = pxPerMinute(tester);
+    testWidgets(
+      'hover toolbar hides while the event top is above the viewport',
+      (tester) async {
+        await pump(tester);
+        container.read(calendarVisibleHoursProvider.notifier).state = 6;
+        final id = await create(tester, startAt: at(3), endAt: at(8));
+        await useDays(tester, 3);
+        final position = gridPosition(tester);
+        final px = pxPerMinute(tester);
 
-      position.jumpTo(2 * 60 * px);
-      await tester.pump();
-      final block = find.byKey(ValueKey('event-$id'));
-      await hover(tester, block);
-      expect(find.byTooltip('Start'), findsOneWidget);
+        position.jumpTo(2 * 60 * px);
+        await tester.pump();
+        // Hover is frozen while scrolling; let the scroll settle first.
+        await tester.pump(const Duration(milliseconds: 200));
+        final block = find.byKey(ValueKey('event-$id'));
+        await hover(tester, block);
+        expect(find.byTooltip('Start'), findsOneWidget);
 
-      // Half an hour of the block's top is now scrolled out; the pointer is
-      // still over the block, but the bar would float over the header.
-      position.jumpTo(3.5 * 60 * px);
-      await tester.pump();
-      await tester.pump();
-      expect(find.byTooltip('Start'), findsNothing);
+        // Half an hour of the block's top is now scrolled out; the pointer is
+        // still over the block, but the bar would float over the header.
+        position.jumpTo(3.5 * 60 * px);
+        await tester.pump();
+        await tester.pump();
+        expect(find.byTooltip('Start'), findsNothing);
 
-      // Scrolling back brings it back (re-evaluated while scrolling).
-      position.jumpTo(2 * 60 * px);
-      await tester.pump();
-      await tester.pump();
-      expect(find.byTooltip('Start'), findsOneWidget);
-      await unmount(tester);
-    });
+        // Scrolling back brings it back (re-evaluated while scrolling).
+        position.jumpTo(2 * 60 * px);
+        await tester.pump();
+        await tester.pump();
+        expect(find.byTooltip('Start'), findsOneWidget);
+        await unmount(tester);
+      },
+    );
   });
 
   group('event block drawing cost', () {

@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart' show OrderingTerm, innerJoin;
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
@@ -6,9 +7,11 @@ import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
 import '../domain/action_urgency.dart';
+import '../domain/all_actions_view_rules.dart';
 import '../domain/dependency_service.dart';
 import '../domain/growth_rules.dart';
 import '../domain/metric_service.dart';
+import '../domain/name_sort.dart';
 import 'views/calendar_layout.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -40,26 +43,45 @@ final currentNotDoneLimitProvider = StateProvider<int>(
 /// How many cards the left ("Done Before") column loads.
 final currentDoneLimitProvider = StateProvider<int>((ref) => kCurrentPageSize);
 
+/// The one instant the Current Actions board uses as "now": it is passed to
+/// the SQL column queries AND to every card, so a card's colour/done state
+/// always agrees with the column it sits in. Refreshed once a minute; the
+/// queries re-run with it and `distinctList` drops unchanged results.
+final currentBoardNowProvider = Provider.autoDispose<DateTime>((ref) {
+  ref.watch(minuteTickProvider);
+  return DateTime.now().toUtc();
+});
+
 final currentNotDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref
       .watch(viewQueriesProvider)
-      .watchCurrentNotDone(limit: ref.watch(currentNotDoneLimitProvider)),
+      .watchCurrentNotDone(
+        limit: ref.watch(currentNotDoneLimitProvider),
+        nowUtc: ref.watch(currentBoardNowProvider),
+      ),
 );
 
 final currentDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
   (ref) => ref
       .watch(viewQueriesProvider)
-      .watchCurrentDone(limit: ref.watch(currentDoneLimitProvider)),
+      .watchCurrentDone(
+        limit: ref.watch(currentDoneLimitProvider),
+        nowUtc: ref.watch(currentBoardNowProvider),
+      ),
 );
 
 /// Total not-done actions (the column header shows this, not the page size).
 final currentNotDoneCountProvider = StreamProvider.autoDispose<int>(
-  (ref) => ref.watch(viewQueriesProvider).watchCurrentNotDoneCount(),
+  (ref) => ref
+      .watch(viewQueriesProvider)
+      .watchCurrentNotDoneCount(nowUtc: ref.watch(currentBoardNowProvider)),
 );
 
 /// Total done actions.
 final currentDoneCountProvider = StreamProvider.autoDispose<int>(
-  (ref) => ref.watch(viewQueriesProvider).watchCurrentDoneCount(),
+  (ref) => ref
+      .watch(viewQueriesProvider)
+      .watchCurrentDoneCount(nowUtc: ref.watch(currentBoardNowProvider)),
 );
 
 /// How many day columns the calendar shows (2..7).
@@ -231,12 +253,18 @@ final countableActivitiesProvider =
       )..orderBy([(t) => OrderingTerm.asc(t.name)])).watch();
     });
 
-/// All saved "new from template" presets.
+/// All saved "new from template" presets, by name ignoring leading emoji.
 final templatesProvider = StreamProvider.autoDispose<List<ActionTemplate>>((
   ref,
 ) {
   final db = ref.watch(databaseProvider);
-  return db.select(db.actionTemplatesTable).watch();
+  return db
+      .select(db.actionTemplatesTable)
+      .watch()
+      .map(
+        (rows) =>
+            [...rows]..sort((a, b) => compareIgnoringEmoji(a.name, b.name)),
+      );
 });
 
 /// All not-done actions, for the action editor's predecessor/successor
@@ -313,6 +341,151 @@ final allActionsProvider = StreamProvider.autoDispose<List<ActionListItem>>(
 /// The search text above the All list (matched case-insensitively against the
 /// loaded names in Dart; empty = everything).
 final allActionsQueryProvider = StateProvider.autoDispose<String>((ref) => '');
+
+/// Which fields the All list's search text is matched against.
+final allActionsSearchFlagsProvider = StateProvider.autoDispose<SearchFlags>(
+  (ref) => const SearchFlags(),
+);
+
+/// The All list's waterfall sort (default: last edited first).
+final allActionsSortProvider = StateProvider.autoDispose<List<SortKey>>(
+  (ref) => kDefaultAllActionsSort,
+);
+
+/// The All list's filters.
+final allActionsFiltersProvider = StateProvider.autoDispose<AllActionsFilters>(
+  (ref) => const AllActionsFilters(),
+);
+
+// Lean link streams for the All list; only watched while a filter / search
+// flag needs them (autoDispose drops them otherwise).
+final allActionsMetricIdsProvider =
+    StreamProvider.autoDispose<Map<String, Set<String>>>(
+      (ref) => ref.watch(viewQueriesProvider).watchActionMetricIds(),
+    );
+
+/// metric id -> emoji, blank icons skipped. Value-equal on purpose: a mindmap
+/// drag rewrites pos_x/pos_y (the metrics stream fires) but not the icons, so
+/// nothing downstream recomputes.
+class _IconMap {
+  final Map<String, String> byId;
+  const _IconMap(this.byId);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _IconMap && mapEquals(byId, other.byId);
+
+  @override
+  int get hashCode => byId.length;
+}
+
+final _iconByMetricIdProvider = Provider.autoDispose<_IconMap>((ref) {
+  return ref.watch(
+    metricsProvider.select((a) {
+      final out = <String, String>{};
+      for (final m in a.value ?? const <Metric>[]) {
+        final icon = m.icon?.trim();
+        if (icon != null && icon.isNotEmpty) out[m.id] = icon;
+      }
+      return _IconMap(out);
+    }),
+  );
+});
+
+/// At most this many direction emojis are shown, then '+n'.
+const kMaxDirectionIcons = 4;
+
+/// actionId -> the emojis of its linked growth directions joined by spaces
+/// ('A B C D +2'); actions without any icon are absent. Widgets should
+/// `.select((m) => m[id])` so only the affected block/card rebuilds.
+final actionDirectionIconsProvider = Provider.autoDispose<Map<String, String>>((
+  ref,
+) {
+  final links =
+      ref.watch(allActionsMetricIdsProvider).value ??
+      const <String, Set<String>>{};
+  final icons = ref.watch(_iconByMetricIdProvider).byId;
+  if (icons.isEmpty) return const {};
+  final out = <String, String>{};
+  links.forEach((actionId, metricIds) {
+    // UUIDv7 ids sort by creation time: a stable order.
+    final ids = metricIds.where(icons.containsKey).toList()..sort();
+    if (ids.isEmpty) return;
+    final shown = ids.take(kMaxDirectionIcons).map((id) => icons[id]!);
+    final extra = ids.length - kMaxDirectionIcons;
+    out[actionId] = [...shown, if (extra > 0) '+$extra'].join(' ');
+  });
+  return out;
+});
+
+class _NameMap {
+  final Map<String, String> byId;
+  const _NameMap(this.byId);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _NameMap && mapEquals(byId, other.byId);
+
+  @override
+  int get hashCode => byId.length;
+}
+
+/// metric id -> name of the directions that have an icon (value-equal, like
+/// [_iconByMetricIdProvider]).
+final _nameByIconMetricIdProvider = Provider.autoDispose<_NameMap>((ref) {
+  return ref.watch(
+    metricsProvider.select((a) {
+      final out = <String, String>{};
+      for (final m in a.value ?? const <Metric>[]) {
+        final icon = m.icon?.trim();
+        if (icon != null && icon.isNotEmpty) out[m.id] = m.name;
+      }
+      return _NameMap(out);
+    }),
+  );
+});
+
+/// actionId -> the direction names matching the chunks of
+/// [actionDirectionIconsProvider]'s string: one name per shown emoji, plus a
+/// last entry listing the hidden names (joined by ', ') when the '+n' chunk is
+/// present. Same ordering and cap as the icons provider. Read with `ref.read`
+/// on hover only.
+final actionDirectionNamesProvider =
+    Provider.autoDispose<Map<String, List<String>>>((ref) {
+      final links =
+          ref.watch(allActionsMetricIdsProvider).value ??
+          const <String, Set<String>>{};
+      final names = ref.watch(_nameByIconMetricIdProvider).byId;
+      if (names.isEmpty) return const {};
+      final out = <String, List<String>>{};
+      links.forEach((actionId, metricIds) {
+        final ids = metricIds.where(names.containsKey).toList()..sort();
+        if (ids.isEmpty) return;
+        out[actionId] = [
+          for (final id in ids.take(kMaxDirectionIcons)) names[id]!,
+          if (ids.length > kMaxDirectionIcons)
+            ids.skip(kMaxDirectionIcons).map((id) => names[id]!).join(', '),
+        ];
+      });
+      return out;
+    });
+
+final allActionsPredecessorsProvider =
+    StreamProvider.autoDispose<Map<String, Set<String>>>(
+      (ref) => ref.watch(viewQueriesProvider).watchPredecessorIds(),
+    );
+final allActionsSuccessorsProvider =
+    StreamProvider.autoDispose<Map<String, Set<String>>>(
+      (ref) => ref.watch(viewQueriesProvider).watchSuccessorIds(),
+    );
+
+/// Ids of actions whose notes contain the (lower-cased) query; watched only
+/// while the Notes flag is on and the query is not empty.
+final allActionsNotesMatchProvider = StreamProvider.autoDispose
+    .family<Set<String>, String>(
+      (ref, lowerQuery) =>
+          ref.watch(viewQueriesProvider).watchNotesMatchIds(lowerQuery),
+    );
 
 /// The metric ids currently linked to [actionId].
 final metricIdsOfProvider = StreamProvider.autoDispose

@@ -64,20 +64,20 @@ ActionSchedule applyPostponeRule(
       now,
       location,
     ).add(const Duration(days: 7)),
-    PostponeRule.afterWork => _todayOrTomorrowAt(
-      now,
+    PostponeRule.afterWork => _nextAtHour(
+      _relativeBase(current.startAt, now, location),
       AppSettings.afterWorkHour,
     ),
-    PostponeRule.morning => _atHourOnDate(
-      now.add(const Duration(days: 1)),
+    PostponeRule.morning => _nextAtHour(
+      _relativeBase(current.startAt, now, location),
       AppSettings.morningHour,
     ),
-    PostponeRule.workingMorning => _nextWorkingDayAt(
-      now,
+    PostponeRule.workingMorning => _nextWorkingAtHour(
+      _relativeBase(current.startAt, now, location),
       AppSettings.morningHour,
     ),
     PostponeRule.nextMondayMorning => _nextWeekdayAt(
-      now,
+      _relativeBase(current.startAt, now, location),
       DateTime.monday,
       AppSettings.morningHour,
     ),
@@ -106,27 +106,31 @@ tz.TZDateTime _atHourOnDate(tz.TZDateTime date, int hour) {
   return tz.TZDateTime(date.location, date.year, date.month, date.day, hour);
 }
 
-tz.TZDateTime _todayOrTomorrowAt(tz.TZDateTime now, int hour) {
-  final today = _atHourOnDate(now, hour);
-  return today.isAfter(now)
-      ? today
-      : _atHourOnDate(now.add(const Duration(days: 1)), hour);
+/// Calendar-day step (wall-clock safe, unlike adding 24 hours).
+tz.TZDateTime _nextDay(tz.TZDateTime date) =>
+    tz.TZDateTime(date.location, date.year, date.month, date.day + 1);
+
+/// [hour] on the base's own day if that is strictly after the base, else on
+/// the next day. No "after now" floor: an overdue action follows its own date.
+tz.TZDateTime _nextAtHour(tz.TZDateTime base, int hour) {
+  final sameDay = _atHourOnDate(base, hour);
+  return sameDay.isAfter(base) ? sameDay : _atHourOnDate(_nextDay(base), hour);
 }
 
-tz.TZDateTime _nextWorkingDayAt(tz.TZDateTime now, int hour) {
-  var date = now.add(const Duration(days: 1));
-  while (!AppSettings.workingWeekdays.contains(date.weekday)) {
-    date = date.add(const Duration(days: 1));
+/// Like [_nextAtHour], then skips non-working weekdays.
+tz.TZDateTime _nextWorkingAtHour(tz.TZDateTime base, int hour) {
+  var candidate = _nextAtHour(base, hour);
+  while (!AppSettings.workingWeekdays.contains(candidate.weekday)) {
+    candidate = _atHourOnDate(_nextDay(candidate), hour);
   }
-  return _atHourOnDate(date, hour);
+  return candidate;
 }
 
-/// The next occurrence of [weekday] strictly after today (never today, even
-/// if today already matches — postponing must always move forward).
-tz.TZDateTime _nextWeekdayAt(tz.TZDateTime now, int weekday, int hour) {
-  var date = now.add(const Duration(days: 1));
+/// The next occurrence of [weekday] strictly after the base's date.
+tz.TZDateTime _nextWeekdayAt(tz.TZDateTime base, int weekday, int hour) {
+  var date = _nextDay(base);
   while (date.weekday != weekday) {
-    date = date.add(const Duration(days: 1));
+    date = _nextDay(date);
   }
   return _atHourOnDate(date, hour);
 }

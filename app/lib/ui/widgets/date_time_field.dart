@@ -34,6 +34,7 @@ class DateTimeField extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         InkWell(
+          borderRadius: BorderRadius.circular(8),
           onTap: () => _pick(context),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),

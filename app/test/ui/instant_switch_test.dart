@@ -44,7 +44,6 @@ Future<void> _noLingeringAnimation(WidgetTester tester) async {
   expect(tester.hasRunningAnimations, isFalse);
 }
 
-
 final _rail = find.byType(InstantRail);
 Finder _railItem(String label) =>
     find.descendant(of: _rail, matching: find.text(label));

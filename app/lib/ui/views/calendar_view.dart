@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/settings.dart';
@@ -31,8 +32,10 @@ import '../providers.dart';
 import '../undo.dart';
 import '../theme/glass_theme.dart';
 import '../urgency_colors.dart';
+import '../widgets/round_check.dart';
 import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
+import '../widgets/direction_badge.dart';
 import '../widgets/glass.dart';
 import '../widgets/glass_icon_tile.dart';
 import 'calendar_layout.dart';
@@ -68,10 +71,59 @@ class CalendarPerfCounters {
   static int chipBuilds = 0;
   static int layoutRuns = 0;
 
+  /// Direction badges built (block or all-day chip), and times a hover
+  /// toolbar was actually shown.
+  static int badgeBuilds = 0;
+  static int toolbarShows = 0;
+
   static void reset() {
     blockBuilds = 0;
     chipBuilds = 0;
     layoutRuns = 0;
+    badgeBuilds = 0;
+    toolbarShows = 0;
+  }
+}
+
+/// How long after the last scroll movement the badges come back.
+const _kScrollSettle = Duration(milliseconds: 150);
+
+/// Shows [child] only while [scrolling] is false. With [keepSpace] it stays
+/// laid out (so a row does not jump) but is not painted; otherwise it is
+/// removed. Only this subtree reacts when the flag flips - the block that
+/// contains it is never rebuilt.
+class _HideWhileScrolling extends StatelessWidget {
+  final ValueListenable<bool> scrolling;
+  final bool keepSpace;
+  final Widget child;
+  const _HideWhileScrolling({
+    required this.scrolling,
+    required this.child,
+    this.keepSpace = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: scrolling,
+    child: child,
+    builder: (_, hide, child) => keepSpace
+        ? Opacity(opacity: hide ? 0 : 1, child: child)
+        : hide
+        ? const SizedBox.shrink()
+        : child!,
+  );
+}
+
+/// [DirectionBadge] that counts its builds for the perf tests.
+class _CountedBadge extends StatelessWidget {
+  final String actionId;
+  final String icons;
+  const _CountedBadge({super.key, required this.actionId, required this.icons});
+
+  @override
+  Widget build(BuildContext context) {
+    CalendarPerfCounters.badgeBuilds++;
+    return DirectionBadge(actionId: actionId, icons: icons);
   }
 }
 
@@ -155,8 +207,22 @@ class _CrossDrag {
   /// is dragged (null = not over the strip); the strip highlights that cell.
   final stripTarget = ValueNotifier<int?>(null);
 
+  /// True while the time grid is scrolling (and for [_kScrollSettle] after).
+  /// Written by the grid; read only by badge subtrees and hover toolbars, so
+  /// flipping it rebuilds no event block.
+  final scrolling = ValueNotifier<bool>(false);
+
   /// On the strip's root box, to hit-test it in global coordinates.
   final stripKey = GlobalKey(debugLabel: 'all-day strip');
+
+  /// The strip's day geometry, assigned by the strip on every build so chip
+  /// drags can hit-test it.
+  double stripDayWidth = 0;
+  int stripDayCount = 0;
+
+  int? _stripDayAtPos(Offset global) => stripDayCount == 0
+      ? null
+      : stripDayAt(global, stripDayWidth, stripDayCount);
 
   /// Set by the grid: called with the chip and the global drop position.
   void Function(ActionListItem item, Offset pos)? onChipDrop;
@@ -169,6 +235,7 @@ class _CrossDrag {
     _unroute();
     chip.dispose();
     stripTarget.dispose();
+    scrolling.dispose();
   }
 
   /// The strip day column under [global], or null when it is not over the
@@ -219,13 +286,16 @@ class _CrossDrag {
       return;
     }
     if (e is PointerMoveEvent) {
+      stripTarget.value = _stripDayAtPos(e.position);
       chip.value = (item: d.item, pos: e.position);
     } else if (e is PointerUpEvent) {
       _unroute();
+      stripTarget.value = null;
       chip.value = null;
       onChipDrop?.call(d.item, e.position);
     } else if (e is PointerCancelEvent) {
       _unroute();
+      stripTarget.value = null;
       chip.value = null;
     }
   }
@@ -323,6 +393,11 @@ class _CalendarInput extends ConsumerStatefulWidget {
   ConsumerState<_CalendarInput> createState() => _CalendarInputState();
 }
 
+/// Bumped whenever the Calendar becomes the shown view (first show, switching
+/// back to it, re-selecting the Actions section) so [_CalendarInput] takes
+/// keyboard focus without a click.
+final calendarFocusRequestProvider = StateProvider<int>((ref) => 0);
+
 const _digitKeys = [
   LogicalKeyboardKey.digit2,
   LogicalKeyboardKey.digit3,
@@ -394,6 +469,9 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(calendarFocusRequestProvider, (_, _) {
+      if (mounted && !_focus.hasFocus) _focus.requestFocus();
+    });
     return Listener(
       onPointerDown: (_) {
         if (!_focus.hasFocus) _focus.requestFocus();
@@ -745,7 +823,9 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
       final d = dayIndexOf(a.startAt!, start);
       if (d >= 0 && d < dayCount) byDay.putIfAbsent(d, () => []).add(a);
     }
-    final cross = ref.read(_crossDragProvider);
+    final cross = ref.read(_crossDragProvider)
+      ..stripDayWidth = dayWidth
+      ..stripDayCount = dayCount;
     final primary = Theme.of(context).colorScheme.primary;
     return Container(
       key: cross.stripKey,
@@ -801,7 +881,6 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
                           color: target == i
                               ? primary.withValues(alpha: 0.22)
                               : null,
-                          border: Border(left: BorderSide(color: line)),
                         ),
                         child: chips,
                       ),
@@ -849,6 +928,37 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
   }
 }
 
+/// Rough width of the badge chip for [icons] ('A B +2'): ~15 px per emoji, 3 px
+/// gaps, 2 px chip padding each side. Only used to reserve room on one-line
+/// labels, so it errs on the generous side.
+double _badgeWidth(String icons) {
+  final chunks = icons.split(' ');
+  var w = 4.0 + 3.0 * (chunks.length - 1);
+  for (final c in chunks) {
+    w += c.startsWith('+') ? 14 : 15;
+  }
+  return w + 2;
+}
+
+/// The small translucent chip behind a badge so it stays readable over text.
+class _DirectionChip extends StatelessWidget {
+  final Color color;
+  final Widget child;
+  const _DirectionChip({required this.color, required this.child});
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.85),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: child,
+    ),
+  );
+}
+
 class _AllDayChip extends ConsumerWidget {
   final ActionListItem item;
   final bool running;
@@ -860,33 +970,44 @@ class _AllDayChip extends ConsumerWidget {
     CalendarPerfCounters.chipBuilds++;
     final scheme = Theme.of(context).colorScheme;
     final done = item.isDoneBefore;
-    final urgency = done || running
+    // Only the band matters for the colour, so the once-a-minute urgency
+    // refresh rebuilds a chip only when its band changes.
+    final band = running
         ? null
-        : ref.watch(actionUrgencyProvider.select((m) => m[item.id]));
-    final uc = urgency == null
-        ? null
-        : urgencyColors(
-            urgency,
-            dark: Theme.of(context).brightness == Brightness.dark,
+        : ref.watch(
+            actionUrgencyProvider.select(
+              (m) => m[item.id] == null ? null : urgencyBand(m[item.id]!),
+            ),
           );
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    // Done chips keep their band, muted; unlinked done stay grey.
+    final uc = band == null
+        ? null
+        : done
+        ? urgencyColorsMutedForBand(band, dark: dark)
+        : urgencyColorsForBand(band, dark: dark);
     final bg = running
         ? scheme.primary
-        : done
-        ? scheme.surfaceContainerHighest
-        : uc?.bg ?? scheme.tertiaryContainer;
+        : uc?.bg ??
+              (done
+                  ? scheme.surfaceContainerHighest
+                  : scheme.tertiaryContainer);
     final fg = running
         ? scheme.onPrimary
-        : done
-        ? scheme.onSurfaceVariant
-        : uc?.fg ?? scheme.onTertiaryContainer;
+        : uc?.fg ??
+              (done ? scheme.onSurfaceVariant : scheme.onTertiaryContainer);
     final selected = ref.watch(
       calendarSelectionProvider.select((s) => s.contains(item.id)),
     );
     final cross = ref.read(_crossDragProvider);
+    final icons = ref.watch(
+      actionDirectionIconsProvider.select((m) => m[item.id]),
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: _HoverToolbarHost(
         actionId: item.id,
+        scrolling: cross.scrolling,
         child: Listener(
           onPointerDown: (e) {
             _onPress(ref, item.id, e);
@@ -904,7 +1025,7 @@ class _AllDayChip extends ConsumerWidget {
               borderRadius: BorderRadius.circular(10),
               side: selected
                   ? BorderSide(color: scheme.onSurface, width: 2)
-                  : BorderSide(color: _brightEdge(context.glass)),
+                  : BorderSide.none,
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
@@ -918,22 +1039,12 @@ class _AllDayChip extends ConsumerWidget {
                 alignment: Alignment.centerLeft,
                 child: Row(
                   children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: Checkbox(
-                        key: ValueKey('chip-check-${item.id}'),
-                        value: done,
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        side: BorderSide(color: fg, width: 1.5),
-                        checkColor: bg,
-                        fillColor: WidgetStateProperty.resolveWith(
-                          (s) => s.contains(WidgetState.selected) ? fg : null,
-                        ),
-                        onChanged: (_) =>
-                            runUndoableToggleDone(context, ref, item.id),
-                      ),
+                    RoundCheck(
+                      key: ValueKey('chip-check-${item.id}'),
+                      value: done,
+                      color: fg,
+                      checkColor: bg,
+                      onTap: () => runUndoableToggleDone(context, ref, item.id),
                     ),
                     const SizedBox(width: 2),
                     Expanded(
@@ -942,12 +1053,20 @@ class _AllDayChip extends ConsumerWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 9,
+                          fontSize: 10,
                           color: fg,
                           decoration: done ? TextDecoration.lineThrough : null,
                         ),
                       ),
                     ),
+                    if (icons != null) ...[
+                      const SizedBox(width: 3),
+                      _HideWhileScrolling(
+                        scrolling: cross.scrolling,
+                        keepSpace: true,
+                        child: _CountedBadge(actionId: item.id, icons: icons),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -971,10 +1090,16 @@ class _HoverToolbarHost extends ConsumerStatefulWidget {
   final bool suppressed;
   final Widget child;
 
+  /// While true the toolbar is neither shown nor hidden (a parked pointer
+  /// under a scrolling grid keeps entering/leaving blocks); it re-syncs to
+  /// the real hover state when this turns false.
+  final ValueListenable<bool>? scrolling;
+
   const _HoverToolbarHost({
     required this.actionId,
     required this.child,
     this.suppressed = false,
+    this.scrolling,
   });
 
   @override
@@ -988,17 +1113,39 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
 
   void _sync() {
     if (!mounted) return;
+    if (widget.scrolling?.value ?? false) return; // re-synced when it ends
     final show = _overChild || _overBar;
     if (show && !_portal.isShowing) {
+      CalendarPerfCounters.toolbarShows++;
       _portal.show();
     } else if (!show && _portal.isShowing) {
       _portal.hide();
     }
   }
 
+  void _scrollingChanged() {
+    if (!(widget.scrolling?.value ?? false)) _sync();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scrolling?.addListener(_scrollingChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.scrolling?.removeListener(_scrollingChanged);
+    super.dispose();
+  }
+
   @override
   void didUpdateWidget(_HoverToolbarHost old) {
     super.didUpdateWidget(old);
+    if (old.scrolling != widget.scrolling) {
+      old.scrolling?.removeListener(_scrollingChanged);
+      widget.scrolling?.addListener(_scrollingChanged);
+    }
     if (widget.suppressed) _overBar = false; // its region is being removed
   }
 
@@ -1436,6 +1583,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _cross.onChipDrop = null;
     _cross.stripTarget.value = null;
     _tick?.cancel();
+    _settle?.cancel();
     _endMarquee();
     _marqueeN.dispose();
     _dragN.dispose();
@@ -1668,6 +1816,11 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// An all-day chip was dropped: over a grid cell it becomes a timed action
   /// starting there (duration predicted, else 1 h - the service decides).
   void _chipDrop(ActionListItem item, Offset pos) {
+    final stripDay = _cross.stripDayAt(pos, widget.dayWidth, widget.dayCount);
+    if (stripDay != null) {
+      _chipDropOnStrip(item, stripDay);
+      return;
+    }
     final cell = _gridCellAt(pos);
     if (cell == null) return;
     final start = calendarAddDays(
@@ -1675,6 +1828,47 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       cell.$1,
     ).add(Duration(minutes: cell.$2));
     runUndoableScheduleAllDayAt(context, ref, item.id, start);
+  }
+
+  /// An all-day chip dropped on another day's strip cell: it (and the rest of
+  /// the selection, when it is part of one) moves by whole days; all-day
+  /// members keep having no end, timed ones keep their time of day. The done
+  /// flag and all-day flag are untouched. One Undo restores everything.
+  void _chipDropOnStrip(ActionListItem item, int day) {
+    final from = item.startAt == null
+        ? null
+        : dayIndexOf(item.startAt!, widget.start);
+    if (from == null || from == day) return;
+    final dayDelta = day - from;
+    final members = <ActionListItem>[item];
+    final sel = ref.read(calendarSelectionProvider);
+    if (sel.length > 1 && sel.contains(item.id)) {
+      for (final a in widget.items) {
+        if (a.id != item.id && sel.contains(a.id) && a.startAt != null) {
+          members.add(a);
+        }
+      }
+    }
+    final changes = <ScheduleChange>[];
+    for (final m in members) {
+      final s = movedSchedule(
+        startAt: m.startAt!,
+        endAt: m.endAt,
+        dayDelta: dayDelta,
+        minuteDelta: 0,
+        legacyEstimatedMinutes: m.estimatedMinutes,
+      );
+      final endAt = m.isAllDay && m.endAt == null ? null : s.endAt;
+      changes.add(ScheduleChange(m.id, startAt: s.startAt, endAt: endAt));
+    }
+    runUndoableMoveMany(
+      context,
+      ref,
+      changes,
+      description: changes.length == 1
+          ? 'Moved'
+          : 'Moved ${changes.length} events',
+    );
   }
 
   void _clearDrag() {
@@ -1829,20 +2023,15 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           _local(dayStart),
         );
       } else {
-        await runUndoableMoveMany(
-          context,
-          ref,
-          [
-            for (final m in timed)
-              ScheduleChange(
-                m.id,
-                startAt: dayStart,
-                endAt: null,
-                isAllDay: true,
-              ),
-          ],
-          description: 'Made ${timed.length} events all-day',
-        );
+        await runUndoableMoveMany(context, ref, [
+          for (final m in timed)
+            ScheduleChange(
+              m.id,
+              startAt: dayStart,
+              endAt: null,
+              isAllDay: true,
+            ),
+        ], description: 'Made ${timed.length} events all-day');
       }
     } finally {
       if (mounted) _clearDrag();
@@ -2102,8 +2291,25 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     return true;
   }
 
+  double? _lastOffset;
+  Timer? _settle;
+
   void _onScrolled() {
-    if (mounted && _updateWindow()) setState(() {});
+    if (!mounted) return;
+    // Hide badges / freeze toolbar hover while the offset is moving; a
+    // debounce timer flips it back ~150 ms after the last movement.
+    final offset = _scrollOffsetNow;
+    final last = _lastOffset;
+    _lastOffset = offset;
+    if (last != null && last != offset) {
+      _cross.scrolling.value = true;
+      _settle?.cancel();
+      _settle = Timer(_kScrollSettle, () {
+        _settle = null;
+        _cross.scrolling.value = false;
+      });
+    }
+    if (_updateWindow()) setState(() {});
   }
 
   bool _inWindow(_Placed p) {
@@ -2152,10 +2358,12 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         builder: (dragging) => _HoverToolbarHost(
           actionId: seg.item.id,
           suppressed: dragging,
+          scrolling: _cross.scrolling,
           child: _EventBlock(
             seg: seg,
             height: height,
             width: blockW,
+            scrolling: _cross.scrolling,
             running: running,
             dragging: dragging,
             onDragStart: (kind, pos) => _dragStart(p, kind, pos),
@@ -2217,6 +2425,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// Ghost of an all-day chip being dragged over the grid: a one-hour block
   /// (the real length is predicted when dropped) at the snapped start.
   List<Widget> _chipGhost(ColorScheme scheme, Offset pos) {
+    if (_cross.stripDayAt(pos, widget.dayWidth, widget.dayCount) != null) {
+      return const [];
+    }
     final cell = _gridCellAt(pos);
     if (cell == null) return const [];
     final (day, minute) = cell;
@@ -2541,6 +2752,10 @@ class _EventBlock extends ConsumerStatefulWidget {
   final _Seg seg;
   final double height;
   final double width;
+
+  /// Hides the direction badge while the grid scrolls (only that subtree
+  /// listens, so the block itself is not rebuilt when it flips).
+  final ValueListenable<bool> scrolling;
   final bool running;
   final bool dragging;
   final void Function(_DragKind, Offset) onDragStart;
@@ -2550,6 +2765,7 @@ class _EventBlock extends ConsumerStatefulWidget {
     required this.seg,
     required this.height,
     required this.width,
+    required this.scrolling,
     required this.running,
     required this.dragging,
     required this.onDragStart,
@@ -2586,24 +2802,32 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     final scheme = theme.colorScheme;
     final item = seg.item;
     final done = item.isDoneBefore;
-    final urgency = done || widget.running
+    // Only the band matters for the colour, so the once-a-minute urgency
+    // refresh rebuilds a block only when its band changes.
+    final band = widget.running
         ? null
-        : ref.watch(actionUrgencyProvider.select((m) => m[item.id]));
-    final uc = urgency == null
+        : ref.watch(
+            actionUrgencyProvider.select(
+              (m) => m[item.id] == null ? null : urgencyBand(m[item.id]!),
+            ),
+          );
+    final dark = theme.brightness == Brightness.dark;
+    // Done events keep their band, muted; unlinked done stay grey.
+    final uc = band == null
         ? null
-        : urgencyColors(urgency, dark: theme.brightness == Brightness.dark);
+        : done
+        ? urgencyColorsMutedForBand(band, dark: dark)
+        : urgencyColorsForBand(band, dark: dark);
     final bg = widget.running
         ? scheme.primary
-        : done
-        ? scheme.surfaceContainerHighest
-        : uc?.bg ?? scheme.primaryContainer;
+        : uc?.bg ??
+              (done ? scheme.surfaceContainerHighest : scheme.primaryContainer);
     final fg = widget.running
         ? scheme.onPrimary
-        : done
-        ? scheme.onSurfaceVariant
-        : uc?.fg ?? scheme.onPrimaryContainer;
+        : uc?.fg ??
+              (done ? scheme.onSurfaceVariant : scheme.onPrimaryContainer);
     final name = TextStyle(
-      fontSize: 9,
+      fontSize: 10,
       fontWeight: FontWeight.w600,
       color: fg,
       decoration: done ? TextDecoration.lineThrough : null,
@@ -2616,13 +2840,20 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     // without opening the event. The end is the one the block is drawn to.
     final timeRange = seg.timeRange;
     final padTop = height >= 16 ? 3.0 : 0.0;
+    final icons = ref.watch(
+      actionDirectionIconsProvider.select((m) => m[item.id]),
+    );
+    // The badge floats over the bottom-right corner (outside the cached label,
+    // so the label-fit cache never depends on it); blocks under 18 px have no
+    // room for it.
+    final showIcons = icons != null && height >= 18;
 
     // The label is ONE paragraph. A block gets a ClipRect only when its text
     // is taller than it; otherwise nothing needs clipping.
     Widget label;
     var clip = false;
     if (height >= 26) {
-      // Title (w600 9 px, up to two lines) then the time on its own line
+      // Title (w600 10 px, up to two lines) then the time on its own line
       // (8 px normal): one TextSpan tree = one paragraph.
       final children = [
         TextSpan(text: '${item.name}\n'),
@@ -2643,7 +2874,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
           style: DefaultTextStyle.of(context).style.merge(name),
           children: children,
         ),
-        '${textWidth.toStringAsFixed(1)}|${scaler.scale(9)}|${item.name}|$timeRange',
+        '${textWidth.toStringAsFixed(1)}|${scaler.scale(10)}|${item.name}|$timeRange',
         textWidth,
         scaler,
       );
@@ -2686,11 +2917,38 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
       );
       clip = height < 12;
     }
+    // A one-line label gives the badge its width as right padding so the name
+    // ellipsizes instead of running under it.
+    final reserve = showIcons && height < 26 ? _badgeWidth(icons) : 0.0;
     Widget content = Padding(
-      padding: EdgeInsets.fromLTRB(6, padTop, 6, 0),
+      padding: EdgeInsets.fromLTRB(6, padTop, 6 + reserve, 0),
       child: label,
     );
     if (clip) content = ClipRect(child: content);
+    if (showIcons) {
+      content = Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.none,
+        children: [
+          content,
+          Positioned(
+            right: 2,
+            bottom: 2,
+            child: _HideWhileScrolling(
+              scrolling: widget.scrolling,
+              child: _DirectionChip(
+                color: bg,
+                child: _CountedBadge(
+                  key: ValueKey('block-icons-${item.id}'),
+                  actionId: item.id,
+                  icons: icons,
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
     Widget box = DecoratedBox(
       decoration: BoxDecoration(

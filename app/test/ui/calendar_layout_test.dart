@@ -234,23 +234,26 @@ void main() {
       expect(r['b']!.$2, 2);
       expect(r['c'], (0, 1));
     });
-    test('an event expands over lanes that are free for its whole duration', () {
-      final r = pack([
-        ('A', u(29, 5), u(29, 19)), // 08:00-22:00 local
-        ('B', u(29, 5, 30), u(29, 6, 10)), // 08:30-09:10
-        ('C', u(29, 6), u(29, 7)), // 09:00-10:00
-        ('D', u(29, 7, 10), u(29, 8)), // 10:10-11:00
-      ]);
-      final byId = {for (final a in r) a.event.$1: a};
-      for (final a in r) {
-        expect(a.laneCount, 3);
-      }
-      expect((byId['A']!.lane, byId['A']!.span), (0, 1));
-      expect((byId['B']!.lane, byId['B']!.span), (1, 1)); // C blocks lane 2
-      expect((byId['C']!.lane, byId['C']!.span), (2, 1));
-      // D reuses lane 1 and grows over the free lane 2: 2/3 of the width.
-      expect((byId['D']!.lane, byId['D']!.span), (1, 2));
-    });
+    test(
+      'an event expands over lanes that are free for its whole duration',
+      () {
+        final r = pack([
+          ('A', u(29, 5), u(29, 19)), // 08:00-22:00 local
+          ('B', u(29, 5, 30), u(29, 6, 10)), // 08:30-09:10
+          ('C', u(29, 6), u(29, 7)), // 09:00-10:00
+          ('D', u(29, 7, 10), u(29, 8)), // 10:10-11:00
+        ]);
+        final byId = {for (final a in r) a.event.$1: a};
+        for (final a in r) {
+          expect(a.laneCount, 3);
+        }
+        expect((byId['A']!.lane, byId['A']!.span), (0, 1));
+        expect((byId['B']!.lane, byId['B']!.span), (1, 1)); // C blocks lane 2
+        expect((byId['C']!.lane, byId['C']!.span), (2, 1));
+        // D reuses lane 1 and grows over the free lane 2: 2/3 of the width.
+        expect((byId['D']!.lane, byId['D']!.span), (1, 2));
+      },
+    );
     test('span stops at a lane that is busy during the event', () {
       final r = pack([
         ('a', u(29, 7), u(29, 9)),

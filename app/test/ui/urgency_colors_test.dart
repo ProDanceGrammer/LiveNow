@@ -52,4 +52,23 @@ void main() {
     expect(urgencyForeground(const Color(0xFFFFFFFF)), const Color(0xFF1E293B));
     expect(urgencyForeground(const Color(0xFF0E7490)), const Color(0xFFFFFFFF));
   });
+
+  test('muted colours stay readable (contrast >= 4.5) in both themes', () {
+    for (final u in [-5.0, 0.0, 50.0, 200.0, 400.0, 900.0]) {
+      for (final dark in [false, true]) {
+        final c = urgencyColorsMuted(u, dark: dark);
+        final l1 = c.bg.computeLuminance();
+        final l2 = c.fg.computeLuminance();
+        final hi = l1 > l2 ? l1 : l2;
+        final lo = l1 > l2 ? l2 : l1;
+        expect(
+          (hi + 0.05) / (lo + 0.05),
+          greaterThanOrEqualTo(4.5),
+          reason: 'u=$u dark=$dark',
+        );
+        // Muted = differs from the full band colour.
+        expect(c.bg, isNot(urgencyColors(u, dark: dark).bg));
+      }
+    }
+  });
 }

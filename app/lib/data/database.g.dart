@@ -439,6 +439,17 @@ class $ActionsTableTable extends ActionsTable
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _notesTextMeta = const VerificationMeta(
+    'notesText',
+  );
+  @override
+  late final GeneratedColumn<String> notesText = GeneratedColumn<String>(
+    'notes_text',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _completedAtMeta = const VerificationMeta(
     'completedAt',
   );
@@ -510,6 +521,7 @@ class $ActionsTableTable extends ActionsTable
     estimatedMinutes,
     resultNote,
     notes,
+    notesText,
     completedAt,
     sequenceNumber,
     countableActivityId,
@@ -599,6 +611,12 @@ class $ActionsTableTable extends ActionsTable
       context.handle(
         _notesMeta,
         notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    if (data.containsKey('notes_text')) {
+      context.handle(
+        _notesTextMeta,
+        notesText.isAcceptableOrUnknown(data['notes_text']!, _notesTextMeta),
       );
     }
     if (data.containsKey('completed_at')) {
@@ -697,6 +715,10 @@ class $ActionsTableTable extends ActionsTable
         DriftSqlType.string,
         data['${effectivePrefix}notes'],
       ),
+      notesText: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes_text'],
+      ),
       completedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}completed_at'],
@@ -747,6 +769,10 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   /// editor in the action dialog; `result_note` stays a separate, unused
   /// plain "outcome" field.
   final String? notes;
+
+  /// Lower-cased plain text of [notes], derived (see `notesPlainText`) and
+  /// written next to it; only used by the All list's notes search.
+  final String? notesText;
   final String? completedAt;
 
   /// Position in a "Continue with Same Action" chain (`[#2] Read a Bible`).
@@ -770,6 +796,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     this.estimatedMinutes,
     this.resultNote,
     this.notes,
+    this.notesText,
     this.completedAt,
     this.sequenceNumber,
     this.countableActivityId,
@@ -801,6 +828,9 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     }
     if (!nullToAbsent || notes != null) {
       map['notes'] = Variable<String>(notes);
+    }
+    if (!nullToAbsent || notesText != null) {
+      map['notes_text'] = Variable<String>(notesText);
     }
     if (!nullToAbsent || completedAt != null) {
       map['completed_at'] = Variable<String>(completedAt);
@@ -841,6 +871,9 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       notes: notes == null && nullToAbsent
           ? const Value.absent()
           : Value(notes),
+      notesText: notesText == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notesText),
       completedAt: completedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(completedAt),
@@ -872,6 +905,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       estimatedMinutes: serializer.fromJson<int?>(json['estimatedMinutes']),
       resultNote: serializer.fromJson<String?>(json['resultNote']),
       notes: serializer.fromJson<String?>(json['notes']),
+      notesText: serializer.fromJson<String?>(json['notesText']),
       completedAt: serializer.fromJson<String?>(json['completedAt']),
       sequenceNumber: serializer.fromJson<int?>(json['sequenceNumber']),
       countableActivityId: serializer.fromJson<String?>(
@@ -896,6 +930,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       'estimatedMinutes': serializer.toJson<int?>(estimatedMinutes),
       'resultNote': serializer.toJson<String?>(resultNote),
       'notes': serializer.toJson<String?>(notes),
+      'notesText': serializer.toJson<String?>(notesText),
       'completedAt': serializer.toJson<String?>(completedAt),
       'sequenceNumber': serializer.toJson<int?>(sequenceNumber),
       'countableActivityId': serializer.toJson<String?>(countableActivityId),
@@ -916,6 +951,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     Value<int?> estimatedMinutes = const Value.absent(),
     Value<String?> resultNote = const Value.absent(),
     Value<String?> notes = const Value.absent(),
+    Value<String?> notesText = const Value.absent(),
     Value<String?> completedAt = const Value.absent(),
     Value<int?> sequenceNumber = const Value.absent(),
     Value<String?> countableActivityId = const Value.absent(),
@@ -935,6 +971,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
         : this.estimatedMinutes,
     resultNote: resultNote.present ? resultNote.value : this.resultNote,
     notes: notes.present ? notes.value : this.notes,
+    notesText: notesText.present ? notesText.value : this.notesText,
     completedAt: completedAt.present ? completedAt.value : this.completedAt,
     sequenceNumber: sequenceNumber.present
         ? sequenceNumber.value
@@ -966,6 +1003,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           ? data.resultNote.value
           : this.resultNote,
       notes: data.notes.present ? data.notes.value : this.notes,
+      notesText: data.notesText.present ? data.notesText.value : this.notesText,
       completedAt: data.completedAt.present
           ? data.completedAt.value
           : this.completedAt,
@@ -994,6 +1032,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           ..write('estimatedMinutes: $estimatedMinutes, ')
           ..write('resultNote: $resultNote, ')
           ..write('notes: $notes, ')
+          ..write('notesText: $notesText, ')
           ..write('completedAt: $completedAt, ')
           ..write('sequenceNumber: $sequenceNumber, ')
           ..write('countableActivityId: $countableActivityId, ')
@@ -1016,6 +1055,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     estimatedMinutes,
     resultNote,
     notes,
+    notesText,
     completedAt,
     sequenceNumber,
     countableActivityId,
@@ -1037,6 +1077,7 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           other.estimatedMinutes == this.estimatedMinutes &&
           other.resultNote == this.resultNote &&
           other.notes == this.notes &&
+          other.notesText == this.notesText &&
           other.completedAt == this.completedAt &&
           other.sequenceNumber == this.sequenceNumber &&
           other.countableActivityId == this.countableActivityId &&
@@ -1056,6 +1097,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   final Value<int?> estimatedMinutes;
   final Value<String?> resultNote;
   final Value<String?> notes;
+  final Value<String?> notesText;
   final Value<String?> completedAt;
   final Value<int?> sequenceNumber;
   final Value<String?> countableActivityId;
@@ -1074,6 +1116,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.estimatedMinutes = const Value.absent(),
     this.resultNote = const Value.absent(),
     this.notes = const Value.absent(),
+    this.notesText = const Value.absent(),
     this.completedAt = const Value.absent(),
     this.sequenceNumber = const Value.absent(),
     this.countableActivityId = const Value.absent(),
@@ -1093,6 +1136,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.estimatedMinutes = const Value.absent(),
     this.resultNote = const Value.absent(),
     this.notes = const Value.absent(),
+    this.notesText = const Value.absent(),
     this.completedAt = const Value.absent(),
     this.sequenceNumber = const Value.absent(),
     this.countableActivityId = const Value.absent(),
@@ -1115,6 +1159,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Expression<int>? estimatedMinutes,
     Expression<String>? resultNote,
     Expression<String>? notes,
+    Expression<String>? notesText,
     Expression<String>? completedAt,
     Expression<int>? sequenceNumber,
     Expression<String>? countableActivityId,
@@ -1134,6 +1179,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       if (estimatedMinutes != null) 'estimated_minutes': estimatedMinutes,
       if (resultNote != null) 'result_note': resultNote,
       if (notes != null) 'notes': notes,
+      if (notesText != null) 'notes_text': notesText,
       if (completedAt != null) 'completed_at': completedAt,
       if (sequenceNumber != null) 'sequence_number': sequenceNumber,
       if (countableActivityId != null)
@@ -1156,6 +1202,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Value<int?>? estimatedMinutes,
     Value<String?>? resultNote,
     Value<String?>? notes,
+    Value<String?>? notesText,
     Value<String?>? completedAt,
     Value<int?>? sequenceNumber,
     Value<String?>? countableActivityId,
@@ -1175,6 +1222,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       resultNote: resultNote ?? this.resultNote,
       notes: notes ?? this.notes,
+      notesText: notesText ?? this.notesText,
       completedAt: completedAt ?? this.completedAt,
       sequenceNumber: sequenceNumber ?? this.sequenceNumber,
       countableActivityId: countableActivityId ?? this.countableActivityId,
@@ -1220,6 +1268,9 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     if (notes.present) {
       map['notes'] = Variable<String>(notes.value);
     }
+    if (notesText.present) {
+      map['notes_text'] = Variable<String>(notesText.value);
+    }
     if (completedAt.present) {
       map['completed_at'] = Variable<String>(completedAt.value);
     }
@@ -1257,6 +1308,7 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
           ..write('estimatedMinutes: $estimatedMinutes, ')
           ..write('resultNote: $resultNote, ')
           ..write('notes: $notes, ')
+          ..write('notesText: $notesText, ')
           ..write('completedAt: $completedAt, ')
           ..write('sequenceNumber: $sequenceNumber, ')
           ..write('countableActivityId: $countableActivityId, ')
@@ -3813,6 +3865,7 @@ typedef $$ActionsTableTableCreateCompanionBuilder =
       Value<int?> estimatedMinutes,
       Value<String?> resultNote,
       Value<String?> notes,
+      Value<String?> notesText,
       Value<String?> completedAt,
       Value<int?> sequenceNumber,
       Value<String?> countableActivityId,
@@ -3833,6 +3886,7 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
       Value<int?> estimatedMinutes,
       Value<String?> resultNote,
       Value<String?> notes,
+      Value<String?> notesText,
       Value<String?> completedAt,
       Value<int?> sequenceNumber,
       Value<String?> countableActivityId,
@@ -4024,6 +4078,11 @@ class $$ActionsTableTableFilterComposer
 
   ColumnFilters<String> get notes => $composableBuilder(
     column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notesText => $composableBuilder(
+    column: $table.notesText,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4239,6 +4298,11 @@ class $$ActionsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get notesText => $composableBuilder(
+    column: $table.notesText,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get completedAt => $composableBuilder(
     column: $table.completedAt,
     builder: (column) => ColumnOrderings(column),
@@ -4333,6 +4397,9 @@ class $$ActionsTableTableAnnotationComposer
 
   GeneratedColumn<String> get notes =>
       $composableBuilder(column: $table.notes, builder: (column) => column);
+
+  GeneratedColumn<String> get notesText =>
+      $composableBuilder(column: $table.notesText, builder: (column) => column);
 
   GeneratedColumn<String> get completedAt => $composableBuilder(
     column: $table.completedAt,
@@ -4526,6 +4593,7 @@ class $$ActionsTableTableTableManager
                 Value<int?> estimatedMinutes = const Value.absent(),
                 Value<String?> resultNote = const Value.absent(),
                 Value<String?> notes = const Value.absent(),
+                Value<String?> notesText = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> sequenceNumber = const Value.absent(),
                 Value<String?> countableActivityId = const Value.absent(),
@@ -4544,6 +4612,7 @@ class $$ActionsTableTableTableManager
                 estimatedMinutes: estimatedMinutes,
                 resultNote: resultNote,
                 notes: notes,
+                notesText: notesText,
                 completedAt: completedAt,
                 sequenceNumber: sequenceNumber,
                 countableActivityId: countableActivityId,
@@ -4564,6 +4633,7 @@ class $$ActionsTableTableTableManager
                 Value<int?> estimatedMinutes = const Value.absent(),
                 Value<String?> resultNote = const Value.absent(),
                 Value<String?> notes = const Value.absent(),
+                Value<String?> notesText = const Value.absent(),
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> sequenceNumber = const Value.absent(),
                 Value<String?> countableActivityId = const Value.absent(),
@@ -4582,6 +4652,7 @@ class $$ActionsTableTableTableManager
                 estimatedMinutes: estimatedMinutes,
                 resultNote: resultNote,
                 notes: notes,
+                notesText: notesText,
                 completedAt: completedAt,
                 sequenceNumber: sequenceNumber,
                 countableActivityId: countableActivityId,

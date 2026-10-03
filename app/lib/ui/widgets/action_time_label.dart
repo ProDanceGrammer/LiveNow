@@ -23,6 +23,7 @@ class ActionTimeLabel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final color = style?.color ?? Theme.of(context).colorScheme.secondary;
     return InkWell(
+      borderRadius: BorderRadius.circular(8),
       onTap: () => QuickTimeEditDialog.editAction(context, ref, action),
       child: Text(
         text,

@@ -125,20 +125,22 @@ void main() {
           allDay: e.value['allDay'] == true,
         );
       }
-      final sqlDone = (await db
-              .customSelect(
-                'SELECT id FROM actions WHERE (${doneBeforeSql('?')})',
-                variables: [Variable.withString(dateTimeToDb(now)!)],
-              )
-              .get())
-          .map((r) => r.read<String>('id'))
-          .toSet();
+      final sqlDone =
+          (await db
+                  .customSelect(
+                    'SELECT id FROM actions WHERE (${doneBeforeSql('?')})',
+                    variables: [Variable.withString(dateTimeToDb(now)!)],
+                  )
+                  .get())
+              .map((r) => r.read<String>('id'))
+              .toSet();
       for (final row in await db.select(db.actionsTable).get()) {
         final dart = done_rule.isDoneBefore(
           startAt: dateTimeFromDb(row.startAt),
           endAt: dateTimeFromDb(row.endAt),
           isAllDay: row.isAllDay,
           done: row.done,
+          nowUtc: now,
         );
         expect(sqlDone.contains(row.id), dart, reason: row.id);
       }
@@ -192,7 +194,10 @@ void main() {
 
       final notDone = await queries.watchCurrentNotDone(limit: 10000).first;
       final done = await queries.watchCurrentDone(limit: 10000).first;
-      expect(notDone.map((a) => a.id).toSet(), oldNotDone.map((a) => a.id).toSet());
+      expect(
+        notDone.map((a) => a.id).toSet(),
+        oldNotDone.map((a) => a.id).toSet(),
+      );
       expect(done.map((a) => a.id).toSet(), oldDone.map((a) => a.id).toSet());
       // Ties (equal / null keys) may come in any order, so compare the keys.
       expect(
@@ -221,7 +226,9 @@ void main() {
               name: 'Bulk $i',
               // 2500 done (past, finished), 2500 open (future).
               startAt: Value(
-                dateTimeToDb(now.add(Duration(minutes: i < 2500 ? -5000 + i : 100 + i))),
+                dateTimeToDb(
+                  now.add(Duration(minutes: i < 2500 ? -5000 + i : 100 + i)),
+                ),
               ),
               endAt: Value(
                 dateTimeToDb(
@@ -267,7 +274,10 @@ void main() {
       expect(cal, isNotEmpty);
       final open = await queries.watchOpenActions().first;
       expect(open, hasLength(2500));
-      expect(open.every((a) => a.notes == null && a.resultNote == null), isTrue);
+      expect(
+        open.every((a) => a.notes == null && a.resultNote == null),
+        isTrue,
+      );
       final linked = await queries.watchMetricLinkedActions().first;
       expect(linked, hasLength(1667));
       expect(
@@ -275,9 +285,9 @@ void main() {
         isTrue,
       );
       // ...while the data really is there for the editor's full-row read.
-      final full = await (db.select(db.actionsTable)
-            ..where((t) => t.id.equals('b0')))
-          .getSingle();
+      final full = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals('b0'))).getSingle();
       expect(full.notes, _bigNote);
 
       final rowsOld = 5000;
@@ -311,15 +321,27 @@ void main() {
       expect(counts, [2]);
 
       // Only the notes column changes: the list result is identical.
-      await db.customUpdate("UPDATE actions SET notes = 'hello' WHERE id = 'a'", updates: {db.actionsTable});
+      await db.customUpdate(
+        "UPDATE actions SET notes = 'hello' WHERE id = 'a'",
+        updates: {db.actionsTable},
+      );
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(emissions, hasLength(1));
       expect(counts, [2]);
 
       // A visible change does emit, once, even for a burst of writes.
-      await db.customUpdate("UPDATE actions SET name = 'x1' WHERE id = 'a'", updates: {db.actionsTable});
-      await db.customUpdate("UPDATE actions SET name = 'x2' WHERE id = 'a'", updates: {db.actionsTable});
-      await db.customUpdate("UPDATE actions SET name = 'x3' WHERE id = 'a'", updates: {db.actionsTable});
+      await db.customUpdate(
+        "UPDATE actions SET name = 'x1' WHERE id = 'a'",
+        updates: {db.actionsTable},
+      );
+      await db.customUpdate(
+        "UPDATE actions SET name = 'x2' WHERE id = 'a'",
+        updates: {db.actionsTable},
+      );
+      await db.customUpdate(
+        "UPDATE actions SET name = 'x3' WHERE id = 'a'",
+        updates: {db.actionsTable},
+      );
       await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(emissions.length, inInclusiveRange(2, 3));
       expect(emissions.last.firstWhere((a) => a.id == 'a').name, 'x3');
@@ -327,28 +349,37 @@ void main() {
   });
 
   group('stream helpers', () {
-    test('debounced: first event now, then only the last after the quiet', () async {
-      final src = StreamController<int>();
-      final out = <int>[];
-      final sub = debounced(src.stream, const Duration(milliseconds: 60)).listen(out.add);
-      src.add(1);
-      await Future<void>.delayed(Duration.zero);
-      expect(out, [1]);
-      src.add(2);
-      src.add(3);
-      src.add(4);
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(out, [1]);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      expect(out, [1, 4]);
-      await sub.cancel();
-      await src.close();
-    });
+    test(
+      'debounced: first event now, then only the last after the quiet',
+      () async {
+        final src = StreamController<int>();
+        final out = <int>[];
+        final sub = debounced(
+          src.stream,
+          const Duration(milliseconds: 60),
+        ).listen(out.add);
+        src.add(1);
+        await Future<void>.delayed(Duration.zero);
+        expect(out, [1]);
+        src.add(2);
+        src.add(3);
+        src.add(4);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(out, [1]);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(out, [1, 4]);
+        await sub.cancel();
+        await src.close();
+      },
+    );
 
     test('debounced: cancel drops the pending event and the timer', () async {
       final src = StreamController<int>();
       final out = <int>[];
-      final sub = debounced(src.stream, const Duration(milliseconds: 30)).listen(out.add);
+      final sub = debounced(
+        src.stream,
+        const Duration(milliseconds: 30),
+      ).listen(out.add);
       src.add(1);
       src.add(2);
       await Future<void>.delayed(Duration.zero);
@@ -363,7 +394,10 @@ void main() {
       final src = StreamController<int>();
       final out = <int>[];
       final done = Completer<void>();
-      debounced(src.stream, const Duration(seconds: 5)).listen(out.add, onDone: done.complete);
+      debounced(
+        src.stream,
+        const Duration(seconds: 5),
+      ).listen(out.add, onDone: done.complete);
       src.add(1);
       src.add(2);
       await src.close();

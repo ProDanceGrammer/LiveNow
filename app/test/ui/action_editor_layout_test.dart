@@ -12,6 +12,7 @@ import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/action_editor.dart';
 import 'package:livenow/ui/widgets/growth_direction_dialog.dart';
 import 'package:livenow/ui/widgets/notes_editor.dart';
+import 'package:livenow/ui/widgets/section_block.dart';
 
 /// The reworked action edit menu: hint-only Name, Ctrl+Enter, hidden Time
 /// tracking, two-column Connected actions, opening related entities.
@@ -162,19 +163,24 @@ void main() {
     await teardown(tester);
   });
 
-  testWidgets('Connected actions: Previous left, Next right, only a + when '
-      'empty', (tester) async {
+  testWidgets('Connected actions: headers with a + at their right, nothing '
+      'else when empty', (tester) async {
     setup(tester);
     final id = await seedAction(tester, 'Middle');
     await open(tester, existing: await rowOf(tester, id));
 
     expect(find.text('Connected actions'), findsOneWidget);
-    expect(find.text('Previous'), findsOneWidget);
-    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Previous actions'), findsOneWidget);
+    expect(find.text('Next actions'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Previous')).dx,
-      lessThan(tester.getTopLeft(find.text('Next')).dx),
+      tester.getTopLeft(find.text('Previous actions')).dx,
+      lessThan(tester.getTopLeft(find.text('Next actions')).dx),
     );
+    // The + sits to the right of its title, on the same row.
+    final prevTitle = tester.getRect(find.text('Previous actions'));
+    final prevPlus = tester.getRect(find.byTooltip('Add previous action'));
+    expect(prevPlus.left, greaterThanOrEqualTo(prevTitle.right));
+    expect((prevPlus.center.dy - prevTitle.center.dy).abs(), lessThan(8));
     final connected = find.widgetWithText(ExpansionTile, 'Connected actions');
     expect(
       find.descendant(of: connected, matching: find.text('None')),
@@ -187,8 +193,9 @@ void main() {
     await teardown(tester);
   });
 
-  testWidgets('Manual parameters is a plain tile holding only the three '
-      'parameters', (tester) async {
+  testWidgets('Manual parameters holds only the countable activity', (
+    tester,
+  ) async {
     setup(tester);
     final id = await seedAction(tester, 'Params');
     await open(tester, existing: await rowOf(tester, id));
@@ -200,8 +207,8 @@ void main() {
     await tester.tap(find.text('Manual parameters'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Postpone flexibility'), findsOneWidget);
-    expect(find.text('Depth (learning)'), findsOneWidget);
+    expect(find.text('Postpone flexibility'), findsNothing);
+    expect(find.text('Depth (learning)'), findsNothing);
     expect(find.text('Countable activity'), findsOneWidget);
     // Directions and the All-day switch live outside it.
     expect(
@@ -240,12 +247,10 @@ void main() {
     expect(find.byType(ActionEditorDialog), findsOneWidget);
 
     // From the direction back to its action (a second editor on top).
-    final chip = find.widgetWithText(ActionChip, 'Run');
-    await tester.tap(find.text('Linked actions (1)'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.ensureVisible(chip);
-    await tester.tap(chip);
+    final row = find.widgetWithText(ListTile, 'Run');
+    expect(find.text('Linked actions (1)'), findsOneWidget);
+    await tester.ensureVisible(row);
+    await tester.tap(row);
     await tester.pump(const Duration(milliseconds: 500));
     await settle(tester);
     expect(find.byType(ActionEditorDialog), findsNWidgets(2));
@@ -282,6 +287,222 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(AlertDialog), findsNothing);
+    await teardown(tester);
+  });
+
+  testWidgets('Done switch: only for an all-day action, right of All day, and '
+      'toggling All day does not move it between rows', (tester) async {
+    setup(tester);
+    final id = await seedAction(tester, 'Chore');
+    await open(tester, existing: await rowOf(tester, id));
+    final allDay = find.byKey(const ValueKey('editorAllDaySwitch'));
+    final done = find.byKey(const ValueKey('editorDoneSwitch'));
+    expect(done, findsNothing);
+    final y = tester.getCenter(allDay).dy;
+    final x = tester.getCenter(allDay).dx;
+
+    await tester.tap(allDay);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(done, findsOneWidget);
+    expect(tester.getCenter(done).dx, greaterThan(tester.getCenter(allDay).dx));
+    expect(tester.getCenter(allDay).dx, x);
+    expect(tester.getCenter(allDay).dy, y);
+    expect(tester.getCenter(done).dy, y);
+    expect(tester.widget<Switch>(done).value, isFalse);
+
+    await tester.tap(allDay);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(done, findsNothing);
+    expect(tester.getCenter(allDay).dy, y);
+    await teardown(tester);
+  });
+
+  testWidgets('Done switch writes the done flag straight away', (tester) async {
+    setup(tester);
+    final id = (await tester.runAsync(
+      () => seedContainer
+          .read(actionServiceProvider)
+          .createAction(
+            name: 'Chore',
+            isAllDay: true,
+            startAt: DateTime.utc(2026, 10, 3),
+          ),
+    ))!;
+    await open(tester, existing: await rowOf(tester, id));
+    final done = find.byKey(const ValueKey('editorDoneSwitch'));
+    expect(tester.widget<Switch>(done).value, isFalse);
+    await tester.tap(done);
+    await tester.pump();
+    await settle(tester);
+    await settle(tester);
+    expect((await rowOf(tester, id)).done, isTrue);
+    expect(tester.widget<Switch>(done).value, isTrue);
+    await tester.pump(const Duration(seconds: 6)); // the Undo toast
+    await teardown(tester);
+  });
+
+  testWidgets('Countable activity lists templates without a same-name '
+      'activity and picking one creates it', (tester) async {
+    setup(tester);
+    final id = await seedAction(tester, 'Run');
+    await tester.runAsync(() async {
+      await db
+          .into(db.actionTemplatesTable)
+          .insert(
+            ActionTemplatesTableCompanion.insert(
+              id: 'tpl1',
+              name: 'Gym',
+              payload: '{}',
+            ),
+          );
+      await seedContainer
+          .read(actionServiceProvider)
+          .createCountableActivity('gym');
+      await db
+          .into(db.actionTemplatesTable)
+          .insert(
+            ActionTemplatesTableCompanion.insert(
+              id: 'tpl2',
+              name: 'Yoga',
+              payload: '{}',
+            ),
+          );
+    });
+    await open(tester, existing: await rowOf(tester, id));
+    await tester.tap(find.text('Manual parameters'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+    final field = find.byKey(const ValueKey('countableActivityField'));
+    await tester.ensureVisible(field);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(field);
+    await tester.pump(const Duration(milliseconds: 400));
+    // The picker dialog: None on top, New activity... at the bottom.
+    expect(find.byKey(const ValueKey('activityNone')), findsOneWidget);
+    expect(find.byKey(const ValueKey('activityNew')), findsOneWidget);
+    expect(find.text('gym'), findsOneWidget);
+    expect(find.text('Gym (template)'), findsNothing); // has an activity
+    expect(find.text('Yoga (template)'), findsOneWidget);
+    await tester.tap(find.text('Yoga (template)').last);
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+    final acts = (await tester.runAsync(
+      () => db.select(db.countableActivitiesTable).get(),
+    ))!;
+    expect(acts.map((a) => a.name), containsAll(['gym', 'Yoga']));
+    await teardown(tester);
+  });
+
+  testWidgets('Countable activity picker: search filters, None and New stay '
+      'pinned, None clears the choice', (tester) async {
+    setup(tester);
+    final id = await seedAction(tester, 'Run');
+    await tester.runAsync(() async {
+      final svc = seedContainer.read(actionServiceProvider);
+      final a = await svc.createCountableActivity('Swimming');
+      await svc.createCountableActivity('Reading');
+      await svc.setCountableActivity(id, a);
+    });
+    await open(tester, existing: await rowOf(tester, id));
+    await tester.tap(find.text('Manual parameters'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+    expect(find.text('Swimming'), findsOneWidget); // in the closed field
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('countableActivityField')),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const ValueKey('countableActivityField')));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Reading'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Search'), 'READ');
+    await tester.pump();
+    expect(find.text('Reading'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ListTile),
+        matching: find.text('Swimming'),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('activityNone')), findsOneWidget);
+    expect(find.byKey(const ValueKey('activityNew')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('activityNone')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('countableActivityField')),
+        matching: find.text('None'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Swimming'), findsNothing);
+    await teardown(tester);
+  });
+
+  testWidgets('Action picker rows show the short schedule', (tester) async {
+    setup(tester);
+    final id = await seedAction(tester, 'Middle');
+    await tester.runAsync(
+      () => seedContainer
+          .read(actionServiceProvider)
+          .createAction(
+            name: 'Other',
+            // Far in the future so the action is always still open (the
+            // picker lists open actions only) and never in the current year.
+            startAt: DateTime.utc(2099, 10, 3, 10, 0),
+            endAt: DateTime.utc(2099, 10, 3, 11, 40),
+          ),
+    );
+    await open(tester, existing: await rowOf(tester, id));
+    await tester.tap(find.byTooltip('Add next action'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+    expect(find.text('Choose an action'), findsOneWidget);
+    expect(find.text('Other'), findsOneWidget);
+    expect(find.textContaining("3 Oct 99' 13:00-14:40"), findsOneWidget);
+    await tester.tap(find.text('Cancel').last);
+    await tester.pump(const Duration(milliseconds: 400));
+    await teardown(tester);
+  });
+
+  testWidgets('Manual parameters is a section block; a very long countable '
+      'activity name is shown whole without an overflow', (tester) async {
+    setup(tester);
+    final longName =
+        'A very long countable activity name that keeps going and going '
+        'until it certainly cannot fit on a single line of the dropdown';
+    await tester.runAsync(() async {
+      final svc = seedContainer.read(actionServiceProvider);
+      final act = await svc.createCountableActivity(longName);
+      final id = await svc.createAction(name: 'Chore');
+      await svc.setCountableActivity(id, act);
+    });
+    final row = (await tester.runAsync(
+      () => db.select(db.actionsTable).getSingle(),
+    ))!;
+    await open(tester, existing: row);
+
+    final title = find.text('Manual parameters');
+    expect(
+      find.ancestor(of: title, matching: find.byType(SectionBlock)),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(title);
+    await tester.tap(title);
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+
+    // The closed field shows the whole name (not clipped to one line).
+    expect(find.text(longName), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    // All four section headers share the horizontal tile padding.
+    for (final t in tester.widgetList<ExpansionTile>(
+      find.byType(ExpansionTile),
+    )) {
+      expect(t.tilePadding, kSectionTilePadding);
+    }
     await teardown(tester);
   });
 }

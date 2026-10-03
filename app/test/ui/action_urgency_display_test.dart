@@ -9,7 +9,10 @@ import 'package:livenow/domain/growth_rules.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/action_card.dart';
 import 'package:livenow/ui/widgets/action_editor.dart';
+import 'package:livenow/ui/urgency_colors.dart';
 import 'package:livenow/ui/widgets/action_tile.dart';
+import 'package:livenow/ui/widgets/param_icons.dart';
+import 'package:livenow/ui/widgets/quick_action_bar.dart';
 
 void main() {
   late AppDatabase db;
@@ -88,8 +91,17 @@ void main() {
       ],
     );
     expect(find.byKey(const ValueKey('actionUrgencyChip')), findsOneWidget);
-    expect(find.text('U 910'), findsOneWidget);
-    expect(find.textContaining('U 910'), findsNWidgets(2));
+    // Card chip + tile subtitle part: icon + number, no 'U ' text.
+    expect(find.text('910'), findsNWidgets(2));
+    expect(find.textContaining('U 910'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('actionUrgencyChip')),
+        matching: find.byTooltip('Urgency to Keep in Balance'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Urgency to Keep in Balance'), findsNWidgets(2));
     await unmount(tester);
 
     await pump(
@@ -102,7 +114,39 @@ void main() {
       ),
       extra: [actionUrgencyProvider.overrideWithValue(const {})],
     );
-    expect(find.textContaining('U '), findsNothing);
+    expect(find.byType(ParamIcon), findsNothing);
+    expect(find.text('910'), findsNothing);
+    await unmount(tester);
+  });
+
+  testWidgets('done card with urgency gets the muted band colour', (
+    tester,
+  ) async {
+    final row = await makeAction(tester);
+    final base = ActionListItem.fromRow(row);
+    final item = ActionListItem(
+      id: base.id,
+      name: base.name,
+      done: true,
+      isAllDay: false,
+    );
+    await pump(
+      tester,
+      ActionCard(action: item),
+      extra: [
+        actionUrgencyProvider.overrideWithValue({item.id: 909.6}),
+      ],
+    );
+    final muted = urgencyColorsMuted(909.6, dark: false).bg;
+    final full = urgencyColors(909.6, dark: false).bg;
+    final colors = tester
+        .widgetList<Container>(find.byType(Container))
+        .map((c) => c.decoration)
+        .whereType<BoxDecoration>()
+        .map((d) => d.color)
+        .toList();
+    expect(colors, contains(muted));
+    expect(colors, isNot(contains(full)));
     await unmount(tester);
   });
 
@@ -144,7 +188,25 @@ void main() {
       () => Future<void>.delayed(const Duration(milliseconds: 200)),
     );
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.text('Urgency to Keep in Balance: 910'), findsOneWidget);
+    final line = find.byKey(const ValueKey('actionUrgencyLine'));
+    expect(line, findsOneWidget);
+    expect(
+      find.descendant(of: line, matching: find.text('910')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: line,
+        matching: find.byTooltip('Urgency to Keep in Balance'),
+      ),
+      findsOneWidget,
+    );
+    // Order: Name field above the urgency line above the button row.
+    final nameY = tester.getTopLeft(find.byType(TextFormField).first).dy;
+    final lineY = tester.getTopLeft(line).dy;
+    final barY = tester.getTopLeft(find.byType(QuickActionBar)).dy;
+    expect(nameY, lessThan(lineY));
+    expect(lineY, lessThan(barY));
     await unmount(tester);
   });
 
@@ -175,7 +237,8 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.textContaining('Urgency to Keep in Balance'), findsNothing);
+    expect(find.byKey(const ValueKey('actionUrgencyLine')), findsNothing);
+    expect(find.byTooltip('Urgency to Keep in Balance'), findsNothing);
     await unmount(tester);
   });
 }

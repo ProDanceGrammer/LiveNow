@@ -49,44 +49,51 @@ class InstantRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: collapsed ? collapsedWidth : width,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (onToggleCollapsed != null)
-              Align(
-                alignment: collapsed ? Alignment.center : Alignment.centerRight,
-                child: Padding(
-                  padding: EdgeInsets.only(right: collapsed ? 0 : 4),
-                  child: IconButton(
-                    key: const ValueKey('rail-toggle'),
-                    visualDensity: VisualDensity.compact,
-                    tooltip: collapsed ? 'Show menu' : 'Hide menu',
-                    icon: Icon(
-                      collapsed ? Icons.menu : Icons.menu_open,
-                      size: 22,
+    // Own traversal group: Tab walks the rail items in order instead of
+    // following the whole page's reading order, which any screen's top row
+    // (e.g. the Templates search field) would otherwise interleave with.
+    return FocusTraversalGroup(
+      child: SizedBox(
+        width: collapsed ? collapsedWidth : width,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (onToggleCollapsed != null)
+                Align(
+                  alignment: collapsed
+                      ? Alignment.center
+                      : Alignment.centerRight,
+                  child: Padding(
+                    padding: EdgeInsets.only(right: collapsed ? 0 : 4),
+                    child: IconButton(
+                      key: const ValueKey('rail-toggle'),
+                      visualDensity: VisualDensity.compact,
+                      tooltip: collapsed ? 'Show menu' : 'Hide menu',
+                      icon: Icon(
+                        collapsed ? Icons.menu : Icons.menu_open,
+                        size: 22,
+                      ),
+                      onPressed: onToggleCollapsed,
                     ),
-                    onPressed: onToggleCollapsed,
                   ),
                 ),
-              ),
-            if (onToggleCollapsed != null) const SizedBox(height: 4),
-            for (var i = 0; i < items.length; i++)
-              Padding(
-                padding: EdgeInsets.only(
-                  bottom: i == items.length - 1 ? 0 : 12,
+              if (onToggleCollapsed != null) const SizedBox(height: 4),
+              for (var i = 0; i < items.length; i++)
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: i == items.length - 1 ? 0 : 12,
+                  ),
+                  child: _RailItem(
+                    item: items[i],
+                    selected: i == selectedIndex,
+                    collapsed: collapsed,
+                    onTap: () => onSelected(i),
+                  ),
                 ),
-                child: _RailItem(
-                  item: items[i],
-                  selected: i == selectedIndex,
-                  collapsed: collapsed,
-                  onTap: () => onSelected(i),
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -8,6 +8,7 @@ import '../time_format.dart';
 import 'action_menu_button.dart';
 import 'action_time_label.dart';
 import 'glass.dart';
+import 'param_icons.dart';
 
 // Re-exported for the widgets/views that imported these from here.
 export '../time_format.dart' show twoDigits, formatClockTime;
@@ -42,7 +43,14 @@ class ActionTile extends ConsumerWidget {
       if (!action.isAllDay) formatActionDuration(action),
       if (isRunning && action.startAt != null)
         'Started ${formatClockTime(action.startAt!)}',
-      if (urgency != null) 'U ${formatUrgency(urgency)}',
+      if (urgency != null)
+        ParamValue.urgency(
+          formatUrgency(urgency),
+          key: const ValueKey('tileUrgency'),
+          size: 19,
+          style: Theme.of(context).textTheme.bodyMedium,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
     ];
 
     final tile = ListTile(

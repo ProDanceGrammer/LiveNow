@@ -28,9 +28,8 @@ void main() {
 
   tearDown(() => db.close());
 
-  Future<ActionRow> row(String id) => (db.select(
-    db.actionsTable,
-  )..where((t) => t.id.equals(id))).getSingle();
+  Future<ActionRow> row(String id) =>
+      (db.select(db.actionsTable)..where((t) => t.id.equals(id))).getSingle();
 
   /// A finished run of [name] that lasted [minutes], completed [daysAgo] ago.
   Future<void> finishedRun(String name, int minutes, {int daysAgo = 1}) async {
@@ -242,5 +241,71 @@ void main() {
       db.actionMetricsTable,
     )..where((t) => t.actionId.equals(id))).get();
     expect(links.map((l) => l.metricId), [keep]);
+  });
+
+  group('all-day templates', () {
+    Future<String> seed() async {
+      final id = newId();
+      await db
+          .into(db.actionTemplatesTable)
+          .insert(
+            ActionTemplatesTableCompanion.insert(
+              id: id,
+              name: 'Water',
+              payload: jsonEncode({
+                'name': 'Water',
+                'isAllDay': true,
+                'estimatedMinutes': 30,
+              }),
+            ),
+          );
+      return id;
+    }
+
+    DateTime istanbulMidnight() {
+      final n = tz.TZDateTime.now(tz.getLocation('Europe/Istanbul'));
+      return tz.TZDateTime(
+        tz.getLocation('Europe/Istanbul'),
+        n.year,
+        n.month,
+        n.day,
+      ).toUtc();
+    }
+
+    Future<List<ActionOccurrence>> occ(String id) => (db.select(
+      db.actionOccurrencesTable,
+    )..where((t) => t.actionId.equals(id))).get();
+
+    test('Started: all-day today, not done, no occurrence', () async {
+      final id = await service.createFromTemplateStarted(await seed());
+      final a = await row(id);
+      expect(a.isAllDay, isTrue);
+      expect(
+        dateTimeFromDb(a.startAt)!.isAtSameMomentAs(istanbulMidnight()),
+        isTrue,
+      );
+      expect(a.endAt, isNull);
+      expect(a.done, isFalse);
+      expect(a.completedAt, isNull);
+      expect(await occ(id), isEmpty);
+    });
+
+    test('Finished: all-day today, done, closed occurrence', () async {
+      final id = await service.createFromTemplateFinished(await seed());
+      final a = await row(id);
+      expect(a.isAllDay, isTrue);
+      expect(
+        dateTimeFromDb(a.startAt)!.isAtSameMomentAs(istanbulMidnight()),
+        isTrue,
+      );
+      expect(a.endAt, isNull);
+      expect(a.done, isTrue);
+      expect(a.completedAt, isNotNull);
+      final o = await occ(id);
+      expect(o, hasLength(1));
+      expect(o.single.startedAt, isNotNull);
+      expect(o.single.finishedAt, o.single.startedAt);
+      expect(o.single.outcome, 'done');
+    });
   });
 }
