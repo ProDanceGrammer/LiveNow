@@ -189,7 +189,7 @@ void main() {
   });
 
   testWidgets(
-    'block border is a thin bright edge, 2px onSurface when selected',
+    'block has no outline, 2px onSurface border only when selected',
     (tester) async {
       for (final dark in [false, true]) {
         urgency.clear();
@@ -215,14 +215,7 @@ void main() {
                     )
                     .decoration
                 as BoxDecoration;
-        final unselected = deco().border! as Border;
-        expect(unselected.top.width, 1);
-        expect(unselected.top.color, isNot(scheme.surface));
-        expect(
-          unselected.top.color.a,
-          closeTo(dark ? 0.25 : 0.7, 0.01),
-          reason: 'dark=$dark',
-        );
+        expect(deco().border, isNull, reason: 'borderless fill, dark=$dark');
         expect(deco().borderRadius, BorderRadius.circular(8));
         await tester.tap(find.textContaining('Edge'));
         await tester.pump(const Duration(milliseconds: 400));

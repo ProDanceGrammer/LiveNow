@@ -26,6 +26,7 @@ import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
 import '../../domain/postpone_rules.dart';
+import '../calendar_icons.dart';
 import '../calendar_selection.dart';
 import '../edit_action.dart';
 import '../providers.dart';
@@ -76,7 +77,11 @@ class CalendarPerfCounters {
   static int badgeBuilds = 0;
   static int toolbarShows = 0;
 
+  /// `_Toolbar` builds (must not grow while the grid scrolls).
+  static int toolbarBuilds = 0;
+
   static void reset() {
+    toolbarBuilds = 0;
     blockBuilds = 0;
     chipBuilds = 0;
     layoutRuns = 0;
@@ -133,10 +138,6 @@ Color _softLine(BuildContext context) {
   return Theme.of(context).colorScheme.outlineVariant
       .withValues(alpha: g.dark ? 0.3 : 0.55);
 }
-
-/// The thin bright edge of event blocks and all-day chips.
-Color _brightEdge(GlassTheme g) =>
-    g.border.withValues(alpha: g.dark ? 0.25 : 0.7);
 
 tz.TZDateTime _local(DateTime utc) =>
     tz.TZDateTime.from(utc, tz.getLocation(AppSettings.timeZoneName));
@@ -615,6 +616,29 @@ class _Header extends ConsumerWidget {
           ),
           const SizedBox(width: 12),
           pill(
+            Builder(
+              builder: (context) {
+                final on = ref.watch(calendarIconsProvider);
+                return IconButton(
+                  key: const ValueKey('calendar-icons-toggle'),
+                  isSelected: on,
+                  icon: const Icon(Icons.sentiment_satisfied_outlined),
+                  selectedIcon: const Icon(Icons.sentiment_satisfied_alt),
+                  tooltip: on
+                      ? 'Hide growth direction icons'
+                      : 'Show growth direction icons',
+                  style: IconButton.styleFrom(
+                    backgroundColor: on ? scheme.primaryContainer : null,
+                    foregroundColor: on ? scheme.onPrimaryContainer : null,
+                  ),
+                  onPressed: () =>
+                      ref.read(calendarIconsProvider.notifier).toggle(),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          pill(
             SegmentedButton<int>(
               showSelectedIcon: false,
               style: ButtonStyle(
@@ -826,6 +850,7 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
     final cross = ref.read(_crossDragProvider)
       ..stripDayWidth = dayWidth
       ..stripDayCount = dayCount;
+    final showIcons = ref.watch(calendarIconsProvider);
     final primary = Theme.of(context).colorScheme.primary;
     return Container(
       key: cross.stripKey,
@@ -869,6 +894,7 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
                               key: ValueKey('allday-${a.id}'),
                               item: a,
                               running: running.contains(a.id),
+                              showIcons: showIcons,
                             ),
                         ],
                       ),
@@ -962,8 +988,14 @@ class _DirectionChip extends StatelessWidget {
 class _AllDayChip extends ConsumerWidget {
   final ActionListItem item;
   final bool running;
+  final bool showIcons;
 
-  const _AllDayChip({super.key, required this.item, required this.running});
+  const _AllDayChip({
+    super.key,
+    required this.item,
+    required this.running,
+    required this.showIcons,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1000,9 +1032,9 @@ class _AllDayChip extends ConsumerWidget {
       calendarSelectionProvider.select((s) => s.contains(item.id)),
     );
     final cross = ref.read(_crossDragProvider);
-    final icons = ref.watch(
-      actionDirectionIconsProvider.select((m) => m[item.id]),
-    );
+    final icons = showIcons
+        ? ref.watch(actionDirectionIconsProvider.select((m) => m[item.id]))
+        : null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: _HoverToolbarHost(
@@ -1124,7 +1156,15 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
   }
 
   void _scrollingChanged() {
-    if (!(widget.scrolling?.value ?? false)) _sync();
+    if (!mounted) return;
+    if (widget.scrolling?.value ?? false) {
+      // Scroll start: hide the bar (it is not repositioned per tick); it comes
+      // back through _sync once the scroll settles.
+      _overBar = false;
+      if (_portal.isShowing) _portal.hide();
+    } else {
+      _sync();
+    }
   }
 
   @override
@@ -1199,16 +1239,13 @@ class _HoverToolbarHostState extends ConsumerState<_HoverToolbarHost> {
 
   @override
   Widget build(BuildContext context) {
-    final position = Scrollable.maybeOf(context)?.position;
     return OverlayPortal.overlayChildLayoutBuilder(
       controller: _portal,
       overlayChildBuilder: (_, info) {
         if (widget.suppressed) return const SizedBox.shrink();
-        // Re-evaluated on every scroll of the enclosing viewport.
-        return ListenableBuilder(
-          listenable: position ?? Listenable.merge(const []),
-          builder: (_, _) => _positioned(info.childSize),
-        );
+        // Positioned (and the top-edge rule checked) when it is built, i.e.
+        // at show time; a scroll hides it instead of moving it.
+        return _positioned(info.childSize);
       },
       child: MouseRegion(
         onEnter: (_) {
@@ -1288,6 +1325,7 @@ class _Toolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    CalendarPerfCounters.toolbarBuilds++;
     // A small static glass pill; the transparent Material is only there so
     // the buttons' ink has something to paint on.
     return GlassSurface(
@@ -1433,6 +1471,7 @@ class _BlockEntry {
   final double dayWidth;
   final bool running;
   final bool done;
+  final bool showIcons;
 
   const _BlockEntry(
     this.widget,
@@ -1440,6 +1479,7 @@ class _BlockEntry {
     this.dayWidth,
     this.running,
     this.done,
+    this.showIcons,
   );
 }
 
@@ -2043,6 +2083,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   @override
   Widget build(BuildContext context) {
     final visibleHours = ref.watch(calendarVisibleHoursProvider);
+    _showIcons = ref.watch(calendarIconsProvider);
     ref.listen<int>(calendarVisibleHoursProvider, (_, _) => _anchorZoom());
     // Moving to other days clears the selection - except while dragging,
     // where Shift+scroll shifts the range on purpose.
@@ -2328,12 +2369,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     return true;
   }
 
+  /// Mirrors [calendarIconsProvider]; set once per build, part of the block
+  /// cache key so a flip rebuilds every block exactly once.
+  bool _showIcons = false;
+
   Widget _blockFor(_Placed p) {
     final seg = p.event;
     final running = widget.running.contains(seg.item.id);
     final done = seg.item.isDoneBefore;
+    final showIcons = _showIcons;
     final cached = _blockCache[p];
     if (cached != null &&
+        cached.showIcons == showIcons &&
         cached.hourHeight == _hourHeight &&
         cached.dayWidth == widget.dayWidth &&
         cached.running == running &&
@@ -2365,6 +2412,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
             width: blockW,
             scrolling: _cross.scrolling,
             running: running,
+            showIcons: showIcons,
             dragging: dragging,
             onDragStart: (kind, pos) => _dragStart(p, kind, pos),
             onDragUpdate: _dragUpdate,
@@ -2378,6 +2426,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       widget.dayWidth,
       running,
       done,
+      showIcons,
     );
     return built;
   }
@@ -2757,6 +2806,7 @@ class _EventBlock extends ConsumerStatefulWidget {
   /// listens, so the block itself is not rebuilt when it flips).
   final ValueListenable<bool> scrolling;
   final bool running;
+  final bool showIcons;
   final bool dragging;
   final void Function(_DragKind, Offset) onDragStart;
   final void Function(Offset) onDragUpdate;
@@ -2767,6 +2817,7 @@ class _EventBlock extends ConsumerStatefulWidget {
     required this.width,
     required this.scrolling,
     required this.running,
+    required this.showIcons,
     required this.dragging,
     required this.onDragStart,
     required this.onDragUpdate,
@@ -2840,13 +2891,14 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     // without opening the event. The end is the one the block is drawn to.
     final timeRange = seg.timeRange;
     final padTop = height >= 16 ? 3.0 : 0.0;
-    final icons = ref.watch(
-      actionDirectionIconsProvider.select((m) => m[item.id]),
-    );
+    // Switch off (default): no subscription, no badge widgets at all.
+    final icons = widget.showIcons
+        ? ref.watch(actionDirectionIconsProvider.select((m) => m[item.id]))
+        : null;
     // The badge floats over the bottom-right corner (outside the cached label,
     // so the label-fit cache never depends on it); blocks under 18 px have no
     // room for it.
-    final showIcons = icons != null && height >= 18;
+    final showBadge = icons != null && height >= 18;
 
     // The label is ONE paragraph. A block gets a ClipRect only when its text
     // is taller than it; otherwise nothing needs clipping.
@@ -2919,13 +2971,13 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     }
     // A one-line label gives the badge its width as right padding so the name
     // ellipsizes instead of running under it.
-    final reserve = showIcons && height < 26 ? _badgeWidth(icons) : 0.0;
+    final reserve = showBadge && height < 26 ? _badgeWidth(icons) : 0.0;
     Widget content = Padding(
       padding: EdgeInsets.fromLTRB(6, padTop, 6 + reserve, 0),
       child: label,
     );
     if (clip) content = ClipRect(child: content);
-    if (showIcons) {
+    if (showBadge) {
       content = Stack(
         fit: StackFit.expand,
         clipBehavior: Clip.none,
@@ -2954,9 +3006,10 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8),
+        // One filled rounded rectangle; only the selected block is outlined.
         border: selected
             ? Border.all(color: scheme.onSurface, width: 2)
-            : Border.all(color: _brightEdge(context.glass)),
+            : null,
       ),
       child: content,
     );

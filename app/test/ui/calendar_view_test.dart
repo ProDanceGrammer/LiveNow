@@ -1433,12 +1433,18 @@ void main() {
         position.jumpTo(3.5 * 60 * px);
         await tester.pump();
         await tester.pump();
+        // Hidden at scroll start, and still hidden after settling because the
+        // top edge is out of the viewport (checked at show time).
+        expect(find.byTooltip('Start'), findsNothing);
+        await tester.pump(const Duration(milliseconds: 200));
         expect(find.byTooltip('Start'), findsNothing);
 
-        // Scrolling back brings it back (re-evaluated while scrolling).
+        // Scrolling back: hidden while moving, back after the settle.
         position.jumpTo(2 * 60 * px);
         await tester.pump();
         await tester.pump();
+        expect(find.byTooltip('Start'), findsNothing);
+        await tester.pump(const Duration(milliseconds: 200));
         expect(find.byTooltip('Start'), findsOneWidget);
         await unmount(tester);
       },

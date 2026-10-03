@@ -39,6 +39,7 @@ planned but not started — the local schema is already designed for that (see
 - Growth directions show their emoji on calendar events and Current Actions cards, urgency is
   shown everywhere as a scales-on-fire icon (hover: "Urgency to Keep in Balance"), and actions can
   be linked to a direction right from the direction's edit menu.
+- Calendar direction emojis can be switched on/off from the calendar toolbar (off by default).
 - Hover a growth-direction emoji on an event or card to see the direction's name; the growth
   direction menu shows level, progress with a bar, weight, urgency and the fact reached so far.
 - **Templates** (searchable, sorted by name ignoring emojis, with Start now / Finish now buttons)

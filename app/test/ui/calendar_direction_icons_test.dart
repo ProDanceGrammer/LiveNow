@@ -9,6 +9,7 @@ import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/growth_rules.dart';
 import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/ui/calendar_icons.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/views/calendar_layout.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
@@ -110,6 +111,7 @@ void main() {
           overrides: [
             databaseProvider.overrideWithValue(db),
             calendarVisibleHoursProvider.overrideWith((ref) => 24),
+            calendarIconsProvider.overrideWith(() => CalendarIconsNotifier(true)),
             actionDirectionIconsProvider.overrideWith(
               (ref) => {
                 tall: '\u{1F381} \u{26A1}',
@@ -200,6 +202,7 @@ void main() {
           overrides: [
             databaseProvider.overrideWithValue(db),
             calendarVisibleHoursProvider.overrideWith((ref) => 24),
+            calendarIconsProvider.overrideWith(() => CalendarIconsNotifier(true)),
             actionDirectionIconsProvider.overrideWith(
               (ref) => {
                 lane1: two,
@@ -277,6 +280,73 @@ void main() {
       await mouse.moveTo(Offset(chipRect.left + 2, chipRect.center.dy));
       await tester.pump(const Duration(milliseconds: 200));
       expect(find.text('Gift'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets('default is OFF; the toolbar switch shows then hides them', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1400, 1700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      late String tall, chip;
+      await tester.runAsync(() async {
+        final s = ActionService(db);
+        tall = await s.createAction(
+          name: 'Tall',
+          startAt: at(10),
+          endAt: at(12),
+        );
+        chip = await s.createAction(
+          name: 'Chip',
+          startAt: at(0),
+          isAllDay: true,
+        );
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            databaseProvider.overrideWithValue(db),
+            calendarVisibleHoursProvider.overrideWith((ref) => 24),
+            actionDirectionIconsProvider.overrideWith(
+              (ref) => {tall: '\u{1F381}', chip: '\u{1F381}'},
+            ),
+          ],
+          child: const MaterialApp(home: Scaffold(body: CalendarView())),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 200)),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.byKey(ValueKey('block-icons-$tall')), findsNothing);
+      expect(find.text('\u{1F381}'), findsNothing);
+      expect(find.byTooltip('Show growth direction icons'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-icons-toggle')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byKey(ValueKey('block-icons-$tall')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('allday-$chip')),
+          matching: find.text('\u{1F381}'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('Hide growth direction icons'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-icons-toggle')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.byKey(ValueKey('block-icons-$tall')), findsNothing);
+      expect(find.text('\u{1F381}'), findsNothing);
 
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));

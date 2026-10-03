@@ -8,6 +8,7 @@ import 'package:livenow/data/database.dart';
 import 'package:livenow/data/queries.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/calendar_selection.dart';
+import 'package:livenow/ui/calendar_icons.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/views/calendar_layout.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
@@ -50,6 +51,7 @@ void main() {
     WidgetTester tester, {
     int hours = 24,
     List<ActionListItem>? only,
+    bool icons = false,
   }) async {
     tester.view.physicalSize = const Size(1400, 1000);
     tester.view.devicePixelRatio = 1;
@@ -65,6 +67,7 @@ void main() {
           calendarVisibleHoursProvider.overrideWith((ref) => hours),
           // The same list instance on every read, like `distinctList` gives.
           calendarRangeProvider.overrideWith((ref) => Stream.value(items)),
+          calendarIconsProvider.overrideWith(() => CalendarIconsNotifier(icons)),
           actionDirectionIconsProvider.overrideWith(
             (ref) => ref.watch(iconsSource),
           ),
@@ -243,7 +246,7 @@ void main() {
   testWidgets(
     'changing one action\'s direction icons rebuilds only its block',
     (tester) async {
-      await pumpCalendar(tester);
+      await pumpCalendar(tester, icons: true);
       CalendarPerfCounters.reset();
       container.read(iconsSource.notifier).state = {'perf-3': '\u{1F381}'};
       await tester.pump();
@@ -277,7 +280,7 @@ void main() {
   testWidgets('scrolling hides the badges and rebuilds no block', (
     tester,
   ) async {
-    await pumpCalendar(tester, hours: 12);
+    await pumpCalendar(tester, hours: 12, icons: true);
     container.read(iconsSource.notifier).state = {
       for (final a in items) a.id: gift,
     };
@@ -308,6 +311,55 @@ void main() {
       0,
       reason: 'flipping the scrolling flag must not rebuild blocks',
     );
+    await unmount(tester);
+  });
+
+  testWidgets('switch OFF: icons source is neither read nor rebuilds blocks', (
+    tester,
+  ) async {
+    await pumpCalendar(tester);
+    CalendarPerfCounters.reset();
+    container.read(iconsSource.notifier).state = {
+      for (final a in items) a.id: gift,
+    };
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(CalendarPerfCounters.blockBuilds, 0);
+    expect(CalendarPerfCounters.chipBuilds, 0);
+    expect(CalendarPerfCounters.badgeBuilds, 0);
+    expect(find.text(gift), findsNothing);
+
+    // Flipping the switch rebuilds the blocks once and shows the badges.
+    container.read(calendarIconsProvider.notifier).set(true);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(CalendarPerfCounters.blockBuilds, greaterThan(0));
+    expect(find.text(gift), findsWidgets);
+    final after = CalendarPerfCounters.blockBuilds;
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(CalendarPerfCounters.blockBuilds, after, reason: 'once per flip');
+    await unmount(tester);
+  });
+
+  testWidgets('scrolling with the pointer parked builds no block and no toolbar', (
+    tester,
+  ) async {
+    await pumpCalendar(tester, hours: 12);
+    final pos = gridPosition(tester);
+    pos.jumpTo(0);
+    await tester.pump(const Duration(milliseconds: 200));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(700, 400));
+    addTearDown(mouse.removePointer);
+    await tester.pump(const Duration(milliseconds: 200));
+    CalendarPerfCounters.reset();
+    for (var i = 1; i <= 10; i++) {
+      pos.jumpTo(i * 15.0);
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(CalendarPerfCounters.toolbarBuilds, 0);
+    expect(CalendarPerfCounters.blockBuilds, 0);
+    expect(find.byTooltip('Start'), findsNothing);
     await unmount(tester);
   });
 
