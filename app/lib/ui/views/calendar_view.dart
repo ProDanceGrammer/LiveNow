@@ -622,8 +622,8 @@ class _Header extends ConsumerWidget {
                 return IconButton(
                   key: const ValueKey('calendar-icons-toggle'),
                   isSelected: on,
-                  icon: const Icon(Icons.sentiment_satisfied_outlined),
-                  selectedIcon: const Icon(Icons.sentiment_satisfied_alt),
+                  // The same icon as the 'Growth directions' item in the rail.
+                  icon: const Icon(Icons.insights),
                   tooltip: on
                       ? 'Hide growth direction icons'
                       : 'Show growth direction icons',
