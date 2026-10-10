@@ -139,7 +139,7 @@ void main() {
     await _unmount(tester);
   });
 
-  testWidgets('rail has exactly Actions, Growth directions, Templates', (
+  testWidgets('rail has exactly Actions, Growth directions, Templates, Budget', (
     tester,
   ) async {
     await _pumpApp(tester);
@@ -149,7 +149,7 @@ void main() {
         .items
         .map((d) => d.label)
         .toList();
-    expect(labels, ['Actions', 'Growth directions', 'Templates']);
+    expect(labels, ['Actions', 'Growth directions', 'Templates', 'Budget']);
     expect(
       find.descendant(of: _rail, matching: find.text('Current')),
       findsNothing,
@@ -186,7 +186,7 @@ void main() {
     );
     expect(
       find.descendant(of: _rail, matching: find.byType(Icon)),
-      findsNWidgets(4), // toggle + 3 destinations
+      findsNWidgets(5), // toggle + 4 destinations
     );
     expect(
       find.byType(CalendarView, skipOffstage: false).evaluate().single,

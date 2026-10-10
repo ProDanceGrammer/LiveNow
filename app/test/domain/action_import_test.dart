@@ -2,6 +2,8 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/action_import_service.dart';
+import 'package:livenow/domain/action_service.dart';
+import 'package:livenow/domain/actions_csv.dart';
 import 'package:livenow/domain/growth_rules.dart';
 import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
@@ -106,5 +108,92 @@ void main() {
   test('bad file changes nothing', () async {
     await expectLater(service.importCsv('Foo\nbar\n'), throwsFormatException);
     expect(await db.select(db.actionsTable).get(), isEmpty);
+  });
+
+  group('Done column (all-day actions)', () {
+    const header =
+        'Name,Datetime,Next actions and time,Previous actions and time,'
+        'Growth Direction,Done\n';
+
+    Future<Map<String, ActionRow>> actionsByName() async => {
+      for (final a in await db.select(db.actionsTable).get()) a.name: a,
+    };
+
+    test('parseYesNo reads Yes/No in any case, anything else is null', () {
+      expect(parseYesNo('Yes'), isTrue);
+      expect(parseYesNo(' YES '), isTrue);
+      expect(parseYesNo('No'), isFalse);
+      expect(parseYesNo('no'), isFalse);
+      expect(parseYesNo(''), isNull);
+      expect(parseYesNo('maybe'), isNull);
+    });
+
+    test('the parser keeps Done per row; the header is case-insensitive', () {
+      final parsed = parseActionsCsv(
+        'Name,Datetime,done\nA,03/10/2026,Yes\nB,04/10/2026,No\nC,05/10/2026,\n',
+      );
+      expect(parsed.actions.map((a) => a.done), [true, false, null]);
+      // No Done column at all: every row is null.
+      expect(
+        parseActionsCsv('Name,Datetime\nA,03/10/2026\n').actions.single.done,
+        isNull,
+      );
+    });
+
+    test(
+      'marks all-day actions done, leaves timed ones to their end time',
+      () async {
+        final r = await service.importCsv(
+          '${header}'
+          '💧 Water,03/10/2026,,,,Yes\n'
+          '🧹 Chores,04/10/2026,,,,No\n'
+          'Timed,03/10/2026 10:00 → 11:00,,,,Yes\n'
+          'No value,05/10/2026,,,,\n',
+        );
+        expect(r.created, 4);
+        expect(r.doneApplied, 1); // only Water changed from the default
+        expect(r.doneIgnoredTimed, 1);
+
+        final rows = await actionsByName();
+        expect(rows['💧 Water']!.done, isTrue);
+        expect(rows['💧 Water']!.completedAt, isNotNull);
+        expect(rows['🧹 Chores']!.done, isFalse);
+        expect(rows['No value']!.done, isFalse);
+        expect(rows['Timed']!.done, isFalse); // derived, not the manual flag
+      },
+    );
+
+    test('a re-import updates the flag of existing all-day actions', () async {
+      await service.importCsv(
+        '${header}💧 Water,03/10/2026,,,,Yes\n🧹 Chores,04/10/2026,,,,No\n',
+      );
+      final r = await service.importCsv(
+        '${header}💧 Water,03/10/2026,,,,No\n🧹 Chores,04/10/2026,,,,Yes\n',
+      );
+      expect(r.created, 0);
+      expect(r.skippedDuplicates, 2);
+      expect(r.doneApplied, 2);
+
+      final rows = await actionsByName();
+      expect(rows['💧 Water']!.done, isFalse);
+      expect(rows['💧 Water']!.completedAt, isNull);
+      expect(rows['🧹 Chores']!.done, isTrue);
+
+      // Same values again: nothing to change.
+      final again = await service.importCsv(
+        '${header}💧 Water,03/10/2026,,,,No\n🧹 Chores,04/10/2026,,,,Yes\n',
+      );
+      expect(again.doneApplied, 0);
+    });
+
+    test('a file without the column never touches the done flag', () async {
+      await service.importCsv('Name,Datetime\n💧 Water,03/10/2026\n');
+      final id = (await actionsByName())['💧 Water']!.id;
+      await ActionService(db).toggleDone(id);
+
+      final r = await service.importCsv('Name,Datetime\n💧 Water,03/10/2026\n');
+      expect(r.doneApplied, 0);
+      expect((await actionsByName())['💧 Water']!.done, isTrue);
+    });
   });
 }

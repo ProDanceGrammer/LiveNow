@@ -15,6 +15,7 @@ import '../dialog_stack.dart';
 import '../open_entity.dart';
 import '../providers.dart';
 import '../undo.dart';
+import 'action_budget_section.dart';
 import 'action_picker_dialog.dart';
 import 'activity_picker_dialog.dart';
 import 'action_tile.dart' show formatUrgency;
@@ -401,6 +402,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
               children: [_DependencySection(actionId: widget.existing!.id)],
             ),
           ),
+        if (_isEditing) ActionBudgetSection(actionId: widget.existing!.id),
         SectionBlock(
           padding: kSectionTileBlockPadding,
           child: ExpansionTile(

@@ -54,12 +54,25 @@ class DeleteUndo {
   final List<ActionMetric> metricLinks;
   final List<ActionDependency> edges;
 
+  /// Budget transactions that were linked to the action: they are detached on
+  /// delete (their date frozen) and re-linked by undo.
+  final List<BudgetTxDetach> budgetTxs;
+
   const DeleteUndo({
     required this.action,
     required this.occurrences,
     required this.metricLinks,
     required this.edges,
+    this.budgetTxs = const [],
   });
+}
+
+/// A budget transaction's link state before its action was deleted.
+class BudgetTxDetach {
+  final String id;
+  final String occurredAtBefore;
+
+  const BudgetTxDetach({required this.id, required this.occurredAtBefore});
 }
 
 /// Everything [ActionService.deleteActions] removed, in deletion order.
@@ -242,6 +255,26 @@ class ActionService {
               ))
               .get();
 
+      // Budget transactions keep existing without the action: unlink them and
+      // freeze the date they currently show (the action's start, if any).
+      final budgetTxs = <BudgetTxDetach>[];
+      final linkedTxs = await (db.select(
+        db.budgetTransactionsTable,
+      )..where((t) => t.actionId.equals(actionId))).get();
+      for (final tx in linkedTxs) {
+        budgetTxs.add(
+          BudgetTxDetach(id: tx.id, occurredAtBefore: tx.occurredAt),
+        );
+        await (db.update(
+          db.budgetTransactionsTable,
+        )..where((t) => t.id.equals(tx.id))).write(
+          BudgetTransactionsTableCompanion(
+            actionId: const Value(null),
+            occurredAt: Value(action.startAt ?? tx.occurredAt),
+          ),
+        );
+      }
+
       await (db.delete(db.actionDependenciesTable)..where(
             (t) =>
                 t.predecessorId.equals(actionId) |
@@ -263,6 +296,7 @@ class ActionService {
         occurrences: occurrences,
         metricLinks: metricLinks,
         edges: edges,
+        budgetTxs: budgetTxs,
       );
     });
   }
@@ -294,6 +328,18 @@ class ActionService {
             actionIds.contains(edge.successorId)) {
           await db.into(db.actionDependenciesTable).insert(edge);
         }
+      }
+
+      // Re-link budget transactions that still exist and are still detached.
+      for (final d in undo.budgetTxs) {
+        await (db.update(
+          db.budgetTransactionsTable,
+        )..where((t) => t.id.equals(d.id) & t.actionId.isNull())).write(
+          BudgetTransactionsTableCompanion(
+            actionId: Value(undo.action.id),
+            occurredAt: Value(d.occurredAtBefore),
+          ),
+        );
       }
     });
   }
@@ -1166,9 +1212,7 @@ class ActionService {
       );
 
       if (finished) {
-        await (db.update(
-          db.actionsTable,
-        )..where((t) => t.id.equals(id))).write(
+        await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
           ActionsTableCompanion(
             done: const Value(true),
             completedAt: Value(nowText),

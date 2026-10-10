@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../core/local_time.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
@@ -112,10 +114,17 @@ double progressPercent(double fact, double target) {
   return (fact * 100 / target * 100).round() / 100;
 }
 
-/// `U = W × (90 − P) / 90`: how urgently the direction needs attention. Zero
-/// at the threshold, negative once over-performing.
-double urgencyOf(double weight, double progress) =>
-    weight * (kBalanceThreshold - progress) / kBalanceThreshold;
+/// `U = max(0, W × (1 − P/90)) − min(1, max(0, P − 90)) × P² / W`: how urgently
+/// the direction needs attention. Zero from the threshold up to P = 90, then
+/// negative as the direction is over-performed (the penalty saturates at one
+/// P-point over the threshold). A zero-weight direction has no penalty (the
+/// formula would divide by zero).
+double urgencyOf(double weight, double progress) {
+  final deficit = math.max(0.0, weight * (1 - progress / kBalanceThreshold));
+  final over = math.min(1.0, math.max(0.0, progress - kBalanceThreshold));
+  final penalty = weight > 0 ? over * progress * progress / weight : 0.0;
+  return deficit - penalty;
+}
 
 // ---- the direction graph ----------------------------------------------------
 

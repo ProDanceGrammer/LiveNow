@@ -49,6 +49,13 @@ class ActionImportSummaryDialog extends StatelessWidget {
               Text('${r.created} created'),
               Text('${r.skippedDuplicates} skipped as duplicates'),
               Text('${r.edgesCreated} next/previous links created'),
+              if (r.doneApplied > 0)
+                Text('${r.doneApplied} all-day actions had their Done changed'),
+              if (r.doneIgnoredTimed > 0)
+                Text(
+                  '${r.doneIgnoredTimed} Done values ignored on timed actions '
+                  '(they are done by their end time)',
+                ),
               _list(
                 context,
                 'Unmatched growth directions',

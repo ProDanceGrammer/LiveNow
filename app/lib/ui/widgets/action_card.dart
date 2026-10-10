@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/queries.dart';
+import '../current_icons.dart';
 import '../current_selection.dart';
 import '../edit_action.dart';
 import '../providers.dart';
@@ -40,9 +41,11 @@ class ActionCard extends ConsumerWidget {
     final urgency = ref.watch(
       actionUrgencyProvider.select((m) => m[action.id]),
     );
-    final icons = ref.watch(
-      actionDirectionIconsProvider.select((m) => m[action.id]),
-    );
+    // The direction badges can be switched off for the whole board; then the
+    // icons source is not even subscribed to.
+    final icons = ref.watch(currentIconsProvider)
+        ? ref.watch(actionDirectionIconsProvider.select((m) => m[action.id]))
+        : null;
     final timeLine = _formatTimeLine(action);
     final selected = ref.watch(
       currentSelectionProvider.select((s) => s.contains(action.id)),
@@ -159,28 +162,39 @@ class ActionCard extends ConsumerWidget {
                                 size: 19,
                                 style: Theme.of(context).textTheme.labelSmall,
                                 color:
-                                    fg ?? Theme.of(context).colorScheme.onSurface,
+                                    fg ??
+                                    Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                         ],
                       ),
-                      if (timeLine != null || (icons != null && icons.isNotEmpty))
+                      if (timeLine != null ||
+                          (icons != null && icons.isNotEmpty))
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
                           child: Row(
                             children: [
-                              if (timeLine != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 28),
-                                  child: ActionTimeLabel(
-                                    action: action,
-                                    text: timeLine,
-                                    style: fg == null
-                                        ? null
-                                        : TextStyle(color: fg),
-                                  ),
-                                ),
-                              const Spacer(),
+                              // Takes the width the badge leaves and wraps onto
+                              // a second line instead of overflowing.
+                              Expanded(
+                                child: timeLine == null
+                                    ? const SizedBox.shrink()
+                                    : Padding(
+                                        padding: const EdgeInsets.only(
+                                          left: 28,
+                                        ),
+                                        child: Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: ActionTimeLabel(
+                                            action: action,
+                                            text: timeLine,
+                                            style: fg == null
+                                                ? null
+                                                : TextStyle(color: fg),
+                                          ),
+                                        ),
+                                      ),
+                              ),
                               if (icons != null && icons.isNotEmpty)
                                 DirectionBadge(
                                   key: const ValueKey('actionCardIcons'),

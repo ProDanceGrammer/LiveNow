@@ -41,11 +41,17 @@ void main() {
       expect(progressPercent(3, -2), 0);
       expect(progressPercent(0, 5), 0);
     });
-    test('urgency U = W x (90 - P) / 90', () {
+    test('urgency U = max(0, W(1 - P/90)) - min(1, max(0, P-90)) P^2 / W', () {
       expect(urgencyOf(1000, 90), 0);
-      expect(urgencyOf(10, 120), closeTo(-3.33, 0.01));
       expect(urgencyOf(500, 80), closeTo(55.56, 0.01));
-      expect(urgencyOf(700, 95), closeTo(-38.89, 0.01));
+      expect(urgencyOf(1000, 0), 1000);
+      // Over the threshold: no deficit, penalty saturates at 1 x P^2 / W.
+      expect(urgencyOf(10, 120), closeTo(-1440, 0.01));
+      expect(urgencyOf(700, 95), closeTo(-95 * 95 / 700, 0.01));
+      expect(urgencyOf(700, 90.5), closeTo(-0.5 * 90.5 * 90.5 / 700, 0.01));
+      // Zero weight must not divide by zero.
+      expect(urgencyOf(0, 120), 0);
+      expect(urgencyOf(0, 50), 0);
     });
   });
 

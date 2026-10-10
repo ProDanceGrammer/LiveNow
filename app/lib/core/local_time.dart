@@ -37,3 +37,23 @@ DateTime localDayStartMonthsBack(DateTime utc, int months) {
   final day = l.day > lastDay ? lastDay : l.day;
   return tz.TZDateTime(_location, year, month, day).toUtc();
 }
+
+/// [utc] shifted by [months] calendar months (negative = back) at the same
+/// local time of day; the day of month is clamped to the target month's length.
+DateTime calendarAddMonths(DateTime utc, int months) {
+  final l = tz.TZDateTime.from(utc, _location);
+  final total = l.year * 12 + (l.month - 1) + months;
+  final year = total ~/ 12;
+  final month = total % 12 + 1;
+  final lastDay = DateTime.utc(year, month + 1, 0).day;
+  final day = l.day > lastDay ? lastDay : l.day;
+  return tz.TZDateTime(
+    _location,
+    year,
+    month,
+    day,
+    l.hour,
+    l.minute,
+    l.second,
+  ).toUtc();
+}

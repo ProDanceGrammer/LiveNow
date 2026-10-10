@@ -5,6 +5,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../domain/notes_plain_text.dart';
+import 'sync/sync_schema.dart';
 import 'tables.dart';
 
 part 'database.g.dart';
@@ -19,6 +20,10 @@ part 'database.g.dart';
     ActionTemplatesTable,
     CountableActivitiesTable,
     MetricDependenciesTable,
+    BudgetAccountsTable,
+    BudgetCategoriesTable,
+    BudgetTransactionsTable,
+    BudgetSettingsTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -28,7 +33,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -100,6 +105,30 @@ class AppDatabase extends _$AppDatabase {
       if (from < 9) {
         await _backfillNotesText();
       }
+      if (from < 10) {
+        // Budget: accounts, categories, transactions (linked to actions) and
+        // a small settings store. Purely additive.
+        await m.createTable(budgetAccountsTable);
+        await m.createTable(budgetCategoriesTable);
+        await m.createTable(budgetTransactionsTable);
+        await m.createTable(budgetSettingsTable);
+        await m.createIndex(idxBudgetCategoriesParent);
+        await m.createIndex(idxBudgetTxCategory);
+        await m.createIndex(idxBudgetTxAction);
+      }
+      if (from < 11) {
+        // Sync bookkeeping: every existing row gets a version (seeded from its
+        // updated_at); the triggers are (re)created by beforeOpen below.
+        await createSyncTables(this);
+        await backfillSyncVersions(this);
+      }
+    },
+    // Runs after onCreate/onUpgrade on EVERY open: a TableMigration rebuild
+    // drops a table's triggers, so they are recreated each time, and rows
+    // written without them get a version.
+    beforeOpen: (details) async {
+      await ensureSyncTriggers(this);
+      await reconcileSyncVersions(this);
     },
   );
 

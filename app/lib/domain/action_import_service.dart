@@ -25,6 +25,13 @@ class ActionImportResult {
   final List<String> rejectedEdges;
   final int skippedBlank;
 
+  /// All-day actions whose done flag the `Done` column set (new rows marked
+  /// done, and existing rows whose flag it changed).
+  final int doneApplied;
+
+  /// `Done` values on timed actions, ignored: those are done by their end time.
+  final int doneIgnoredTimed;
+
   const ActionImportResult({
     required this.created,
     required this.skippedDuplicates,
@@ -33,12 +40,16 @@ class ActionImportResult {
     required this.unresolvedRefs,
     required this.rejectedEdges,
     this.skippedBlank = 0,
+    this.doneApplied = 0,
+    this.doneIgnoredTimed = 0,
   });
 }
 
 /// Imports the Notion actions export: creates the actions, links their
 /// growth directions and next/previous edges. One transaction; re-importing
-/// the same file creates nothing new (rows are matched by name + start).
+/// the same file creates nothing new (rows are matched by name + start). An
+/// optional `Done` column (Yes/No) sets the manual done flag of ALL-DAY actions,
+/// also on rows that already exist (the file is the source for that flag).
 class ActionImportService {
   final AppDatabase db;
   final ActionService actions;
@@ -80,7 +91,7 @@ class ActionImportService {
         byName.putIfAbsent(name, () => []).add(id);
       }
 
-      var created = 0, skipped = 0;
+      var created = 0, skipped = 0, doneApplied = 0, doneIgnoredTimed = 0;
       final unmatched = <String>{};
       final rowIds = <String>[]; // id per parsed action (new or existing)
       for (final a in parsed.actions) {
@@ -89,6 +100,13 @@ class ActionImportService {
         if (known != null) {
           skipped++;
           rowIds.add(known);
+          if (a.done != null) {
+            if (!a.isAllDay) {
+              doneIgnoredTimed++;
+            } else if (await _applyDone(known, a.done!)) {
+              doneApplied++;
+            }
+          }
           continue;
         }
         final metricIds = <String>{};
@@ -111,6 +129,13 @@ class ActionImportService {
           metricIds: metricIds.toList(),
         );
         created++;
+        if (a.done != null) {
+          if (!a.isAllDay) {
+            doneIgnoredTimed++;
+          } else if (await _applyDone(id, a.done!)) {
+            doneApplied++;
+          }
+        }
         byKey[key] = id;
         byName.putIfAbsent(a.name, () => []).add(id);
         rowIds.add(id);
@@ -182,7 +207,32 @@ class ActionImportService {
         unresolvedRefs: unresolved,
         rejectedEdges: rejected,
         skippedBlank: parsed.skippedBlank,
+        doneApplied: doneApplied,
+        doneIgnoredTimed: doneIgnoredTimed,
       );
     });
+  }
+
+  /// Sets the manual done flag of an ALL-DAY action (like `toggleDone`: the
+  /// completion time is set or cleared with it). Returns whether anything
+  /// changed; a timed action or an unchanged flag is left alone.
+  Future<bool> _applyDone(String id, bool done) async {
+    final row = await db
+        .customSelect(
+          'SELECT done, is_all_day FROM actions WHERE id = ?',
+          variables: [Variable.withString(id)],
+        )
+        .getSingleOrNull();
+    if (row == null || !row.read<bool>('is_all_day')) return false;
+    if (row.read<bool>('done') == done) return false;
+    final nowText = dateTimeToDb(DateTime.now())!;
+    await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+      ActionsTableCompanion(
+        done: Value(done),
+        completedAt: Value(done ? nowText : null),
+        updatedAt: Value(nowText),
+      ),
+    );
+    return true;
   }
 }

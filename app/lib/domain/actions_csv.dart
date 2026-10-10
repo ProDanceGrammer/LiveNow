@@ -5,7 +5,8 @@ import 'growth_import.dart' show normalizeDirectionName, parseCsv;
 
 // Reads the Notion export of actions (see dev/data/actions/*.csv): columns
 // `Name`, `Datetime`, `Next actions and time`, `Previous actions and time`,
-// `Growth Direction`. Pure apart from the Istanbul wall-clock -> UTC
+// `Growth Direction`, plus an optional manual `Done` (`Yes` / `No`) that applies
+// to all-day actions. Pure apart from the Istanbul wall-clock -> UTC
 // conversion, which needs the timezone database to be initialised
 // (initPostponeTimeZoneData).
 
@@ -37,6 +38,11 @@ class ParsedAction {
   /// with [splitDirectionNames].
   final String directionsCell;
 
+  /// The optional manual `Done` column (`Yes`/`No`); null when the column is
+  /// absent, empty or unreadable. Only meaningful for all-day actions: a timed
+  /// action's done state is derived from its end time.
+  final bool? done;
+
   const ParsedAction({
     required this.name,
     required this.start,
@@ -45,6 +51,7 @@ class ParsedAction {
     required this.nextRefs,
     required this.prevRefs,
     required this.directionsCell,
+    this.done,
   });
 }
 
@@ -81,6 +88,20 @@ DateTime localWallToUtc(int y, int mo, int d, [int h = 0, int mi = 0]) =>
       mi,
     ).toUtc();
 
+/// `Yes`/`No` (case-insensitive, also true/false); null for anything else.
+bool? parseYesNo(String cell) {
+  switch (cell.trim().toLowerCase()) {
+    case 'yes':
+    case 'true':
+      return true;
+    case 'no':
+    case 'false':
+      return false;
+    default:
+      return null;
+  }
+}
+
 /// Parses the export. Throws [FormatException] when `Name` is missing.
 ParsedActionsCsv parseActionsCsv(String text) {
   final rows = parseCsv(text);
@@ -96,6 +117,11 @@ ParsedActionsCsv parseActionsCsv(String text) {
     return i == null || i >= row.length ? '' : row[i].trim();
   }
 
+  // `Done` is looked up case-insensitively; the other headers are exact.
+  final doneColumn = column.entries
+      .where((e) => e.key.toLowerCase() == 'done')
+      .map((e) => e.value)
+      .firstOrNull;
   final actions = <ParsedAction>[];
   final badDates = <String>[];
   var skippedBlank = 0;
@@ -117,6 +143,9 @@ ParsedActionsCsv parseActionsCsv(String text) {
         nextRefs: parseRefs(cell(row, 'Next actions and time')),
         prevRefs: parseRefs(cell(row, 'Previous actions and time')),
         directionsCell: cell(row, 'Growth Direction'),
+        done: doneColumn == null || doneColumn >= row.length
+            ? null
+            : parseYesNo(row[doneColumn]),
       ),
     );
   }

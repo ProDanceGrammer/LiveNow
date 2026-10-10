@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/action_import_service.dart';
+import '../current_icons.dart';
 import '../providers.dart';
 import '../widgets/action_import_summary_dialog.dart';
 import '../views/all_actions_view.dart';
@@ -121,7 +122,9 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
     // is "the Actions section is on screen". Hand keyboard focus to the
     // Calendar whenever it becomes the shown view (after this frame, once
     // ExcludeFocus has been lifted from it).
-    final shown = widget.sub == ActionsSub.calendar && TickerMode.valuesOf(context).enabled;
+    final shown =
+        widget.sub == ActionsSub.calendar &&
+        TickerMode.valuesOf(context).enabled;
     if (shown && !_calendarShown) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) ref.read(calendarFocusRequestProvider.notifier).state++;
@@ -150,6 +153,28 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
                 ),
               ),
             ),
+            if (widget.sub == ActionsSub.current)
+              Builder(
+                builder: (context) {
+                  final on = ref.watch(currentIconsProvider);
+                  final scheme = Theme.of(context).colorScheme;
+                  return IconButton(
+                    key: const ValueKey('current-icons-toggle'),
+                    isSelected: on,
+                    // The same icon as the 'Growth directions' rail item.
+                    icon: const Icon(Icons.insights),
+                    tooltip: on
+                        ? 'Hide growth direction icons'
+                        : 'Show growth direction icons',
+                    style: IconButton.styleFrom(
+                      backgroundColor: on ? scheme.primaryContainer : null,
+                      foregroundColor: on ? scheme.onPrimaryContainer : null,
+                    ),
+                    onPressed: () =>
+                        ref.read(currentIconsProvider.notifier).toggle(),
+                  );
+                },
+              ),
             IconButton(
               key: const ValueKey('import-actions-csv'),
               icon: const Icon(Icons.upload_file),

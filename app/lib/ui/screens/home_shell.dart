@@ -10,6 +10,7 @@ import '../theme_mode.dart';
 import '../widgets/glass.dart';
 import '../widgets/instant_rail.dart';
 import 'actions_section.dart';
+import 'budget_screen.dart';
 import 'growth_directions_screen.dart';
 import 'templates_screen.dart';
 
@@ -36,12 +37,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     InstantRailItem(icon: Icons.checklist_rounded, label: 'Actions'),
     InstantRailItem(icon: Icons.insights, label: 'Growth directions'),
     InstantRailItem(icon: Icons.dashboard_customize, label: 'Templates'),
+    InstantRailItem(
+      icon: Icons.account_balance_wallet_outlined,
+      label: 'Budget',
+    ),
   ];
 
   static const _titles = [
     null, // Actions: the active sub-view's name
     'Growth directions',
     'Templates',
+    'Budget',
   ];
 
   /// Index of the first section that is its own Scaffold (with its own FAB).
@@ -53,7 +59,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       onChanged: (s) => setState(() => _actionsSub = s),
     ),
     1 => const GrowthDirectionsScreen(),
-    _ => const TemplatesScreen(),
+    2 => const TemplatesScreen(),
+    _ => const BudgetScreen(),
   };
 
   @override

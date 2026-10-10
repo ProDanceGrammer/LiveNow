@@ -250,3 +250,164 @@ class ActionTemplatesTable extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+// ---- Budget (schema v10) -----------------------------------------------------
+// Money is stored as plain REAL and rounded by `domain/budget_rules.dart`
+// (like `metrics.target`). A transaction snapshots its own price, rates, income
+// flag and accounts so editing a category never rewrites history or balances.
+
+/// A place money lives: its own currency and its current rate to the base
+/// currency (units of this currency per 1 base unit — the spec's "Euro Rate").
+@DataClassName('BudgetAccount')
+class BudgetAccountsTable extends Table {
+  @override
+  String get tableName => 'budget_accounts';
+
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+
+  /// Free label: electronic money / cash / crypto. Optional, for readability.
+  TextColumn get type => text().nullable()();
+  TextColumn get currency => text()();
+  RealColumn get rateToBase => real().withDefault(const Constant(1))();
+  RealColumn get openingBalance => real().withDefault(const Constant(0))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => ['CHECK (rate_to_base > 0)'];
+}
+
+/// A budget category. A "group" is simply a category that has children; only
+/// leaves carry prices/units/transactions. NULL replaces the Notion `-1`
+/// sentinels everywhere.
+@DataClassName('BudgetCategory')
+@TableIndex(name: 'idx_budget_categories_parent', columns: {#parentId})
+class BudgetCategoriesTable extends Table {
+  @override
+  String get tableName => 'budget_categories';
+
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  BoolColumn get isIncome => boolean().withDefault(const Constant(false))();
+  BoolColumn get oneTime => boolean().withDefault(const Constant(false))();
+
+  /// piece | kilogram | month | percent_per_month
+  TextColumn get unit => text().withDefault(const Constant('month'))();
+
+  /// UTC ISO-8601 text; the category stops counting after it.
+  TextColumn get endDate => text().nullable()();
+  RealColumn get price => real().nullable()();
+  RealColumn get percent => real().nullable()();
+  RealColumn get frequencyMonths => real().nullable()();
+  RealColumn get unitsPerMonth => real().nullable()();
+
+  @ReferenceName('childCategories')
+  TextColumn get parentId => text().nullable().references(
+    BudgetCategoriesTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+
+  /// For `percent_per_month`: the (leaf) category the percentage is taken of.
+  @ReferenceName('percentDistributors')
+  TextColumn get countPercentOfId => text().nullable().references(
+    BudgetCategoriesTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+
+  /// Account whose currency the category is COUNTED in / that money actually
+  /// moves through ("Account to count" / "Account to use" in the spec).
+  @ReferenceName('countedCategories')
+  TextColumn get accountCountId => text().nullable().references(
+    BudgetAccountsTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+  @ReferenceName('usedCategories')
+  TextColumn get accountUseId => text().nullable().references(
+    BudgetAccountsTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (unit IN ('piece','kilogram','month','percent_per_month'))",
+    'CHECK (parent_id IS NULL OR parent_id <> id)',
+  ];
+}
+
+/// One income/expense record. The date follows the linked action's start live
+/// (`COALESCE(actions.start_at, occurred_at)`); `occurred_at` is the fallback
+/// and the frozen date once the action is gone.
+@DataClassName('BudgetTransaction')
+@TableIndex(name: 'idx_budget_tx_category', columns: {#categoryId})
+@TableIndex(name: 'idx_budget_tx_action', columns: {#actionId})
+class BudgetTransactionsTable extends Table {
+  @override
+  String get tableName => 'budget_transactions';
+
+  TextColumn get id => text()();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  TextColumn get categoryId => text().nullable().references(
+    BudgetCategoriesTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+  TextColumn get actionId => text().nullable().references(
+    ActionsTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+  TextColumn get occurredAt => text()();
+  RealColumn get quantity => real().withDefault(const Constant(1))();
+
+  /// Price per unit actually used (snapshot of the category price).
+  RealColumn get unitPrice => real().withDefault(const Constant(0))();
+  BoolColumn get isIncome => boolean().withDefault(const Constant(false))();
+
+  /// True for percent categories: `quantity` already IS the amount.
+  BoolColumn get isAmount => boolean().withDefault(const Constant(false))();
+  @ReferenceName('countedTransactions')
+  TextColumn get accountCountId => text().nullable().references(
+    BudgetAccountsTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+  @ReferenceName('usedTransactions')
+  TextColumn get accountUseId => text().nullable().references(
+    BudgetAccountsTable,
+    #id,
+    onDelete: KeyAction.setNull,
+  )();
+  RealColumn get rateCount => real().nullable()();
+  RealColumn get rateInteract => real().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Small key/value store: base_currency, period_months, tolerance.
+@DataClassName('BudgetSetting')
+class BudgetSettingsTable extends Table {
+  @override
+  String get tableName => 'budget_settings';
+
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}

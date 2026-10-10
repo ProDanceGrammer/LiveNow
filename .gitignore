@@ -26,6 +26,7 @@ venv/
 /.claude
 CLAUDE.md
 /claude_dev
+app/claude_dev/
 
 # Testing / Coverage
 .pytest_cache/

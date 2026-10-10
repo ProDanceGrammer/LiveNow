@@ -41,17 +41,20 @@ Future<void> _insert(
     );
 
 /// The old algorithm: select every row, map, filter in Dart, order in SQL.
+/// The Current board's expected rows: timed/unscheduled actions only (all-day
+/// actions live on the Calendar strip), split by the done rule.
 List<ActionRow> _oldCurrent(List<ActionRow> all, {required bool done}) {
   return all
       .where(
         (a) =>
+            !a.isAllDay &&
             done_rule.isDoneBefore(
-              startAt: dateTimeFromDb(a.startAt),
-              endAt: dateTimeFromDb(a.endAt),
-              isAllDay: a.isAllDay,
-              done: a.done,
-            ) ==
-            done,
+                  startAt: dateTimeFromDb(a.startAt),
+                  endAt: dateTimeFromDb(a.endAt),
+                  isAllDay: a.isAllDay,
+                  done: a.done,
+                ) ==
+                done,
       )
       .toList();
 }
@@ -144,11 +147,16 @@ void main() {
         );
         expect(sqlDone.contains(row.id), dart, reason: row.id);
       }
-      // And the default (SQLite clock) variant gives the same answer.
+      // And the default (SQLite clock) variant gives the same answer, minus the
+      // all-day rows the board never lists.
+      final allDayIds = {
+        for (final r in await db.select(db.actionsTable).get())
+          if (r.isAllDay) r.id,
+      };
       final viaClock = (await queries.watchCurrentDone(limit: 100).first)
           .map((a) => a.id)
           .toSet();
-      expect(viaClock, sqlDone);
+      expect(viaClock, sqlDone.difference(allDayIds));
     });
   });
 
@@ -214,6 +222,39 @@ void main() {
       expect(page, notDone.take(25).toList());
       expect(await queries.watchCurrentNotDoneCount().first, oldNotDone.length);
       expect(await queries.watchCurrentDoneCount().first, oldDone.length);
+    });
+
+    test('all-day actions are never on the board, nor in its totals', () async {
+      final now = DateTime.now().toUtc();
+      String t(Duration d) => dateTimeToDb(now.add(d))!;
+      await _insert(db, 'timed open', startAt: t(const Duration(hours: 2)));
+      await _insert(
+        db,
+        'timed done',
+        startAt: t(const Duration(hours: -3)),
+        endAt: t(const Duration(hours: -2)),
+      );
+      await _insert(db, 'unscheduled');
+      await _insert(
+        db,
+        'all-day open',
+        startAt: t(const Duration(hours: 1)),
+        allDay: true,
+      );
+      await _insert(
+        db,
+        'all-day done',
+        startAt: t(const Duration(hours: -5)),
+        done: true,
+        allDay: true,
+      );
+
+      final notDone = await queries.watchCurrentNotDone(limit: 100).first;
+      final done = await queries.watchCurrentDone(limit: 100).first;
+      expect(notDone.map((a) => a.id), ['timed open', 'unscheduled']);
+      expect(done.map((a) => a.id), ['timed done']);
+      expect(await queries.watchCurrentNotDoneCount().first, 2);
+      expect(await queries.watchCurrentDoneCount().first, 1);
     });
 
     test('5,000 rows: limit, totals, no notes read', () async {

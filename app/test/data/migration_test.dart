@@ -459,6 +459,88 @@ void main() {
     expect(rows['a3']!.name, 'Corrupt');
   });
 
+  test('v9 database upgrades to v10: budget tables are added, data kept', () async {
+    final db = AppDatabase.forTesting(
+      NativeDatabase.memory(
+        setup: (raw) {
+          raw.execute(_countableActivitiesV2);
+          raw.execute('''
+            CREATE TABLE actions (
+              id TEXT NOT NULL PRIMARY KEY,
+              name TEXT NOT NULL,
+              done INTEGER NOT NULL DEFAULT 0,
+              postpone_flex TEXT NOT NULL DEFAULT 'flexible',
+              depth_level TEXT NULL,
+              start_at TEXT NULL,
+              end_at TEXT NULL,
+              is_all_day INTEGER NOT NULL DEFAULT 0,
+              estimated_minutes INTEGER NULL,
+              result_note TEXT NULL,
+              notes TEXT NULL,
+              notes_text TEXT NULL,
+              completed_at TEXT NULL,
+              sequence_number INTEGER NULL,
+              countable_activity_id TEXT NULL REFERENCES countable_activities(id)
+                ON DELETE SET NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )''');
+          raw.execute(_metricsV6);
+          raw.execute(_metricDependenciesV3);
+          raw.execute(_actionMetricsOld);
+          raw.execute(
+            "INSERT INTO actions (id, name, created_at, updated_at) "
+            "VALUES ('a1', 'Keep me', 't', 't')",
+          );
+          raw.execute('PRAGMA user_version = 9');
+          raw.execute('PRAGMA foreign_keys = ON');
+        },
+      ),
+    );
+    addTearDown(db.close);
+
+    expect((await db.select(db.actionsTable).getSingle()).name, 'Keep me');
+
+    // The new tables exist and a transaction can link to the old action.
+    await db.customStatement(
+      "INSERT INTO budget_accounts (id, name, currency, rate_to_base, "
+      "opening_balance, created_at, updated_at) "
+      "VALUES ('acc', 'Euro', 'EUR', 1, 0, 't', 't')",
+    );
+    await db.customStatement(
+      "INSERT INTO budget_categories (id, name, created_at, updated_at) "
+      "VALUES ('cat', 'Food', 't', 't')",
+    );
+    await db.customStatement(
+      "INSERT INTO budget_transactions (id, category_id, action_id, "
+      "occurred_at, created_at, updated_at) "
+      "VALUES ('tx', 'cat', 'a1', 't', 't', 't')",
+    );
+    await db.customStatement(
+      "INSERT INTO budget_settings (key, value) VALUES ('tolerance', '5')",
+    );
+    expect(await db.select(db.budgetTransactionsTable).get(), hasLength(1));
+
+    final idx = await db
+        .customSelect(
+          "SELECT name FROM sqlite_master WHERE type='index' "
+          "AND name LIKE 'idx_budget_%'",
+        )
+        .get();
+    expect(idx.map((r) => r.read<String>('name')).toSet(), {
+      'idx_budget_categories_parent',
+      'idx_budget_tx_category',
+      'idx_budget_tx_action',
+    });
+
+    // SET NULL keeps the transaction when the action goes (foreign keys on).
+    await db.customStatement("DELETE FROM actions WHERE id = 'a1'");
+    expect(
+      (await db.select(db.budgetTransactionsTable).getSingle()).actionId,
+      isNull,
+    );
+  });
+
   test('v7 -> v9 rebuild keeps rows and adds notes_text', () async {
     final db = AppDatabase.forTesting(
       NativeDatabase.memory(

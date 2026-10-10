@@ -266,16 +266,13 @@ class ViewQueries {
     String sql,
     Set<TableInfo> readsFrom,
   ) => debounced(
-    db
-        .customSelect(sql, readsFrom: readsFrom)
-        .watch()
-        .map((rows) {
-          final map = <String, Set<String>>{};
-          for (final r in rows) {
-            (map[r.read<String>('k')] ??= {}).add(r.read<String>('v'));
-          }
-          return map;
-        }),
+    db.customSelect(sql, readsFrom: readsFrom).watch().map((rows) {
+      final map = <String, Set<String>>{};
+      for (final r in rows) {
+        (map[r.read<String>('k')] ??= {}).add(r.read<String>('v'));
+      }
+      return map;
+    }),
     kListDebounce,
   );
 
@@ -316,11 +313,15 @@ class ViewQueries {
     ),
   );
 
+  /// All-day actions live on the Calendar's strip, not on the Current board.
+  static const _timedOnly = 'is_all_day = 0';
+
   static const _notDoneOrder = 'ORDER BY start_at IS NULL ASC, start_at ASC';
   static const _doneOrder = 'ORDER BY end_at IS NULL ASC, end_at DESC';
 
   /// Current Actions board, right column: not done yet, nearest deadline
-  /// first (unscheduled last), at most [limit] rows. Once an action has been
+  /// first (unscheduled last), at most [limit] rows. All-day actions are never
+  /// listed on the board. Once an action has been
   /// started, `start_at` is its actual start time (see
   /// [ActionService.start]), so this is also "started, still running" first.
   /// [nowUtc] pins "now" (tests); by default SQLite's clock is used.
@@ -330,7 +331,8 @@ class ViewQueries {
   }) {
     final (now, vars) = _now(nowUtc);
     return _items(
-      'SELECT $_itemColumns FROM actions WHERE NOT (${doneBeforeSql(now)}) '
+      'SELECT $_itemColumns FROM actions '
+      'WHERE $_timedOnly AND NOT (${doneBeforeSql(now)}) '
       '$_notDoneOrder LIMIT ?',
       variables: [...vars, Variable.withInt(limit)],
     );
@@ -345,7 +347,8 @@ class ViewQueries {
   }) {
     final (now, vars) = _now(nowUtc);
     return _items(
-      'SELECT $_itemColumns FROM actions WHERE (${doneBeforeSql(now)}) '
+      'SELECT $_itemColumns FROM actions '
+      'WHERE $_timedOnly AND (${doneBeforeSql(now)}) '
       '$_doneOrder LIMIT ?',
       variables: [...vars, Variable.withInt(limit)],
     );
@@ -354,13 +357,16 @@ class ViewQueries {
   /// Total number of not-done actions (the column header; not the page size).
   Stream<int> watchCurrentNotDoneCount({DateTime? nowUtc}) {
     final (now, vars) = _now(nowUtc);
-    return _count('NOT (${doneBeforeSql(now)})', variables: vars);
+    return _count(
+      '$_timedOnly AND NOT (${doneBeforeSql(now)})',
+      variables: vars,
+    );
   }
 
   /// Total number of done actions.
   Stream<int> watchCurrentDoneCount({DateTime? nowUtc}) {
     final (now, vars) = _now(nowUtc);
-    return _count('(${doneBeforeSql(now)})', variables: vars);
+    return _count('$_timedOnly AND (${doneBeforeSql(now)})', variables: vars);
   }
 
   (String, List<Variable>) _now(DateTime? nowUtc) => nowUtc == null
