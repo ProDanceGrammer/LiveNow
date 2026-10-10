@@ -14,6 +14,7 @@ import '../../domain/duration_rules.dart';
 import '../dialog_stack.dart';
 import '../open_entity.dart';
 import '../providers.dart';
+import '../sync_providers.dart';
 import '../undo.dart';
 import 'action_budget_section.dart';
 import 'action_picker_dialog.dart';
@@ -82,6 +83,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   final _notesKey = GlobalKey();
   StreamSubscription<ActionRow?>? _rowSub;
   ActionRow? _seen; // the last database row seen (to spot external changes)
+  String? _openStamp; // sync clock stamp of the row when the form was opened
 
   bool get _isEditing => widget.existing != null;
 
@@ -111,6 +113,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       // dispose it mid-load — which throws and leaves the future forever
       // pending, silently dropping the action's metric selection.
       final db = ref.read(databaseProvider);
+      ref
+          .read(syncStoreProvider)
+          .rowStamp('actions', existing.id)
+          .then((v) => _openStamp = v?.hlc);
       _seen = existing;
       _rowSub =
           (db.select(db.actionsTable)..where((t) => t.id.equals(existing.id)))
@@ -534,6 +540,41 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     ).then((name) => (name == null || name.isEmpty) ? null : name);
   }
 
+  /// True when saving may go ahead. If ANOTHER device changed this action
+  /// (through sync) while the form was open, saving would silently overwrite
+  /// that change, so the user is asked first. Changes made here (Start,
+  /// Finish... keep the dialog open) are not asked about.
+  Future<bool> _confirmOverwriteRemote(String id) async {
+    final store = ref.read(syncStoreProvider);
+    final opened = _openStamp;
+    final now = await store.rowStamp('actions', id);
+    if (opened == null || now == null || now.hlc == opened) return true;
+    if (now.origin == await store.deviceId()) return true;
+    if (!mounted) return false;
+    return await showStackedDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Changed on another device'),
+            content: const Text(
+              'This action was changed on your other device while you were '
+              'editing it. Saving now replaces that change with yours.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                key: const ValueKey('overwrite-remote'),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Overwrite'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final service = ref.read(actionServiceProvider);
@@ -541,6 +582,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
 
     if (_isEditing) {
       final id = widget.existing!.id;
+      if (!await _confirmOverwriteRemote(id)) return;
       await service.updateAction(
         actionId: id,
         name: name,

@@ -616,6 +616,72 @@ class SyncStore {
     ];
   }
 
+  Future<int> unseenConflictCount() async =>
+      (await db
+              .customSelect(
+                'SELECT COUNT(*) AS n FROM sync_conflicts WHERE seen = 0',
+              )
+              .getSingle())
+          .read<int>('n');
+
+  /// Puts the losing version of a conflict back as a NEW local edit (it then
+  /// wins everywhere) and removes the conflict. Throws if the row can no longer
+  /// hold it (a row it refers to is gone). Returns false when there is nothing
+  /// to restore (the loser was a deletion).
+  Future<bool> restoreConflict(int id) async {
+    final c = (await conflicts()).where((x) => x.id == id).firstOrNull;
+    if (c == null) return false;
+    final data = c.loserData;
+    if (data == null) {
+      await db.customStatement('DELETE FROM sync_conflicts WHERE id = ?', [id]);
+      return false;
+    }
+    final pk = syncTables[c.table]!;
+    await db.transaction(() async {
+      await _upsert(
+        SyncChange(
+          table: c.table,
+          rowId: c.rowId,
+          hlc: c.loserHlc,
+          origin: c.loserOrigin,
+          deleted: false,
+          data: data,
+        ),
+        pk,
+      );
+      await db.customStatement('DELETE FROM sync_conflicts WHERE id = ?', [id]);
+    });
+    db.notifyUpdates({TableUpdate(c.table)});
+    await afterApply?.call({c.table});
+    return true;
+  }
+
+  Future<void> dismissConflicts() =>
+      db.customStatement('DELETE FROM sync_conflicts');
+
+  /// Clock stamp and writer of a row: the editor uses it to notice that another
+  /// device changed the row while the form was open.
+  Future<({String hlc, String origin})?> rowStamp(
+    String table,
+    String rowId,
+  ) async {
+    final v = await _version(table, rowId);
+    return v == null ? null : (hlc: v.hlc, origin: v.origin);
+  }
+
+  /// How many rows of the main tables exist (for the "this will be replaced"
+  /// confirmation).
+  Future<Map<String, int>> rowCounts() async => {
+    for (final t in const [
+      'actions',
+      'metrics',
+      'action_templates',
+      'budget_transactions',
+    ])
+      t: (await db.customSelect('SELECT COUNT(*) AS n FROM $t').getSingle())
+          .read<int>('n'),
+  };
+
   Future<void> markConflictsSeen() =>
       db.customStatement('UPDATE sync_conflicts SET seen = 1');
 

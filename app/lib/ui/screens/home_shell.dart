@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,9 @@ import '../widgets/action_editor.dart';
 import '../rail_collapsed.dart';
 import '../theme_mode.dart';
 import '../widgets/glass.dart';
+import '../sync_providers.dart';
 import '../widgets/instant_rail.dart';
+import '../widgets/sync_status_button.dart';
 import 'actions_section.dart';
 import 'budget_screen.dart';
 import 'growth_directions_screen.dart';
@@ -32,6 +35,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   /// Which view the Actions section (index 0) shows.
   ActionsSub _actionsSub = ActionsSub.current;
+
+  @override
+  void initState() {
+    super.initState();
+    // Sync starts with the app (the PC opens its server when a phone is
+    // paired, a phone syncs). Never under `flutter test`: no sockets there.
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      Future<void>.microtask(() => startSyncForRole(ref));
+    }
+  }
 
   static const _destinations = [
     InstantRailItem(icon: Icons.checklist_rounded, label: 'Actions'),
@@ -128,7 +141,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget _buildScaffold(BuildContext context) {
     final collapsed = ref.watch(railCollapsedProvider);
     return Scaffold(
-      appBar: AppBar(title: Text(_titles[_index] ?? _actionsSub.title)),
+      appBar: AppBar(
+        title: Text(_titles[_index] ?? _actionsSub.title),
+        actions: const [SyncStatusButton(), SizedBox(width: 8)],
+      ),
       // The New-action FAB is drawn here instead of via Scaffold.
       // floatingActionButton: the Scaffold runs a 200 ms scale transition
       // whenever its FAB appears/disappears, even with noAnimation, and the

@@ -47,6 +47,8 @@ dependencies:
       ref: 01eccc6ee36bd07698bd80915289fe7070478cd2
   provider: ^6.1.5+1
   cryptography: ^2.9.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.4.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
