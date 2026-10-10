@@ -526,6 +526,30 @@ class SyncStore {
     );
   }
 
+  /// Empties every synced table and the whole sync history (versions, inbox,
+  /// conflicts, per-peer cursors), keeping this device's id and clock. Used
+  /// when a phone pairs for the first time: the PC's data then replaces it, and
+  /// the next sync pulls everything from position 0.
+  Future<void> wipeForReplace() async {
+    await db.transaction(() async {
+      await _setApplying(true);
+      await db.customStatement('PRAGMA defer_foreign_keys = ON');
+      for (final t in syncTables.keys) {
+        await db.customStatement('DELETE FROM $t');
+      }
+      await db.customStatement('DELETE FROM sync_versions');
+      await db.customStatement('DELETE FROM sync_inbox');
+      await db.customStatement('DELETE FROM sync_conflicts');
+      await db.customStatement(
+        "DELETE FROM sync_state WHERE key LIKE 'pulled:%' "
+        "OR key LIKE 'pushed:%' OR key LIKE 'served:%'",
+      );
+      await _setApplying(false);
+    });
+    db.notifyUpdates({for (final t in syncTables.keys) TableUpdate(t)});
+    await afterApply?.call(syncTables.keys.toSet());
+  }
+
   // ---- conflicts -------------------------------------------------------------
 
   Future<bool> _recordConflict(

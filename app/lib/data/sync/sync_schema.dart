@@ -83,6 +83,15 @@ Future<void> createSyncTables(DatabaseConnectionUser db) async {
     "INSERT OR IGNORE INTO sync_state (key, value) "
     "VALUES ('device_id', lower(hex(randomblob(8))))",
   );
+  // Devices this one is paired with: the key they share, the last request
+  // counter (seen from them / used towards them) and where to reach them.
+  await db.customStatement(
+    'CREATE TABLE IF NOT EXISTS sync_peers ('
+    'device_id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, '
+    'key TEXT NOT NULL, last_counter INTEGER NOT NULL DEFAULT 0, '
+    "addresses TEXT NOT NULL DEFAULT '[]', port INTEGER, "
+    'created_at TEXT NOT NULL)',
+  );
   // Changes received page by page, merged all at once when the transfer ends.
   await db.customStatement(
     'CREATE TABLE IF NOT EXISTS sync_inbox ('

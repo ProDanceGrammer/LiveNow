@@ -115,8 +115,19 @@ class ApplyResult {
   Map<String, Object?> toJson() => {
     'applied': applied,
     'conflicts': conflicts,
-    'repairs': repairs.length,
+    'repairs': [
+      for (final r in repairs) [r.kind, r.table, r.rowId],
+    ],
   };
+
+  factory ApplyResult.fromJson(Map<String, Object?> j) => ApplyResult(
+    applied: j['applied']! as int,
+    conflicts: j['conflicts']! as int,
+    repairs: [
+      for (final r in (j['repairs']! as List))
+        SyncRepair((r as List)[0] as String, r[1] as String, r[2] as String),
+    ],
+  );
 }
 
 /// An edit that lost a merge against a concurrent edit of the same row.
