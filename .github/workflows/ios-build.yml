@@ -1,0 +1,69 @@
+# Builds an UNSIGNED iOS app (.ipa) on a GitHub macOS runner, so no Mac of your
+# own is needed. Sign + install it from Windows with Sideloadly / AltStore (free
+# Apple ID, valid 7 days).
+#
+# Runs ONLY when you ask: push a tag that starts with "ios-" (git tag ios-1 &&
+# git push origin ios-1) or press "Run workflow" on the Actions page. A build
+# costs ~10-15 macOS minutes (a private repo's free quota counts macOS x10).
+name: iOS build (unsigned)
+
+on:
+  push:
+    tags: ['ios-*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      # The repository has no ios/ folder (the app was Windows-first): generate
+      # it here. Existing lib/ and test/ files are left alone.
+      - name: Generate the iOS project
+        run: flutter create --platforms=ios --org io.livenow --project-name livenow .
+
+      - name: Permissions and network settings (Info.plist)
+        run: |
+          PLIST=ios/Runner/Info.plist
+          B=/usr/libexec/PlistBuddy
+          $B -c "Add :NSLocalNetworkUsageDescription string 'LiveNow syncs with your PC over your home network.'" $PLIST
+          $B -c "Add :NSCameraUsageDescription string 'LiveNow scans the pairing code shown on your PC.'" $PLIST
+          # The sync traffic is plain HTTP but encrypted by the app itself; it
+          # goes to the paired PC (a LAN address, or a Tailscale 100.x one,
+          # which iOS does not count as local).
+          $B -c "Add :NSAppTransportSecurity dict" $PLIST
+          $B -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" $PLIST
+
+      # mobile_scanner needs iOS 15.5+.
+      - name: Raise the deployment target
+        run: |
+          sed -i '' "s/^# platform :ios.*/platform :ios, '15.5'/" ios/Podfile
+          sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 15.5/g' ios/Runner.xcodeproj/project.pbxproj
+
+      - run: flutter pub get
+
+      - name: Build (no code signing)
+        run: flutter build ios --release --no-codesign
+
+      - name: Pack the .ipa
+        run: |
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry livenow.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: livenow-ios-unsigned
+          path: app/livenow.ipa
+          retention-days: 7
