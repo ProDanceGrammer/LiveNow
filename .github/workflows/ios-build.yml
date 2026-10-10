@@ -22,6 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Plugins such as device_info_plus need a recent iOS SDK: use the newest
+      # Xcode the runner image has installed.
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode_*.app
+          NEWEST=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.47.5
