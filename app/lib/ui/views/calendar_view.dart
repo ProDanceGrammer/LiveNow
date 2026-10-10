@@ -29,6 +29,7 @@ import '../../domain/postpone_rules.dart';
 import '../calendar_icons.dart';
 import '../calendar_selection.dart';
 import '../edit_action.dart';
+import '../layout.dart';
 import '../providers.dart';
 import '../undo.dart';
 import '../theme/glass_theme.dart';
@@ -548,6 +549,7 @@ class _Header extends ConsumerWidget {
     final theme = Theme.of(context);
     final g = context.glass;
     final scheme = theme.colorScheme;
+    final phone = usePhoneLayout(context);
     // Each group of controls sits in a soft glass pill.
     Widget pill(Widget child) => GlassSurface(
       radius: 20,
@@ -560,61 +562,66 @@ class _Header extends ConsumerWidget {
     );
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Row(
-        children: [
-          pill(
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  tooltip: 'Previous',
-                  onPressed: () => shiftCalendarRange(ref, -1),
-                ),
-                OutlinedButton(
-                  onPressed: () => goToCalendarToday(ref),
-                  child: const Text('Today'),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  tooltip: 'Next',
-                  onPressed: () => shiftCalendarRange(ref, 1),
-                ),
-              ],
-            ),
+      child: _flow(phone, [
+        pill(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                visualDensity: phone ? VisualDensity.compact : null,
+                icon: const Icon(Icons.chevron_left),
+                tooltip: 'Previous',
+                onPressed: () => shiftCalendarRange(ref, -1),
+              ),
+              OutlinedButton(
+                onPressed: () => goToCalendarToday(ref),
+                child: const Text('Today'),
+              ),
+              IconButton(
+                visualDensity: phone ? VisualDensity.compact : null,
+                icon: const Icon(Icons.chevron_right),
+                tooltip: 'Next',
+                onPressed: () => shiftCalendarRange(ref, 1),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Text(
-            _label(),
-            style: theme.textTheme.titleMedium?.copyWith(color: g.textPrimary),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          _label(),
+          style: theme.textTheme.titleMedium?.copyWith(color: g.textPrimary),
+        ),
+        const Spacer(),
+        // Zoom: how many hours of a day are visible at once.
+        pill(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                visualDensity: phone ? VisualDensity.compact : null,
+                icon: const Icon(Icons.zoom_out),
+                tooltip: 'Show more hours (Ctrl+−)',
+                onPressed: () => zoomCalendar(ref, -1),
+              ),
+              Text(
+                '${ref.watch(calendarVisibleHoursProvider)} h',
+                key: const ValueKey('zoom-label'),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: g.textSecondary,
+                ),
+              ),
+              IconButton(
+                visualDensity: phone ? VisualDensity.compact : null,
+                icon: const Icon(Icons.zoom_in),
+                tooltip: 'Show fewer hours (Ctrl++)',
+                onPressed: () => zoomCalendar(ref, 1),
+              ),
+            ],
           ),
-          const Spacer(),
-          // Zoom: how many hours of a day are visible at once.
-          pill(
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.zoom_out),
-                  tooltip: 'Show more hours (Ctrl+−)',
-                  onPressed: () => zoomCalendar(ref, -1),
-                ),
-                Text(
-                  '${ref.watch(calendarVisibleHoursProvider)} h',
-                  key: const ValueKey('zoom-label'),
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: g.textSecondary,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.zoom_in),
-                  tooltip: 'Show fewer hours (Ctrl++)',
-                  onPressed: () => zoomCalendar(ref, 1),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
+        ),
+        const SizedBox(width: 12),
+        // The direction-icons switch has no room on a phone (default: off).
+        if (!phone)
           pill(
             Builder(
               builder: (context) {
@@ -637,40 +644,58 @@ class _Header extends ConsumerWidget {
               },
             ),
           ),
-          const SizedBox(width: 12),
-          pill(
-            SegmentedButton<int>(
-              showSelectedIcon: false,
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                side: const WidgetStatePropertyAll(BorderSide.none),
-                backgroundColor: WidgetStateProperty.resolveWith(
-                  (states) => states.contains(WidgetState.selected)
-                      ? scheme.primaryContainer
-                      : Colors.transparent,
-                ),
-                foregroundColor: WidgetStateProperty.resolveWith(
-                  (states) => states.contains(WidgetState.selected)
-                      ? scheme.onPrimaryContainer
-                      : g.textSecondary,
-                ),
+        const SizedBox(width: 12),
+        pill(
+          SegmentedButton<int>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              // Tighter on a phone so the day selector fits beside the zoom.
+              padding: phone
+                  ? const WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 4),
+                    )
+                  : null,
+              minimumSize: phone
+                  ? const WidgetStatePropertyAll(Size(34, 34))
+                  : null,
+              side: const WidgetStatePropertyAll(BorderSide.none),
+              backgroundColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.selected)
+                    ? scheme.primaryContainer
+                    : Colors.transparent,
               ),
-              segments: [
-                for (var n = 2; n <= 7; n++)
-                  ButtonSegment(
-                    value: n,
-                    label: Text('$n'),
-                    tooltip: '$n days',
-                  ),
-              ],
-              selected: {dayCount},
-              onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
+              foregroundColor: WidgetStateProperty.resolveWith(
+                (states) => states.contains(WidgetState.selected)
+                    ? scheme.onPrimaryContainer
+                    : g.textSecondary,
+              ),
             ),
+            segments: [
+              for (var n = phone ? 1 : 2; n <= (phone ? 3 : 7); n++)
+                ButtonSegment(value: n, label: Text('$n'), tooltip: '$n days'),
+            ],
+            selected: {dayCount},
+            onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
           ),
-        ],
-      ),
+        ),
+      ]),
     );
   }
+
+  /// One row on a desktop; on a phone the groups wrap onto as many rows as the
+  /// width needs (the spacers between them are dropped).
+  static Widget _flow(bool phone, List<Widget> kids) => phone
+      ? Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            for (final k in kids)
+              if (k is! Spacer && k is! SizedBox) k,
+          ],
+        )
+      : Row(children: kids);
 }
 
 class _DayHeaderRow extends StatelessWidget {
@@ -702,6 +727,9 @@ class _DayHeaderRow extends StatelessWidget {
               builder: (context) {
                 final l = _local(calendarAddDays(start, i));
                 final isToday = i == today;
+                // Narrow columns (a phone showing several days) get a one-letter
+                // weekday and tighter padding so the header never overflows.
+                final narrow = dayWidth < 72;
                 return SizedBox(
                   key: ValueKey('day-header-$i'),
                   width: dayWidth,
@@ -709,17 +737,19 @@ class _DayHeaderRow extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        _dayNames[l.weekday - 1],
+                        narrow
+                            ? _dayNames[l.weekday - 1].substring(0, 1)
+                            : _dayNames[l.weekday - 1],
                         style: TextStyle(
                           color: isToday ? scheme.primary : g.textSecondary,
                           fontWeight: isToday ? FontWeight.w600 : null,
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      SizedBox(width: narrow ? 2 : 6),
                       Container(
                         constraints: const BoxConstraints(minWidth: 26),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: narrow ? 3 : 6,
                           vertical: 3,
                         ),
                         decoration: BoxDecoration(
@@ -1062,8 +1092,13 @@ class _AllDayChip extends ConsumerWidget {
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
               // Selection happens on press (see [_onPress]); double-click edits.
-              onTap: () {},
-              onDoubleTap: () => openActionEditor(context, ref, item.id),
+              // On a phone a tap opens the editor.
+              onTap: usePhoneLayout(context)
+                  ? () => openActionEditor(context, ref, item.id)
+                  : () {},
+              onDoubleTap: usePhoneLayout(context)
+                  ? null
+                  : () => openActionEditor(context, ref, item.id),
               child: Container(
                 height: 18,
                 width: double.infinity,
@@ -2155,10 +2190,15 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           onTapDown: (_) {
             if (!isAdditiveCalendarClick()) clearCalendarSelection(ref);
           },
-          onPanStart: _createStart,
-          onPanUpdate: _createUpdate,
-          onPanEnd: (_) => _createEnd(),
-          onPanCancel: _createCancel,
+          // A finger must scroll the grid, so on a phone the sweep gesture is
+          // replaced by a long-press that makes a one-hour action.
+          onPanStart: usePhoneLayout(context) ? null : _createStart,
+          onPanUpdate: usePhoneLayout(context) ? null : _createUpdate,
+          onPanEnd: usePhoneLayout(context) ? null : (_) => _createEnd(),
+          onPanCancel: usePhoneLayout(context) ? null : _createCancel,
+          onLongPressStart: usePhoneLayout(context)
+              ? (d) => _createHourAt(d.localPosition)
+              : null,
           child: RepaintBoundary(
             child: CustomPaint(
               painter: _GridPainter(
@@ -2662,6 +2702,21 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     );
   }
 
+  /// Phone: a long-press on empty space opens the new-action dialog with a
+  /// one-hour slot starting where the finger is (snapped to 10 minutes).
+  Future<void> _createHourAt(Offset local) async {
+    final day = (local.dx / widget.dayWidth).floor().clamp(
+      0,
+      widget.dayCount - 1,
+    );
+    final (start, _) = _newRangeTimes(_NewRange(day, local.dy, local.dy));
+    await ActionEditorDialog.show(
+      context,
+      initialStart: start,
+      initialEnd: start.add(const Duration(hours: 1)),
+    );
+  }
+
   Future<void> _createEnd() async {
     if (_marqueeOrigin != null) {
       final rect = _marqueeN.value;
@@ -3007,9 +3062,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         color: bg,
         borderRadius: BorderRadius.circular(8),
         // One filled rounded rectangle; only the selected block is outlined.
-        border: selected
-            ? Border.all(color: scheme.onSurface, width: 2)
-            : null,
+        border: selected ? Border.all(color: scheme.onSurface, width: 2) : null,
       ),
       child: content,
     );
@@ -3026,10 +3079,30 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         dragStartBehavior: DragStartBehavior.down,
-        onDoubleTap: () => openActionEditor(context, ref, item.id),
-        onPanStart: (d) =>
-            widget.onDragStart(_kindAt(d.localPosition.dy), d.globalPosition),
-        onPanUpdate: (d) => widget.onDragUpdate(d.globalPosition),
+        // Phone: a tap opens the editor, a long-press then drag moves the
+        // block (a plain drag must scroll the grid). Desktop: double-click
+        // edits, a drag moves or resizes.
+        onTap: usePhoneLayout(context)
+            ? () => openActionEditor(context, ref, item.id)
+            : null,
+        onDoubleTap: usePhoneLayout(context)
+            ? null
+            : () => openActionEditor(context, ref, item.id),
+        onLongPressStart: usePhoneLayout(context)
+            ? (d) => widget.onDragStart(_DragKind.move, d.globalPosition)
+            : null,
+        onLongPressMoveUpdate: usePhoneLayout(context)
+            ? (d) => widget.onDragUpdate(d.globalPosition)
+            : null,
+        onPanStart: usePhoneLayout(context)
+            ? null
+            : (d) => widget.onDragStart(
+                _kindAt(d.localPosition.dy),
+                d.globalPosition,
+              ),
+        onPanUpdate: usePhoneLayout(context)
+            ? null
+            : (d) => widget.onDragUpdate(d.globalPosition),
         child: MouseRegion(
           cursor: _inBand
               ? SystemMouseCursors.resizeUpDown

@@ -11,6 +11,7 @@ import '../../domain/name_sort.dart';
 import '../budget_files.dart';
 import '../budget_providers.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../open_entity.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/budget_dialogs.dart';
@@ -204,6 +205,11 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
                     child: TabBar(
                       key: const ValueKey('budget-switch'),
                       controller: _tabs,
+                      // Four tabs do not fit a phone: scroll them.
+                      isScrollable: usePhoneLayout(context),
+                      tabAlignment: usePhoneLayout(context)
+                          ? TabAlignment.start
+                          : null,
                       splashFactory: NoSplash.splashFactory,
                       tabs: [
                         for (final t in BudgetTab.values) Tab(text: t.label),
@@ -429,6 +435,23 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
       under.sort(byName);
       within.sort(byName);
 
+      final boards = [
+        _BoardColumn(
+          columnKey: 'over',
+          title: 'Actual above plan',
+          entries: over,
+        ),
+        _BoardColumn(
+          columnKey: 'under',
+          title: 'Plan above actual',
+          entries: under,
+        ),
+        _BoardColumn(
+          columnKey: 'within',
+          title: 'Close to plan (±${budgetNumber(s.tolerance)})',
+          entries: within,
+        ),
+      ];
       return ListView(
         padding: const EdgeInsets.only(bottom: 88),
         children: [
@@ -532,32 +555,14 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _BoardColumn(
-                    columnKey: 'over',
-                    title: 'Actual above plan',
-                    entries: over,
+            child: usePhoneLayout(context)
+                // A phone stacks the three boards: side by side they are
+                // ~110 px wide each.
+                ? Column(children: boards)
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [for (final b in boards) Expanded(child: b)],
                   ),
-                ),
-                Expanded(
-                  child: _BoardColumn(
-                    columnKey: 'under',
-                    title: 'Plan above actual',
-                    entries: under,
-                  ),
-                ),
-                Expanded(
-                  child: _BoardColumn(
-                    columnKey: 'within',
-                    title: 'Close to plan (±${budgetNumber(s.tolerance)})',
-                    entries: within,
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       );
@@ -748,6 +753,7 @@ class _CategoriesViewState extends ConsumerState<_CategoriesView> {
           if (_query.isEmpty || r.$1.name.toLowerCase().contains(_query)) r,
       ];
       final accounts = view.accountById;
+      final phone = usePhoneLayout(context);
       final width =
           _nameCol.width +
           _cols.fold<double>(0, (a, c) => a + c.width) +
@@ -771,17 +777,31 @@ class _CategoriesViewState extends ConsumerState<_CategoriesView> {
                         setState(() => _query = v.trim().toLowerCase()),
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Icon(Icons.edit_outlined, size: 14),
-                const Text(' entered   '),
-                const Icon(Icons.functions, size: 16),
-                const Text(' calculated'),
+                if (!phone) ...[
+                  const SizedBox(width: 12),
+                  const Icon(Icons.edit_outlined, size: 14),
+                  const Text(' entered   '),
+                  const Icon(Icons.functions, size: 16),
+                  const Text(' calculated'),
+                ],
               ],
             ),
           ),
           Expanded(
             child: rows.isEmpty
                 ? const Center(child: Text('No categories yet.'))
+                : phone
+                ? ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 88),
+                    itemCount: rows.length,
+                    itemBuilder: (context, i) => _CategoryCard(
+                      category: rows[i].$1,
+                      depth: rows[i].$2,
+                      figures: view.snapshot.byCategory[rows[i].$1.id],
+                      urgency: urgency[rows[i].$1.id],
+                      currency: accounts[rows[i].$1.accountCountId]?.currency,
+                    ),
+                  )
                 : Scrollbar(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -1014,6 +1034,85 @@ class _CategoryRow extends ConsumerWidget {
   }
 }
 
+/// A category on a phone: the wide table is replaced by one card each (name
+/// indented by depth, plan and fact in the base currency, urgency, a menu).
+class _CategoryCard extends ConsumerWidget {
+  const _CategoryCard({
+    required this.category,
+    required this.depth,
+    required this.figures,
+    required this.urgency,
+    required this.currency,
+  });
+
+  final BudgetCategory category;
+  final int depth;
+  final CategoryFigures? figures;
+  final double? urgency;
+  final String? currency;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = category;
+    final f = figures;
+    final group = f?.isGroup ?? false;
+    final scheme = Theme.of(context).colorScheme;
+    String money(double? v) => v == null ? '—' : budgetMoney(v);
+    return Padding(
+      padding: EdgeInsets.only(left: depth * 14.0),
+      child: _card(
+        padding: EdgeInsets.zero,
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            key: ValueKey('budget-category-${c.id}'),
+            dense: true,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            leading: Icon(
+              c.isIncome ? Icons.south_west : Icons.north_east,
+              size: 16,
+              color: c.isIncome ? Colors.green : scheme.error,
+            ),
+            title: Text(
+              c.name,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontWeight: group ? FontWeight.w700 : null),
+            ),
+            subtitle: Text(
+              f?.noRate ?? false
+                  ? 'No rate: set the account rate'
+                  : 'Plan ${money(f?.planBase)} · Fact ${money(f?.factBase)}',
+            ),
+            onTap: () => BudgetCategoryDialog.show(context, existing: c),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (urgency != null)
+                  ParamValue.urgency(urgency!.toStringAsFixed(0)),
+                PopupMenuButton<String>(
+                  key: ValueKey('budget-category-menu-${c.id}'),
+                  onSelected: (v) => v == 'sub'
+                      ? BudgetCategoryDialog.show(context, parentId: c.id)
+                      : _deleteCategory(context, ref, c),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'sub',
+                      child: Text('Add sub-category'),
+                    ),
+                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---- transactions -----------------------------------------------------------
 
 class _TransactionsView extends ConsumerStatefulWidget {
@@ -1148,7 +1247,12 @@ class _TransactionTile extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(Icons.bolt_outlined, size: 14),
-                      Text(item.actionName ?? 'Action'),
+                      Flexible(
+                        child: Text(
+                          item.actionName ?? 'Action',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
                 ),

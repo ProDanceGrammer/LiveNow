@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/growth_rules.dart';
 import '../../domain/notion_icons.dart';
+import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
 import '../widgets/glass.dart';
@@ -78,11 +79,14 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
+                // Importing is a desktop job (Notion exports live on the PC).
+                if (!usePhoneLayout(context))
                 IconButton(
                   icon: const Icon(Icons.emoji_emotions_outlined),
                   tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
                   onPressed: () => _importIcons(context, ref),
                 ),
+                if (!usePhoneLayout(context))
                 IconButton(
                   icon: const Icon(Icons.upload_file),
                   tooltip: 'Import growth directions from CSV…',
@@ -283,6 +287,7 @@ class _BalanceBoardState extends State<_BalanceBoard> {
     final headerStyle = theme.textTheme.labelSmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
+    final phone = usePhoneLayout(context);
 
     // Rows stay plain (no per-row surface): the board is ONE glass panel, and
     // a transparent Material inside it hosts the rows' ink.
@@ -312,7 +317,7 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                       ),
                     ),
                     SizedBox(
-                      width: 72,
+                      width: phone ? 52 : 72,
                       child: Align(
                         alignment: Alignment.centerRight,
                         child: ParamIcon(
@@ -322,23 +327,26 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      width: 120,
+                    SizedBox(
+                      width: phone ? 82 : 120,
                       child: Padding(
-                        padding: EdgeInsets.only(left: 12),
-                        child: Align(
+                        padding: EdgeInsets.only(left: phone ? 6 : 12),
+                        child: const Align(
                           alignment: Alignment.centerLeft,
                           child: ParamIcon(Param.progress),
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      width: 56,
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: ParamIcon(Param.weight),
+                    // The weight column is left out on a phone (the room goes
+                    // to the name); it is in the direction's dialog.
+                    if (!phone)
+                      const SizedBox(
+                        width: 56,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: ParamIcon(Param.weight),
+                        ),
                       ),
-                    ),
                     const SizedBox(
                       width: 32,
                       child: Align(
@@ -393,6 +401,7 @@ class _BalanceRowTile extends StatelessWidget {
     final theme = Theme.of(context);
     final m = row.metric;
     final s = row.stat;
+    final phone = usePhoneLayout(context);
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => GrowthDirectionDialog.show(context, existing: m),
@@ -408,7 +417,7 @@ class _BalanceRowTile extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: 72,
+              width: phone ? 52 : 72,
               child: Text(
                 _fmt(s.urgency),
                 textAlign: TextAlign.right,
@@ -418,19 +427,20 @@ class _BalanceRowTile extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: 120,
+              width: phone ? 82 : 120,
               child: Padding(
-                padding: const EdgeInsets.only(left: 12),
+                padding: EdgeInsets.only(left: phone ? 6 : 12),
                 child: _ProgressBar(progress: s.progress),
               ),
             ),
-            SizedBox(
-              width: 56,
-              child: Text(
-                m.weight.round().toString(),
-                textAlign: TextAlign.right,
+            if (!phone)
+              SizedBox(
+                width: 56,
+                child: Text(
+                  m.weight.round().toString(),
+                  textAlign: TextAlign.right,
+                ),
               ),
-            ),
             SizedBox(
               width: 32,
               child: Align(
@@ -500,6 +510,31 @@ class _LevelRing extends StatelessWidget {
 
 enum _Sort { urgency, progress, weight, name }
 
+/// The List tab's filters: one row on a desktop; on a phone the search field
+/// gets a row of its own and the two dropdowns share the next one.
+Widget _filterFlow(bool phone, List<Widget> kids) {
+  if (!phone) return Row(children: kids);
+  final search = (kids.first as Expanded).child;
+  final rest = [
+    for (final w in kids.skip(1))
+      if (w is! SizedBox) w,
+  ];
+  return Column(
+    children: [
+      search,
+      const SizedBox(height: 6),
+      Row(
+        children: [
+          for (var i = 0; i < rest.length; i++) ...[
+            if (i > 0) const SizedBox(width: 12),
+            Expanded(child: rest[i]),
+          ],
+        ],
+      ),
+    ],
+  );
+}
+
 class _ListTab extends ConsumerStatefulWidget {
   const _ListTab();
 
@@ -552,70 +587,67 @@ class _ListTabState extends ConsumerState<_ListTab> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          decoration: const InputDecoration(
-                            labelText: 'Search',
-                            prefixIcon: Icon(Icons.search),
-                            isDense: true,
-                          ),
-                          onChanged: (v) => setState(() => _query = v),
+                  child: _filterFlow(usePhoneLayout(context), [
+                    Expanded(
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Search',
+                          prefixIcon: Icon(Icons.search),
+                          isDense: true,
                         ),
+                        onChanged: (v) => setState(() => _query = v),
                       ),
-                      const SizedBox(width: 12),
-                      DropdownButton<_Sort>(
-                        dropdownColor: context.glass.fillDialog,
-                        borderRadius: BorderRadius.circular(14),
-                        value: _sort,
-                        items: const [
-                          DropdownMenuItem(
-                            value: _Sort.urgency,
-                            child: Text('Most urgent'),
-                          ),
-                          DropdownMenuItem(
-                            value: _Sort.progress,
-                            child: Text('Highest progress'),
-                          ),
-                          DropdownMenuItem(
-                            value: _Sort.weight,
-                            child: Text('Heaviest'),
-                          ),
-                          DropdownMenuItem(
-                            value: _Sort.name,
-                            child: Text('Name'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _sort = v!),
-                      ),
-                      const SizedBox(width: 12),
-                      DropdownButton<MetricKind?>(
-                        dropdownColor: context.glass.fillDialog,
-                        borderRadius: BorderRadius.circular(14),
-                        value: _kind,
-                        items: const [
-                          DropdownMenuItem(
-                            value: null,
-                            child: Text('All types'),
-                          ),
-                          DropdownMenuItem(
-                            value: MetricKind.count,
-                            child: Text('Actions'),
-                          ),
-                          DropdownMenuItem(
-                            value: MetricKind.hours,
-                            child: Text('Hours'),
-                          ),
-                          DropdownMenuItem(
-                            value: MetricKind.boolean,
-                            child: Text('Boolean'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _kind = v),
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 12),
+                    DropdownButton<_Sort>(
+                      isExpanded: usePhoneLayout(context),
+                      dropdownColor: context.glass.fillDialog,
+                      borderRadius: BorderRadius.circular(14),
+                      value: _sort,
+                      items: const [
+                        DropdownMenuItem(
+                          value: _Sort.urgency,
+                          child: Text('Most urgent'),
+                        ),
+                        DropdownMenuItem(
+                          value: _Sort.progress,
+                          child: Text('Highest progress'),
+                        ),
+                        DropdownMenuItem(
+                          value: _Sort.weight,
+                          child: Text('Heaviest'),
+                        ),
+                        DropdownMenuItem(
+                          value: _Sort.name,
+                          child: Text('Name'),
+                        ),
+                      ],
+                      onChanged: (v) => setState(() => _sort = v!),
+                    ),
+                    const SizedBox(width: 12),
+                    DropdownButton<MetricKind?>(
+                      isExpanded: usePhoneLayout(context),
+                      dropdownColor: context.glass.fillDialog,
+                      borderRadius: BorderRadius.circular(14),
+                      value: _kind,
+                      items: const [
+                        DropdownMenuItem(value: null, child: Text('All types')),
+                        DropdownMenuItem(
+                          value: MetricKind.count,
+                          child: Text('Actions'),
+                        ),
+                        DropdownMenuItem(
+                          value: MetricKind.hours,
+                          child: Text('Hours'),
+                        ),
+                        DropdownMenuItem(
+                          value: MetricKind.boolean,
+                          child: Text('Boolean'),
+                        ),
+                      ],
+                      onChanged: (v) => setState(() => _kind = v),
+                    ),
+                  ]),
                 ),
                 Expanded(
                   child: items.isEmpty
@@ -662,11 +694,15 @@ class _ListTabState extends ConsumerState<_ListTab> {
                                       ),
                                     ),
                                     trailing: SizedBox(
-                                      width: 190,
+                                      width: usePhoneLayout(context)
+                                          ? 130
+                                          : 190,
                                       child: Row(
                                         children: [
                                           SizedBox(
-                                            width: 110,
+                                            width: usePhoneLayout(context)
+                                                ? 70
+                                                : 110,
                                             child: _ProgressBar(
                                               progress: s.progress,
                                             ),

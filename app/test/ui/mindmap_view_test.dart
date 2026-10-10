@@ -126,7 +126,7 @@ void main() {
   /// A real mouse sends many move events; a single one (tester.drag) is all
   /// swallowed as the drag's slop and moves nothing.
   Future<void> dragSteps(WidgetTester tester, Offset from, Offset delta) async {
-    final g = await tester.startGesture(from);
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
     final dir = delta / delta.distance;
     await g.moveBy(dir * 25);
     await g.moveBy(dir * 25);
@@ -411,7 +411,7 @@ void main() {
 
   /// A left-drag rectangle on the canvas (raw pointer, like a mouse).
   Future<void> marquee(WidgetTester tester, Offset a, Offset b) async {
-    final g = await tester.startGesture(a);
+    final g = await tester.startGesture(a, kind: PointerDeviceKind.mouse);
     await g.moveTo(Offset.lerp(a, b, 0.5)!);
     await g.moveTo(b);
     await g.up();
@@ -576,6 +576,15 @@ void main() {
     final moved = await panWith(tester);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
     expect(moved, const Offset(100, 50));
+    await unmount(tester);
+  });
+
+  testWidgets('a finger on empty space pans the map (phone)', (tester) async {
+    await pumpMap(tester);
+    expect(
+      await panWith(tester, kind: PointerDeviceKind.touch),
+      const Offset(100, 50),
+    );
     await unmount(tester);
   });
 

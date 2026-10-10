@@ -13,6 +13,10 @@ void main() {
   testWidgets(
     'home shell shows all destinations and opens the new-action dialog',
     (tester) async {
+      // A desktop-sized window (below 900 px the phone layout is used).
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       addTearDown(db.close);
 

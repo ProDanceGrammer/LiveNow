@@ -6,6 +6,8 @@ import 'package:flutter/services.dart' show ServicesBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../widgets/action_editor.dart';
+import '../layout.dart';
+import '../providers.dart' show setCalendarDayCount;
 import '../rail_collapsed.dart';
 import '../theme_mode.dart';
 import '../widgets/glass.dart';
@@ -26,6 +28,7 @@ class HomeShell extends ConsumerStatefulWidget {
 
 class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
+  bool _phoneCalendarInit = false;
 
   /// Sections opened so far. A section is built the first time it is shown
   /// and then kept alive (hidden, not painted, no tickers, no focus), so
@@ -56,6 +59,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ),
   ];
 
+  /// Bottom-navigation labels on a phone (the rail's two-line ones are long).
+  static const _phoneLabels = ['Actions', 'Growth', 'Templates', 'Budget'];
+
   static const _titles = [
     null, // Actions: the active sub-view's name
     'Growth directions',
@@ -78,11 +84,98 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    if (usePhoneLayout(context)) return _buildPhone(context);
     return Column(
       children: [
         _buildMenuBar(context),
         Expanded(child: _buildScaffold(context)),
       ],
+    );
+  }
+
+  /// The sections opened so far, only the selected one visible.
+  Widget _sections() => Stack(
+    fit: StackFit.expand,
+    children: [
+      for (var i = 0; i < _titles.length; i++)
+        if (_visited.contains(i))
+          Visibility(
+            key: ValueKey('shell-view-$i'),
+            visible: i == _index,
+            maintainState: true,
+            child: ExcludeFocus(excluding: i != _index, child: _viewFor(i)),
+          ),
+    ],
+  );
+
+  /// The phone layout: app bar, the sections, bottom navigation. No menu bar,
+  /// no side rail, dark mode lives in the app bar's menu.
+  Widget _buildPhone(BuildContext context) {
+    if (!_phoneCalendarInit) {
+      // A phone starts the calendar on one day (the setting is kept).
+      _phoneCalendarInit = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setCalendarDayCount(ref, 1);
+      });
+    }
+    final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          _titles[_index] ?? _actionsSub.title,
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 22),
+        ),
+        actions: [
+          const SyncStatusButton(),
+          PopupMenuButton<String>(
+            key: const ValueKey('phone-menu'),
+            onSelected: (_) => ref.read(themeModeProvider.notifier).toggle(),
+            itemBuilder: (_) => [
+              CheckedPopupMenuItem(
+                value: 'dark',
+                checked: isDark,
+                child: const Text('Dark mode'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(child: _sections()),
+          if (_index < _firstOwnScaffold)
+            Positioned(
+              right: 16,
+              bottom: 16,
+              child: FloatingActionButton(
+                onPressed: () => ActionEditorDialog.show(context),
+                tooltip: 'New action',
+                child: const Icon(Icons.add),
+              ),
+            ),
+        ],
+      ),
+      bottomNavigationBar: GlassSurface(
+        radius: 0,
+        shadow: false,
+        child: NavigationBar(
+          key: const ValueKey('phone-nav'),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          selectedIndex: _index,
+          onDestinationSelected: (i) => setState(() {
+            _index = i;
+            _visited.add(i);
+          }),
+          destinations: [
+            for (var i = 0; i < _destinations.length; i++)
+              NavigationDestination(
+                icon: Icon(_destinations[i].icon),
+                label: _phoneLabels[i],
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -190,24 +283,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     thickness: 0,
                     color: Colors.transparent,
                   ),
-                  Expanded(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        for (var i = 0; i < _titles.length; i++)
-                          if (_visited.contains(i))
-                            Visibility(
-                              key: ValueKey('shell-view-$i'),
-                              visible: i == _index,
-                              maintainState: true,
-                              child: ExcludeFocus(
-                                excluding: i != _index,
-                                child: _viewFor(i),
-                              ),
-                            ),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: _sections()),
                 ],
               ),
             ),

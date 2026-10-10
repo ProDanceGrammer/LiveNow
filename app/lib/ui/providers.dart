@@ -84,7 +84,7 @@ final currentDoneCountProvider = StreamProvider.autoDispose<int>(
       .watchCurrentDoneCount(nowUtc: ref.watch(currentBoardNowProvider)),
 );
 
-/// How many day columns the calendar shows (2..7).
+/// How many day columns the calendar shows (1..7; a phone offers 1..3).
 final calendarDayCountProvider = StateProvider<int>((ref) => 7);
 
 /// The UTC instant of Istanbul midnight that starts the viewed range.
@@ -107,12 +107,12 @@ final calendarRangeProvider = StreamProvider.autoDispose<List<ActionListItem>>((
 });
 
 /// Changes the day count and re-anchors: 7 -> Monday of the current week,
-/// 2..6 -> today.
+/// 1..6 -> today.
 void setCalendarDayCount(WidgetRef ref, int days) {
-  ref.read(calendarDayCountProvider.notifier).state = days.clamp(2, 7);
+  ref.read(calendarDayCountProvider.notifier).state = days.clamp(1, 7);
   ref.read(calendarRangeStartProvider.notifier).state = calendarAnchorStart(
     DateTime.now().toUtc(),
-    days.clamp(2, 7),
+    days.clamp(1, 7),
   );
 }
 

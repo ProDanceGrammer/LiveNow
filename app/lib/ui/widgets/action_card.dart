@@ -6,6 +6,7 @@ import '../../data/queries.dart';
 import '../current_icons.dart';
 import '../current_selection.dart';
 import '../edit_action.dart';
+import '../layout.dart';
 import '../providers.dart';
 import '../urgency_colors.dart';
 import '../undo.dart';
@@ -66,7 +67,7 @@ class ActionCard extends ConsumerWidget {
       decoration: action.isAllDay && isDone ? TextDecoration.lineThrough : null,
     );
 
-    return GestureDetector(
+    final card = GestureDetector(
       onSecondaryTapDown: (d) =>
           _showContextMenu(context, ref, d.globalPosition),
       child: Padding(
@@ -94,6 +95,9 @@ class ActionCard extends ConsumerWidget {
               child: InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => _onTap(context, ref),
+                onLongPress: usePhoneLayout(context)
+                    ? () => _toggleSelected(ref)
+                    : null,
                 // A Container without a decoration is just the padding; a
                 // selected card adds a 2 px primary border and a faint fill.
                 child: Container(
@@ -213,6 +217,78 @@ class ActionCard extends ConsumerWidget {
         ),
       ),
     );
+    if (!usePhoneLayout(context)) return card;
+    return _swipeable(context, ref, card, isRunning);
+  }
+
+  /// Phone: swipe right = Start (Finish while it runs), swipe left = Delete.
+  /// Both go through the undoable helpers; the card itself never leaves by the
+  /// swipe (`confirmDismiss` returns false): the list updates from the data.
+  Widget _swipeable(
+    BuildContext context,
+    WidgetRef ref,
+    Widget card,
+    bool isRunning,
+  ) {
+    Widget bg(Color color, IconData icon, String label, Alignment align) =>
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          alignment: align,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(label, style: const TextStyle(color: Colors.white)),
+            ],
+          ),
+        );
+    return Dismissible(
+      key: ValueKey('swipe-${action.id}'),
+      direction: DismissDirection.horizontal,
+      background: isRunning
+          ? bg(
+              Colors.green.shade700,
+              Icons.check_rounded,
+              'Finish',
+              Alignment.centerLeft,
+            )
+          : bg(
+              Colors.blue.shade700,
+              Icons.play_arrow_rounded,
+              'Start',
+              Alignment.centerLeft,
+            ),
+      secondaryBackground: bg(
+        Colors.red.shade700,
+        Icons.delete_outline,
+        'Delete',
+        Alignment.centerRight,
+      ),
+      confirmDismiss: (direction) async {
+        if (direction == DismissDirection.endToStart) {
+          runUndoableDelete(context, ref, action.id);
+        } else {
+          final service = ref.read(actionServiceProvider);
+          runUndoable(
+            context,
+            ref,
+            action.id,
+            isRunning ? 'Finished' : 'Started',
+            () => isRunning
+                ? service.finish(action.id)
+                : service.start(action.id),
+          );
+        }
+        return false;
+      },
+      child: card,
+    );
   }
 
   /// The toolbar's Delete: the whole selection when this card is part of a
@@ -229,15 +305,23 @@ class ActionCard extends ConsumerWidget {
     }
   }
 
+  void _toggleSelected(WidgetRef ref) {
+    final notifier = ref.read(currentSelectionProvider.notifier);
+    final next = <String>{...notifier.state};
+    if (!next.remove(action.id)) next.add(action.id);
+    notifier.state = next;
+  }
+
   /// Ctrl/Shift+click toggles this card in the selection (no editor); a
   /// plain click resets the selection and opens the editor.
   void _onTap(BuildContext context, WidgetRef ref) {
     final keys = HardwareKeyboard.instance;
     final notifier = ref.read(currentSelectionProvider.notifier);
-    if (keys.isControlPressed || keys.isShiftPressed) {
-      final next = <String>{...notifier.state};
-      if (!next.remove(action.id)) next.add(action.id);
-      notifier.state = next;
+    // On a phone, once something is selected a tap just toggles (no keys).
+    if (keys.isControlPressed ||
+        keys.isShiftPressed ||
+        (usePhoneLayout(context) && notifier.state.isNotEmpty)) {
+      _toggleSelected(ref);
       return;
     }
     if (notifier.state.isNotEmpty) notifier.state = const {};

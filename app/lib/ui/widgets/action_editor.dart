@@ -12,6 +12,7 @@ import '../../domain/action_urgency.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/duration_rules.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../open_entity.dart';
 import '../providers.dart';
 import '../sync_providers.dart';
@@ -683,29 +684,34 @@ class _DependencySection extends ConsumerWidget {
     final successors =
         ref.watch(successorsOfProvider(actionId)).value ?? const <ActionRow>[];
 
-    // Previous on the left, Next on the right; an empty side is only its header.
+    final previous = _column(
+      context,
+      ref,
+      title: 'Previous actions',
+      items: predecessors,
+      isPredecessor: true,
+    );
+    final next = _column(
+      context,
+      ref,
+      title: 'Next actions',
+      items: successors,
+      isPredecessor: false,
+    );
+    // Previous on the left, Next on the right (stacked on a phone); an empty
+    // side is only its header.
+    if (usePhoneLayout(context)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [previous, const SizedBox(height: 8), next],
+      );
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: _column(
-            context,
-            ref,
-            title: 'Previous actions',
-            items: predecessors,
-            isPredecessor: true,
-          ),
-        ),
+        Expanded(child: previous),
         const SizedBox(width: 16),
-        Expanded(
-          child: _column(
-            context,
-            ref,
-            title: 'Next actions',
-            items: successors,
-            isPredecessor: false,
-          ),
-        ),
+        Expanded(child: next),
       ],
     );
   }

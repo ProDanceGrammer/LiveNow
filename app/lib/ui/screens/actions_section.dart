@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/action_import_service.dart';
 import '../current_icons.dart';
+import '../layout.dart';
 import '../providers.dart';
 import '../widgets/action_import_summary_dialog.dart';
 import '../views/all_actions_view.dart';
@@ -38,6 +39,9 @@ enum ActionsSub {
 
   /// Tab text.
   final String label;
+
+  /// Tab text on a phone (shorter: three tabs share the width).
+  String get phoneLabel => this == current ? 'Current' : label;
 
   /// Page (AppBar) title while this view is shown.
   final String title;
@@ -131,6 +135,7 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
       });
     }
     _calendarShown = shown;
+    final phone = usePhoneLayout(context);
     return Column(
       children: [
         Row(
@@ -146,8 +151,12 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
                     key: const ValueKey('actions-switch'),
                     controller: _tabs,
                     splashFactory: NoSplash.splashFactory,
+                    labelPadding: phone
+                        ? const EdgeInsets.symmetric(horizontal: 4)
+                        : null,
                     tabs: [
-                      for (final s in ActionsSub.values) Tab(text: s.label),
+                      for (final s in ActionsSub.values)
+                        Tab(text: phone ? s.phoneLabel : s.label),
                     ],
                   ),
                 ),
@@ -175,12 +184,14 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
                   );
                 },
               ),
-            IconButton(
-              key: const ValueKey('import-actions-csv'),
-              icon: const Icon(Icons.upload_file),
-              tooltip: 'Import actions from CSV…',
-              onPressed: _importCsv,
-            ),
+            // The CSV import is a desktop job (Notion export on the PC).
+            if (!phone)
+              IconButton(
+                key: const ValueKey('import-actions-csv'),
+                icon: const Icon(Icons.upload_file),
+                tooltip: 'Import actions from CSV…',
+                onPressed: _importCsv,
+              ),
             const SizedBox(width: 8),
           ],
         ),

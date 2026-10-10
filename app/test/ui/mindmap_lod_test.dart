@@ -134,7 +134,7 @@ void main() {
   );
 
   Future<void> dragSteps(WidgetTester tester, Offset from, Offset delta) async {
-    final g = await tester.startGesture(from);
+    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
     final dir = delta / delta.distance;
     await g.moveBy(dir * 25);
     await g.moveBy(dir * 25);
@@ -290,7 +290,7 @@ void main() {
     final end = toScreen(const Offset(100 + 2 * _dx - 10, 100 + 6 * _dy + 100));
     expect(end.dx, lessThan(0));
     expect(node(at(5, 3)), findsNothing);
-    final g = await tester.startGesture(start);
+    final g = await tester.startGesture(start, kind: PointerDeviceKind.mouse);
     await g.moveTo(Offset.lerp(start, end, 0.5)!);
     await g.moveTo(end);
     await g.up();
@@ -358,7 +358,10 @@ void main() {
     await pumpBigMap(tester);
     await zoomIn(tester, 10);
     final id = at(5, 10);
-    final g = await tester.startGesture(tester.getCenter(node(id)));
+    final g = await tester.startGesture(
+      tester.getCenter(node(id)),
+      kind: PointerDeviceKind.mouse,
+    );
     for (var i = 0; i < 8; i++) {
       await g.moveBy(const Offset(-150, 0));
     }

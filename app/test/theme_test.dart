@@ -28,6 +28,10 @@ void main() {
   testWidgets('dark mode toggles via provider, menu and Ctrl+Shift+L', (
     tester,
   ) async {
+    // A desktop-sized window (below 900 px the phone layout is used).
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final container = ProviderContainer(

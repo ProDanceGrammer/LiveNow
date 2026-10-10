@@ -33,12 +33,15 @@ class DateTimeField extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => _pick(context),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text('$label: $text'),
+        // Flexible: in a narrow dialog the text wraps instead of overflowing.
+        Flexible(
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => _pick(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('$label: $text'),
+            ),
           ),
         ),
         if (value != null)

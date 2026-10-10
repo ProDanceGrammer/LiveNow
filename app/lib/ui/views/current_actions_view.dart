@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/queries.dart';
 import '../current_selection.dart';
+import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
 import '../undo.dart';
@@ -53,6 +54,9 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
   Offset _startLocal = Offset.zero;
   Offset _startGlobal = Offset.zero;
   bool _additive = false;
+
+  /// Phone: which of the two columns is shown (false = Not Done Yet).
+  bool _showDone = false;
 
   @override
   void dispose() {
@@ -186,6 +190,34 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
         .toSet();
   }
 
+  Widget _doneColumn(
+    AsyncValue<List<ActionListItem>> cards,
+    AsyncValue<int> total, {
+    bool header = true,
+  }) => _BoardColumn(
+    title: 'Done Before',
+    showHeader: header,
+    asyncCards: cards,
+    total: total.value,
+    onShowMore: () =>
+        ref.read(currentDoneLimitProvider.notifier).state += kCurrentPageSize,
+    emptyMessage: 'Nothing done yet.',
+  );
+
+  Widget _notDoneColumn(
+    AsyncValue<List<ActionListItem>> cards,
+    AsyncValue<int> total, {
+    bool header = true,
+  }) => _BoardColumn(
+    title: 'Not Done Yet',
+    showHeader: header,
+    asyncCards: cards,
+    total: total.value,
+    onShowMore: () => ref.read(currentNotDoneLimitProvider.notifier).state +=
+        kCurrentPageSize,
+    emptyMessage: 'Nothing left to do.',
+  );
+
   @override
   Widget build(BuildContext context) {
     final doneAsync = ref.watch(currentDoneProvider);
@@ -195,6 +227,7 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
     ref.listen(currentDoneProvider, (_, _) => _prune());
     ref.listen(currentNotDoneProvider, (_, _) => _prune());
     final primary = Theme.of(context).colorScheme.primary;
+    final phone = usePhoneLayout(context);
 
     return Focus(
       focusNode: _focus,
@@ -209,35 +242,34 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _BoardColumn(
-                      title: 'Done Before',
-                      asyncCards: doneAsync,
-                      total: doneCount.value,
-                      onShowMore: () =>
-                          ref.read(currentDoneLimitProvider.notifier).state +=
-                              kCurrentPageSize,
-                      emptyMessage: 'Nothing done yet.',
+              child: phone
+                  ? Column(
+                      children: [
+                        _PhoneSwitch(
+                          showDone: _showDone,
+                          onChanged: (v) => setState(() => _showDone = v),
+                        ),
+                        Expanded(
+                          child: _showDone
+                              ? _doneColumn(doneAsync, doneCount, header: false)
+                              : _notDoneColumn(
+                                  notDoneAsync,
+                                  notDoneCount,
+                                  header: false,
+                                ),
+                        ),
+                        const _PhoneSelectionBar(),
+                      ],
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _doneColumn(doneAsync, doneCount)),
+                        Expanded(
+                          child: _notDoneColumn(notDoneAsync, notDoneCount),
+                        ),
+                      ],
                     ),
-                  ),
-                  Expanded(
-                    child: _BoardColumn(
-                      title: 'Not Done Yet',
-                      asyncCards: notDoneAsync,
-                      total: notDoneCount.value,
-                      onShowMore: () =>
-                          ref
-                                  .read(currentNotDoneLimitProvider.notifier)
-                                  .state +=
-                              kCurrentPageSize,
-                      emptyMessage: 'Nothing left to do.',
-                    ),
-                  ),
-                ],
-              ),
             ),
             Positioned.fill(
               child: IgnorePointer(
@@ -279,7 +311,11 @@ class _BoardColumn extends StatelessWidget {
   final VoidCallback onShowMore;
   final String emptyMessage;
 
+  /// The title block; a phone shows the column through its own switch instead.
+  final bool showHeader;
+
   const _BoardColumn({
+    this.showHeader = true,
     required this.title,
     required this.asyncCards,
     required this.total,
@@ -299,35 +335,39 @@ class _BoardColumn extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GlassSurface(
-            key: _kHeaderKey,
-            radius: 20,
-            blurWindow: false,
-            // The deeper tint sits inside the glass edge (1.2 px) so the
-            // bright border stays visible.
-            child: Padding(
-              padding: const EdgeInsets.all(1.2),
-              child: DecoratedBox(
-                key: const ValueKey('boardHeaderTint'),
-                decoration: BoxDecoration(
-                  color: boardHeaderTint(Theme.of(context).colorScheme, glass),
-                  borderRadius: BorderRadius.circular(18.8),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
+          if (showHeader)
+            GlassSurface(
+              key: _kHeaderKey,
+              radius: 20,
+              blurWindow: false,
+              // The deeper tint sits inside the glass edge (1.2 px) so the
+              // bright border stays visible.
+              child: Padding(
+                padding: const EdgeInsets.all(1.2),
+                child: DecoratedBox(
+                  key: const ValueKey('boardHeaderTint'),
+                  decoration: BoxDecoration(
+                    color: boardHeaderTint(
+                      Theme.of(context).colorScheme,
+                      glass,
+                    ),
+                    borderRadius: BorderRadius.circular(18.8),
                   ),
-                  child: Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: text.titleMedium?.copyWith(color: textColor),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: text.titleMedium?.copyWith(color: textColor),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 8),
+          if (showHeader) const SizedBox(height: 8),
           Expanded(
             child: asyncCards.when(
               // Raising the page size restarts the query; keep the cards
@@ -358,6 +398,108 @@ class _BoardColumn extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Phone: the two board columns as a two-button switch (same tinted blocks as
+/// the desktop headers; the chosen one is outlined).
+class _PhoneSwitch extends StatelessWidget {
+  const _PhoneSwitch({required this.showDone, required this.onChanged});
+
+  final bool showDone;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final glass = context.glass;
+    final scheme = Theme.of(context).colorScheme;
+    Widget block(String label, bool done) {
+      final selected = showDone == done;
+      return Expanded(
+        child: GlassSurface(
+          key: ValueKey(done ? 'board-switch-done' : 'board-switch-notdone'),
+          radius: 20,
+          shadow: false,
+          blurWindow: false,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => onChanged(done),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? boardHeaderTint(scheme, glass) : null,
+                borderRadius: BorderRadius.circular(20),
+                border: selected
+                    ? Border.all(color: scheme.primary, width: 2)
+                    : null,
+              ),
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: boardHeaderTextColor(glass),
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 8, 6, 0),
+      child: Row(
+        children: [
+          block('Not Done Yet', false),
+          const SizedBox(width: 8),
+          block('Done Before', true),
+        ],
+      ),
+    );
+  }
+}
+
+/// Phone: after a long-press selected cards, a bar to delete or clear them.
+class _PhoneSelectionBar extends ConsumerWidget {
+  const _PhoneSelectionBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selection = ref.watch(currentSelectionProvider);
+    if (selection.isEmpty) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
+      child: GlassSurface(
+        key: const ValueKey('phone-selection-bar'),
+        radius: 20,
+        shadow: false,
+        blurWindow: false,
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Clear selection',
+              icon: const Icon(Icons.close),
+              onPressed: () =>
+                  ref.read(currentSelectionProvider.notifier).state = const {},
+            ),
+            Expanded(child: Text('${selection.length} selected')),
+            TextButton.icon(
+              key: const ValueKey('phone-selection-delete'),
+              style: TextButton.styleFrom(foregroundColor: scheme.error),
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Delete'),
+              onPressed: () {
+                final ids = selection.toList();
+                ref.read(currentSelectionProvider.notifier).state = const {};
+                runUndoableDeleteMany(context, ref, ids);
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

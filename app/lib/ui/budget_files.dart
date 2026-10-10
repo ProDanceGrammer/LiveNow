@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../domain/budget_io_service.dart';
 import 'providers.dart';
@@ -29,8 +31,30 @@ class BudgetFiles {
     return [for (final f in files) PickedFile(f.name, await f.readAsString())];
   }
 
+  /// A phone has no "save as" dialog: files go to a temp folder and the system
+  /// share sheet (Save to Files, AirDrop, mail...) takes it from there.
+  static bool get _usesShareSheet => Platform.isIOS || Platform.isAndroid;
+
+  static Future<String> _shareFiles(Map<String, String> files) async {
+    final dir = await Directory(
+      '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
+      'livenow_export',
+    ).create(recursive: true);
+    final paths = <String>[];
+    for (final e in files.entries) {
+      final f = File('${dir.path}${Platform.pathSeparator}${e.key}');
+      await f.writeAsString(e.value);
+      paths.add(f.path);
+    }
+    await SharePlus.instance.share(
+      ShareParams(files: [for (final p in paths) XFile(p)]),
+    );
+    return dir.path;
+  }
+
   /// Asks where to save one text file; returns the path, null when cancelled.
   Future<String?> saveText(String suggestedName, String text) async {
+    if (_usesShareSheet) return _shareFiles({suggestedName: text});
     final location = await getSaveLocation(
       suggestedName: suggestedName,
       acceptedTypeGroups: [
@@ -47,6 +71,7 @@ class BudgetFiles {
 
   /// Asks for a folder and writes every file into it; returns the folder.
   Future<String?> saveFolder(Map<String, String> files) async {
+    if (_usesShareSheet) return _shareFiles(files);
     final dir = await getDirectoryPath();
     if (dir == null) return null;
     for (final e in files.entries) {

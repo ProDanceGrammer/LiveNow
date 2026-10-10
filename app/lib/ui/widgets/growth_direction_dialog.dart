@@ -128,9 +128,8 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
     final snapshot = ref.watch(growthSnapshotProvider).value;
     final live = _isEditing ? snapshot?.byId[widget.existing!.id] : null;
     final stat = _isEditing ? snapshot?.statOf(widget.existing!.id) : null;
-    final infoStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: context.glass.textSecondary,
-    );
+    final infoStyle = Theme.of(context).textTheme.bodySmall
+        ?.copyWith(color: context.glass.textSecondary);
 
     return CallbackShortcuts(
       // Ctrl+Enter = Save, from any field.
@@ -355,15 +354,18 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
         children: [
           Row(
             children: [
-              Text(
-                'Linked actions (${sorted.length})',
-                style: Theme.of(context).textTheme.titleSmall,
+              Flexible(
+                child: Text(
+                  'Linked actions (${sorted.length})',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.add),
                 tooltip: 'Link an action',
                 visualDensity: VisualDensity.compact,
-                onPressed: () => _linkAction(id, {for (final a in sorted) a.id}),
+                onPressed: () =>
+                    _linkAction(id, {for (final a in sorted) a.id}),
               ),
             ],
           ),
@@ -382,31 +384,37 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       title: Text(a.name, overflow: TextOverflow.ellipsis),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            formatShortSchedule(
-                                  dateTimeFromDb(a.startAt),
-                                  dateTimeFromDb(a.endAt),
-                                  isAllDay: a.isAllDay,
-                                  nowUtc: nowUtc,
-                                ) ??
-                                '',
-                            style: TextStyle(
-                              color: context.glass.textSecondary,
+                      trailing: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 160),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                formatShortSchedule(
+                                      dateTimeFromDb(a.startAt),
+                                      dateTimeFromDb(a.endAt),
+                                      isAllDay: a.isAllDay,
+                                      nowUtc: nowUtc,
+                                    ) ??
+                                    '',
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: context.glass.textSecondary,
+                                ),
+                              ),
                             ),
-                          ),
-                          IconButton(
-                            key: ValueKey('unlink-action-${a.id}'),
-                            icon: const Icon(Icons.close, size: 16),
-                            tooltip: 'Unlink',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: () => ref
-                                .read(metricServiceProvider)
-                                .unlinkAction(a.id, id),
-                          ),
-                        ],
+                            IconButton(
+                              key: ValueKey('unlink-action-${a.id}'),
+                              icon: const Icon(Icons.close, size: 16),
+                              tooltip: 'Unlink',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => ref
+                                  .read(metricServiceProvider)
+                                  .unlinkAction(a.id, id),
+                            ),
+                          ],
+                        ),
                       ),
                       onTap: () => openActionById(context, ref, a.id),
                     ),

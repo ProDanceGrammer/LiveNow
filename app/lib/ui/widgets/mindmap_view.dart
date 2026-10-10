@@ -17,6 +17,7 @@ import '../../domain/mindmap_layout.dart'
         mindmapNodeWidth,
         radialLayout,
         treeLayout;
+import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
 import '../undo.dart';
@@ -582,6 +583,12 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
 
   void _backgroundDown(PointerDownEvent e) {
     _focus.requestFocus();
+    // A finger on empty space pans the map (there is no mouse to draw a
+    // selection rectangle with); pinching zooms, via the InteractiveViewer.
+    if (e.kind == PointerDeviceKind.touch) {
+      _panPointer = e.pointer;
+      return;
+    }
     if (e.buttons != kPrimaryButton || _spaceHeld) return;
     _marqueePointer = e.pointer;
     _marqueeStart = e.localPosition;
@@ -712,6 +719,43 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
         );
   }
 
+  /// Phone toolbar: one row of icon buttons (layouts, zoom, fit); there is no
+  /// room for the text labels, and the keyboard hint does not apply.
+  Widget _phoneToolbar(GrowthSnapshot s) {
+    Widget button(IconData icon, String tip, VoidCallback? onPressed) =>
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          icon: Icon(icon),
+          tooltip: tip,
+          onPressed: onPressed,
+        );
+    final one = _selected.length == 1;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        button(
+          Icons.auto_awesome_mosaic_outlined,
+          'Auto layout',
+          () => _autoLayout(s),
+        ),
+        button(Icons.account_tree, 'Tree layout', () => _tree(s)),
+        button(
+          Icons.radar,
+          'Radial around selected',
+          one ? () => _radial(s) : null,
+        ),
+        button(
+          Icons.account_tree_outlined,
+          'Tree of selected',
+          one ? () => _treeOfSelected(s) : null,
+        ),
+        button(Icons.zoom_out, 'Zoom out', () => _zoomBy(1 / 1.25)),
+        button(Icons.zoom_in, 'Zoom in', () => _zoomBy(1.25)),
+        button(Icons.fit_screen, 'Fit all', _fitAll),
+      ],
+    );
+  }
+
   Widget _buildMap(BuildContext context, GrowthSnapshot s, List<_Edge> edges) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
@@ -731,83 +775,87 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
               blurWindow: false,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Wrap(
-                        spacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                child: usePhoneLayout(context)
+                    ? _phoneToolbar(s)
+                    : Row(
                         children: [
-                          TextButton.icon(
-                            onPressed: () => _autoLayout(s),
-                            icon: const Icon(
-                              Icons.auto_awesome_mosaic_outlined,
+                          Expanded(
+                            child: Wrap(
+                              spacing: 8,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () => _autoLayout(s),
+                                  icon: const Icon(
+                                    Icons.auto_awesome_mosaic_outlined,
+                                  ),
+                                  label: const Text('Auto layout'),
+                                ),
+                                TextButton.icon(
+                                  onPressed: () => _tree(s),
+                                  icon: const Icon(Icons.account_tree),
+                                  label: const Text('Tree layout'),
+                                ),
+                                Tooltip(
+                                  message: _selected.length == 1
+                                      ? 'Lay the map out in rings around the selected '
+                                            'direction'
+                                      : 'Select exactly one direction first',
+                                  child: TextButton.icon(
+                                    onPressed: _selected.length == 1
+                                        ? () => _radial(s)
+                                        : null,
+                                    icon: const Icon(Icons.radar),
+                                    label: const Text('Radial around selected'),
+                                  ),
+                                ),
+                                Tooltip(
+                                  message: _selected.length == 1
+                                      ? 'Lay out the selected direction and everything '
+                                            'leading into it as a tree below the map'
+                                      : 'Select exactly one direction first',
+                                  child: TextButton.icon(
+                                    onPressed: _selected.length == 1
+                                        ? () => _treeOfSelected(s)
+                                        : null,
+                                    icon: const Icon(
+                                      Icons.account_tree_outlined,
+                                    ),
+                                    label: const Text('Tree of selected'),
+                                  ),
+                                ),
+                              ],
                             ),
-                            label: const Text('Auto layout'),
                           ),
-                          TextButton.icon(
-                            onPressed: () => _tree(s),
-                            icon: const Icon(Icons.account_tree),
-                            label: const Text('Tree layout'),
-                          ),
-                          Tooltip(
-                            message: _selected.length == 1
-                                ? 'Lay the map out in rings around the selected '
-                                      'direction'
-                                : 'Select exactly one direction first',
-                            child: TextButton.icon(
-                              onPressed: _selected.length == 1
-                                  ? () => _radial(s)
-                                  : null,
-                              icon: const Icon(Icons.radar),
-                              label: const Text('Radial around selected'),
+                          const Tooltip(
+                            message:
+                                'Drag on empty space to select; right/middle-drag or '
+                                'Space+drag to pan; Ctrl+click adds to selection; '
+                                'double-click opens a direction. '
+                                'Green arrows lead INTO the selected direction, blue '
+                                'arrows go to the directions it leads to',
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 8),
+                              child: Icon(Icons.info_outline, size: 20),
                             ),
                           ),
-                          Tooltip(
-                            message: _selected.length == 1
-                                ? 'Lay out the selected direction and everything '
-                                      'leading into it as a tree below the map'
-                                : 'Select exactly one direction first',
-                            child: TextButton.icon(
-                              onPressed: _selected.length == 1
-                                  ? () => _treeOfSelected(s)
-                                  : null,
-                              icon: const Icon(Icons.account_tree_outlined),
-                              label: const Text('Tree of selected'),
-                            ),
+                          IconButton(
+                            icon: const Icon(Icons.zoom_out),
+                            tooltip: 'Zoom out',
+                            onPressed: () => _zoomBy(1 / 1.25),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.zoom_in),
+                            tooltip: 'Zoom in',
+                            onPressed: () => _zoomBy(1.25),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.fit_screen),
+                            tooltip: 'Fit all',
+                            onPressed: _fitAll,
                           ),
                         ],
                       ),
-                    ),
-                    const Tooltip(
-                      message:
-                          'Drag on empty space to select; right/middle-drag or '
-                          'Space+drag to pan; Ctrl+click adds to selection; '
-                          'double-click opens a direction. '
-                          'Green arrows lead INTO the selected direction, blue '
-                          'arrows go to the directions it leads to',
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Icon(Icons.info_outline, size: 20),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.zoom_out),
-                      tooltip: 'Zoom out',
-                      onPressed: () => _zoomBy(1 / 1.25),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.zoom_in),
-                      tooltip: 'Zoom in',
-                      onPressed: () => _zoomBy(1.25),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.fit_screen),
-                      tooltip: 'Fit all',
-                      onPressed: _fitAll,
-                    ),
-                  ],
-                ),
               ),
             ),
           ),

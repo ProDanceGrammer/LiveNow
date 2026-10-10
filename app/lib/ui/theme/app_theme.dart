@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import 'glass_theme.dart';
@@ -67,9 +68,10 @@ ThemeData buildAppTheme(Brightness brightness) {
     brightness: brightness,
     colorScheme: scheme,
     // Windows 11's variable UI font has in-between weights (w500); older
-    // systems fall back to Segoe UI.
-    fontFamily: _kFontFamily,
-    fontFamilyFallback: _kFontFallback,
+    // systems fall back to Segoe UI. Apple and Android phones keep their own
+    // system font (these families do not exist there).
+    fontFamily: _windowsFonts ? _kFontFamily : null,
+    fontFamilyFallback: _windowsFonts ? _kFontFallback : null,
   );
   final text = _heavier(
     base.textTheme.apply(bodyColor: g.textPrimary, displayColor: g.textPrimary),
@@ -125,6 +127,8 @@ ThemeData buildAppTheme(Brightness brightness) {
       ),
     ),
     dialogTheme: DialogThemeData(
+      // The default 40 px side inset leaves a phone only ~295 px of dialog.
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       backgroundColor: g.fillDialog,
       surfaceTintColor: Colors.transparent,
       shadowColor: g.shadow,
@@ -363,6 +367,12 @@ class GlassDialogBorder extends RoundedRectangleBorder {
     BorderRadiusGeometry? borderRadius,
   }) => GlassDialogBorder(g);
 }
+
+/// Windows (and the other desktops, where the fallbacks still apply) use the
+/// Segoe family; iOS and Android use the platform font.
+final _windowsFonts =
+    defaultTargetPlatform != TargetPlatform.iOS &&
+    defaultTargetPlatform != TargetPlatform.android;
 
 const _kFontFamily = 'Segoe UI Variable Text';
 const _kFontFallback = ['Segoe UI', 'Roboto', 'Arial'];
