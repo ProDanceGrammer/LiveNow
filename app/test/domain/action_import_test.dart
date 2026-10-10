@@ -144,7 +144,7 @@ void main() {
       'marks all-day actions done, leaves timed ones to their end time',
       () async {
         final r = await service.importCsv(
-          '${header}'
+          '$header'
           '💧 Water,03/10/2026,,,,Yes\n'
           '🧹 Chores,04/10/2026,,,,No\n'
           'Timed,03/10/2026 10:00 → 11:00,,,,Yes\n'
@@ -165,10 +165,10 @@ void main() {
 
     test('a re-import updates the flag of existing all-day actions', () async {
       await service.importCsv(
-        '${header}💧 Water,03/10/2026,,,,Yes\n🧹 Chores,04/10/2026,,,,No\n',
+        '$header💧 Water,03/10/2026,,,,Yes\n🧹 Chores,04/10/2026,,,,No\n',
       );
       final r = await service.importCsv(
-        '${header}💧 Water,03/10/2026,,,,No\n🧹 Chores,04/10/2026,,,,Yes\n',
+        '$header💧 Water,03/10/2026,,,,No\n🧹 Chores,04/10/2026,,,,Yes\n',
       );
       expect(r.created, 0);
       expect(r.skippedDuplicates, 2);
@@ -181,7 +181,7 @@ void main() {
 
       // Same values again: nothing to change.
       final again = await service.importCsv(
-        '${header}💧 Water,03/10/2026,,,,No\n🧹 Chores,04/10/2026,,,,Yes\n',
+        '$header💧 Water,03/10/2026,,,,No\n🧹 Chores,04/10/2026,,,,Yes\n',
       );
       expect(again.doneApplied, 0);
     });

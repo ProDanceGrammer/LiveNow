@@ -83,6 +83,23 @@ Future<void> createSyncTables(DatabaseConnectionUser db) async {
     "INSERT OR IGNORE INTO sync_state (key, value) "
     "VALUES ('device_id', lower(hex(randomblob(8))))",
   );
+  // Changes received page by page, merged all at once when the transfer ends.
+  await db.customStatement(
+    'CREATE TABLE IF NOT EXISTS sync_inbox ('
+    'peer TEXT NOT NULL, tbl TEXT NOT NULL, row_id TEXT NOT NULL, '
+    'hlc TEXT NOT NULL, origin TEXT NOT NULL, deleted INTEGER NOT NULL, '
+    'data TEXT, PRIMARY KEY (peer, tbl, row_id))',
+  );
+  // Edits that lost a last-writer-wins merge while the other side had an
+  // unsynced edit of the same row; the losing version is kept here.
+  await db.customStatement(
+    'CREATE TABLE IF NOT EXISTS sync_conflicts ('
+    'id INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL, '
+    'row_id TEXT NOT NULL, label TEXT, detected_at TEXT NOT NULL, '
+    'loser_hlc TEXT NOT NULL, loser_origin TEXT NOT NULL, '
+    'winner_hlc TEXT NOT NULL, loser_json TEXT, '
+    'seen INTEGER NOT NULL DEFAULT 0, UNIQUE (tbl, row_id, loser_hlc))',
+  );
 }
 
 /// SQL that advances the clock and stamps `(tbl, rowExpr)` in `sync_versions`.
@@ -105,6 +122,30 @@ ON CONFLICT (tbl, row_id) DO UPDATE SET
   hlc = excluded.hlc, origin = excluded.origin,
   deleted = excluded.deleted, seq = excluded.seq;
 ''';
+
+/// Stamps `(tbl, rowId)` as a fresh LOCAL change (what the triggers do), for a
+/// row that was changed or removed while the triggers were silent (a cascade
+/// during a merge) and still has to reach the other devices.
+Future<void> stampLocalChange(
+  DatabaseConnectionUser db,
+  String tbl,
+  String rowId, {
+  required bool deleted,
+}) async {
+  await db.customStatement(
+    'UPDATE sync_clock SET '
+    'counter = CASE WHEN $_wallNow > last_wall THEN 0 ELSE counter + 1 END, '
+    'last_wall = max(last_wall, $_wallNow), seq = seq + 1 WHERE id = 1',
+  );
+  await db.customStatement(
+    'INSERT INTO sync_versions (tbl, row_id, hlc, origin, deleted, seq) '
+    "SELECT ?, ?, c.last_wall || '-' || printf('%04x', c.counter) || '-' || "
+    '$_deviceId, $_deviceId, ?, c.seq FROM sync_clock c WHERE c.id = 1 '
+    'ON CONFLICT (tbl, row_id) DO UPDATE SET hlc = excluded.hlc, '
+    'origin = excluded.origin, deleted = excluded.deleted, seq = excluded.seq',
+    [tbl, rowId, deleted ? 1 : 0],
+  );
+}
 
 Future<List<String>> _columns(DatabaseConnectionUser db, String table) async {
   final rows = await db.customSelect('PRAGMA table_info($table)').get();
