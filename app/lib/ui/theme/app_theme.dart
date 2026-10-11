@@ -337,10 +337,12 @@ class GlassDialogBorder extends RoundedRectangleBorder {
   void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
     final rrect = borderRadius.resolve(textDirection).toRRect(rect);
     // Contact rings just outside the edge (under the Material's own shadow).
+    // Not on iOS/Android: next to the screen edge they read as extra stacked
+    // shadow layers.
     final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 5;
-    for (var i = 0; i < 2; i++) {
+    for (var i = 0; i < (_windowsFonts ? 2 : 0); i++) {
       ring.color = g.shadow.withValues(alpha: g.shadow.a * (0.9 - i * 0.4));
       canvas.drawRRect(
         rrect.inflate(2.5 + i * 5).shift(const Offset(0, 3)),

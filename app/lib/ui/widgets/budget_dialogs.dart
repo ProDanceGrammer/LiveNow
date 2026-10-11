@@ -930,8 +930,8 @@ class _BudgetTransactionDialogState
               if (_actionId != null)
                 IconButton(
                   key: const ValueKey('tx-clear-action'),
-                  tooltip: 'Unlink action',
-                  icon: const Icon(Icons.link_off),
+                  tooltip: 'Remove link',
+                  icon: const Icon(Icons.close),
                   onPressed: () => setState(() {
                     _actionId = null;
                     _actionName = null;

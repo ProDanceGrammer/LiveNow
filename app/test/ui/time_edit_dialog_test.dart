@@ -278,6 +278,10 @@ void main() {
     tester,
   ) async {
     addTearDown(resetStackedDialogsForTest);
+    // The keyboard editor is the wide-layout one (a phone gets the wheel).
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     DateTime? got = start;
     await tester.pumpWidget(
       MaterialApp(

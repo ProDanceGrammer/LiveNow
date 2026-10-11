@@ -453,9 +453,9 @@ class _PhoneSwitch extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(6, 8, 6, 0),
       child: Row(
         children: [
-          block('Not Done Yet', false),
-          const SizedBox(width: 8),
           block('Done Before', true),
+          const SizedBox(width: 8),
+          block('Not Done Yet', false),
         ],
       ),
     );

@@ -1,16 +1,20 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/action_import_service.dart';
+import '../calendar_fullscreen.dart';
 import '../current_icons.dart';
+import '../data_imports.dart';
 import '../layout.dart';
 import '../providers.dart';
-import '../widgets/action_import_summary_dialog.dart';
 import '../views/all_actions_view.dart';
 import '../views/calendar_view.dart';
 import '../views/current_actions_view.dart';
 import '../widgets/glass.dart';
+import 'templates_screen.dart';
 
 /// Asks the user for the Notion actions export and returns its text (null =
 /// cancelled). A provider so tests can replace the native file dialog.
@@ -18,7 +22,17 @@ final actionsCsvPickerProvider = Provider<Future<String?> Function()>(
   (ref) => () async {
     final file = await openFile(
       acceptedTypeGroups: const [
-        XTypeGroup(label: 'CSV', extensions: ['csv']),
+        XTypeGroup(
+          label: 'CSV',
+          extensions: ['csv'],
+          // iOS ignores extensions: it needs type identifiers (without them
+          // the picker shows nothing selectable).
+          uniformTypeIdentifiers: [
+            'public.comma-separated-values-text',
+            'public.text',
+          ],
+          mimeTypes: ['text/csv', 'text/plain'],
+        ),
       ],
     );
     return file?.readAsString();
@@ -33,7 +47,8 @@ final actionImportServiceProvider = Provider<ActionImportService>(
 enum ActionsSub {
   current('Current Actions', 'Current Actions'),
   calendar('Calendar', 'Calendar'),
-  all('All', 'All Actions');
+  all('All', 'All Actions'),
+  templates('Templates', 'Templates');
 
   const ActionsSub(this.label, this.title);
 
@@ -71,6 +86,7 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
     ActionsSub.current => const CurrentActionsView(),
     ActionsSub.calendar => const CalendarView(),
     ActionsSub.all => const AllActionsView(),
+    ActionsSub.templates => const TemplatesScreen(embedded: true),
   };
 
   @override
@@ -98,26 +114,41 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _searchText.dispose();
     _tabs.dispose();
     super.dispose();
   }
 
-  Future<void> _importCsv() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final text = await ref.read(actionsCsvPickerProvider)();
-    if (text == null || !mounted) return;
-    try {
-      final result = await ref
-          .read(actionImportServiceProvider)
-          .importCsv(text);
-      if (!mounted) return;
-      await ActionImportSummaryDialog.show(context, result);
-    } on FormatException catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Import failed: ${e.message}')),
-      );
+  // The Current board's name search: the field is shown by the icon next to
+  // the direction-icons switch; typing filters after a 200 ms pause, closing
+  // the field clears the filter.
+  bool _searchOpen = false;
+  final _searchText = TextEditingController();
+  Timer? _searchDebounce;
+
+  void _toggleSearch() {
+    setState(() => _searchOpen = !_searchOpen);
+    if (!_searchOpen) {
+      _searchText.clear();
+      _applySearch('');
     }
   }
+
+  void _onSearchChanged(String text) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 200),
+      () => _applySearch(text),
+    );
+  }
+
+  void _applySearch(String text) {
+    _searchDebounce?.cancel();
+    ref.read(currentSearchProvider.notifier).state = text;
+  }
+
+  Future<void> _importCsv() => importActionsCsv(context, ref);
 
   @override
   Widget build(BuildContext context) {
@@ -136,65 +167,102 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
     }
     _calendarShown = shown;
     final phone = usePhoneLayout(context);
+    // Phone Calendar in full screen: the view tabs go away too.
+    final fullCalendar =
+        phone &&
+        widget.sub == ActionsSub.calendar &&
+        ref.watch(phoneCalendarFullProvider);
     return Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
-                child: GlassSurface(
-                  radius: 20,
-                  shadow: false,
-                  blurWindow: false,
-                  child: TabBar(
-                    key: const ValueKey('actions-switch'),
-                    controller: _tabs,
-                    splashFactory: NoSplash.splashFactory,
-                    labelPadding: phone
-                        ? const EdgeInsets.symmetric(horizontal: 4)
-                        : null,
-                    tabs: [
-                      for (final s in ActionsSub.values)
-                        Tab(text: phone ? s.phoneLabel : s.label),
-                    ],
+        if (!fullCalendar)
+          Row(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
+                  child: GlassSurface(
+                    radius: 20,
+                    shadow: false,
+                    blurWindow: false,
+                    child: TabBar(
+                      key: const ValueKey('actions-switch'),
+                      controller: _tabs,
+                      splashFactory: NoSplash.splashFactory,
+                      labelPadding: phone
+                          ? const EdgeInsets.symmetric(horizontal: 4)
+                          : null,
+                      tabs: [
+                        for (final s in ActionsSub.values)
+                          Tab(text: phone ? s.phoneLabel : s.label),
+                      ],
+                    ),
                   ),
                 ),
               ),
+              if (widget.sub == ActionsSub.current)
+                Builder(
+                  builder: (context) {
+                    final on = ref.watch(currentIconsProvider);
+                    final scheme = Theme.of(context).colorScheme;
+                    return IconButton(
+                      key: const ValueKey('current-icons-toggle'),
+                      isSelected: on,
+                      // The same icon as the 'Growth directions' rail item.
+                      icon: const Icon(Icons.insights),
+                      tooltip: on
+                          ? 'Hide growth direction icons'
+                          : 'Show growth direction icons',
+                      style: IconButton.styleFrom(
+                        backgroundColor: on ? scheme.primaryContainer : null,
+                        foregroundColor: on ? scheme.onPrimaryContainer : null,
+                      ),
+                      onPressed: () =>
+                          ref.read(currentIconsProvider.notifier).toggle(),
+                    );
+                  },
+                ),
+              if (widget.sub == ActionsSub.current)
+                IconButton(
+                  key: const ValueKey('current-search-toggle'),
+                  isSelected: _searchOpen,
+                  icon: Icon(_searchOpen ? Icons.search_off : Icons.search),
+                  tooltip: _searchOpen ? 'Close search' : 'Search actions',
+                  onPressed: _toggleSearch,
+                ),
+              // The CSV import is a desktop job (Notion export on the PC).
+              if (!phone)
+                IconButton(
+                  key: const ValueKey('import-actions-csv'),
+                  icon: const Icon(Icons.upload_file),
+                  tooltip: 'Import actions from CSV…',
+                  onPressed: _importCsv,
+                ),
+              const SizedBox(width: 8),
+            ],
+          ),
+        if (_searchOpen && widget.sub == ActionsSub.current)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+            child: TextField(
+              key: const ValueKey('current-search-field'),
+              controller: _searchText,
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Search by name',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Clear',
+                  onPressed: () {
+                    _searchText.clear();
+                    _applySearch('');
+                  },
+                ),
+              ),
+              onChanged: _onSearchChanged,
             ),
-            if (widget.sub == ActionsSub.current)
-              Builder(
-                builder: (context) {
-                  final on = ref.watch(currentIconsProvider);
-                  final scheme = Theme.of(context).colorScheme;
-                  return IconButton(
-                    key: const ValueKey('current-icons-toggle'),
-                    isSelected: on,
-                    // The same icon as the 'Growth directions' rail item.
-                    icon: const Icon(Icons.insights),
-                    tooltip: on
-                        ? 'Hide growth direction icons'
-                        : 'Show growth direction icons',
-                    style: IconButton.styleFrom(
-                      backgroundColor: on ? scheme.primaryContainer : null,
-                      foregroundColor: on ? scheme.onPrimaryContainer : null,
-                    ),
-                    onPressed: () =>
-                        ref.read(currentIconsProvider.notifier).toggle(),
-                  );
-                },
-              ),
-            // The CSV import is a desktop job (Notion export on the PC).
-            if (!phone)
-              IconButton(
-                key: const ValueKey('import-actions-csv'),
-                icon: const Icon(Icons.upload_file),
-                tooltip: 'Import actions from CSV…',
-                onPressed: _importCsv,
-              ),
-            const SizedBox(width: 8),
-          ],
-        ),
+          ),
         Expanded(
           child: Stack(
             fit: StackFit.expand,

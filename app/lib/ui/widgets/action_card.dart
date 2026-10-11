@@ -19,6 +19,7 @@ import 'direction_badge.dart';
 import 'hover_toolbar.dart';
 import 'param_icons.dart';
 import 'quick_action_bar.dart';
+import 'quick_action_list.dart';
 import 'round_check.dart';
 
 /// One card on the Current Actions board: name, its current time range
@@ -88,15 +89,19 @@ class ActionCard extends ConsumerWidget {
             // fill and the cheap soft shadow rings give them clear edges against
             // the clouds. No blurred window (invisible at this size, costs ms).
             strength: 1.25,
-            shadow: true,
+            // Not on a phone: the rings spill past the card edges there.
+            shadow: !usePhoneLayout(context),
             blurWindow: false,
             child: Material(
               type: MaterialType.transparency,
               child: InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => _onTap(context, ref),
+                // Phone: long-press opens the action list (Start, Finish,
+                // Postpone ..., Select, Delete); once cards are selected it
+                // toggles this one like a tap.
                 onLongPress: usePhoneLayout(context)
-                    ? () => _toggleSelected(ref)
+                    ? () => _onLongPress(context, ref)
                     : null,
                 // A Container without a decoration is just the padding; a
                 // selected card adds a 2 px primary border and a faint fill.
@@ -303,6 +308,23 @@ class ActionCard extends ConsumerWidget {
     } else {
       runUndoableDelete(context, ref, action.id);
     }
+  }
+
+  void _onLongPress(BuildContext context, WidgetRef ref) {
+    if (ref.read(currentSelectionProvider).isNotEmpty) {
+      _toggleSelected(ref);
+      return;
+    }
+    showQuickActionSheet(
+      context,
+      ref,
+      actionId: action.id,
+      title: action.name,
+      onSelect: () => ref.read(currentSelectionProvider.notifier).state = {
+        action.id,
+      },
+      onDelete: () => runUndoableDelete(context, ref, action.id),
+    );
   }
 
   void _toggleSelected(WidgetRef ref) {

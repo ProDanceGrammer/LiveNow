@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/growth_rules.dart';
-import '../../domain/notion_icons.dart';
+import '../data_imports.dart';
 import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
@@ -24,6 +24,11 @@ final notionPagesPickerProvider = Provider<Future<List<String>> Function()>(
         XTypeGroup(
           label: 'Saved Notion page or name<TAB>emoji list',
           extensions: ['htm', 'html', 'tsv', 'txt'],
+          uniformTypeIdentifiers: [
+            'public.html',
+            'public.text',
+            'public.tab-separated-values-text',
+          ],
         ),
       ],
     );
@@ -37,7 +42,17 @@ final growthCsvPickerProvider = Provider<Future<String?> Function()>(
   (ref) => () async {
     final file = await openFile(
       acceptedTypeGroups: const [
-        XTypeGroup(label: 'CSV', extensions: ['csv']),
+        XTypeGroup(
+          label: 'CSV',
+          extensions: ['csv'],
+          // iOS ignores extensions: it needs type identifiers (without them
+          // the picker shows nothing selectable).
+          uniformTypeIdentifiers: [
+            'public.comma-separated-values-text',
+            'public.text',
+          ],
+          mimeTypes: ['text/csv', 'text/plain'],
+        ),
       ],
     );
     return file?.readAsString();
@@ -81,17 +96,17 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                 ),
                 // Importing is a desktop job (Notion exports live on the PC).
                 if (!usePhoneLayout(context))
-                IconButton(
-                  icon: const Icon(Icons.emoji_emotions_outlined),
-                  tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
-                  onPressed: () => _importIcons(context, ref),
-                ),
+                  IconButton(
+                    icon: const Icon(Icons.emoji_emotions_outlined),
+                    tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
+                    onPressed: () => _importIcons(context, ref),
+                  ),
                 if (!usePhoneLayout(context))
-                IconButton(
-                  icon: const Icon(Icons.upload_file),
-                  tooltip: 'Import growth directions from CSV…',
-                  onPressed: () => _import(context, ref),
-                ),
+                  IconButton(
+                    icon: const Icon(Icons.upload_file),
+                    tooltip: 'Import growth directions from CSV…',
+                    onPressed: () => _import(context, ref),
+                  ),
                 const SizedBox(width: 8),
               ],
             ),
@@ -114,60 +129,11 @@ class GrowthDirectionsScreen extends ConsumerWidget {
     );
   }
 
-  /// Sets direction icons from saved Notion pages, matching by name.
-  Future<void> _importIcons(BuildContext context, WidgetRef ref) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final pages = await ref.read(notionPagesPickerProvider)();
-    if (pages.isEmpty) return;
-    final icons = <String, String>{};
-    final skipped = <String>[];
-    for (final html in pages) {
-      icons.addAll(parseIconsFile(html, skippedBuiltin: skipped));
-    }
-    final s = await ref.read(metricServiceProvider).applyIcons(icons);
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          'Set ${s.matched} icons'
-          '${s.unmatched.isEmpty ? '' : ' (${s.unmatched.length} not in your directions)'}'
-          '${skipped.isEmpty ? '' : ', ${skipped.length} with an unknown built-in icon skipped'}.',
-        ),
-      ),
-    );
-  }
+  Future<void> _importIcons(BuildContext context, WidgetRef ref) =>
+      importGrowthIcons(context, ref);
 
-  /// Replaces every direction with the ones in a Notion export.
-  Future<void> _import(BuildContext context, WidgetRef ref) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final pick = ref.read(growthCsvPickerProvider);
-    final service = ref.read(metricServiceProvider);
-
-    final text = await pick();
-    if (text == null) return;
-    try {
-      final s = await service.importGrowthDirections(text);
-      final notes = [
-        if (s.skippedBlank > 0) '${s.skippedBlank} empty rows skipped',
-        if (s.unsupported.isNotEmpty)
-          '${s.unsupported.length} with an unknown type skipped',
-        if (s.unresolved.isNotEmpty)
-          '${s.unresolved.length} unknown relations ignored',
-      ];
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            'Imported ${s.directions} growth directions '
-            'and ${s.relations} relations'
-            '${notes.isEmpty ? '' : ' (${notes.join(', ')})'}.',
-          ),
-        ),
-      );
-    } on FormatException catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Import failed: ${e.message}')),
-      );
-    }
-  }
+  Future<void> _import(BuildContext context, WidgetRef ref) =>
+      importGrowthCsv(context, ref);
 }
 
 // ---- Balance ----------------------------------------------------------------
@@ -317,7 +283,7 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                       ),
                     ),
                     SizedBox(
-                      width: phone ? 52 : 72,
+                      width: phone ? 64 : 72,
                       child: Align(
                         alignment: Alignment.centerRight,
                         child: ParamIcon(
@@ -347,13 +313,15 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                           child: ParamIcon(Param.weight),
                         ),
                       ),
-                    const SizedBox(
-                      width: 32,
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: ParamIcon(Param.level),
+                    // The level ring is desktop-only too (phone: no room).
+                    if (!phone)
+                      const SizedBox(
+                        width: 32,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: ParamIcon(Param.level),
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -417,12 +385,20 @@ class _BalanceRowTile extends StatelessWidget {
               ),
             ),
             SizedBox(
-              width: phone ? 52 : 72,
-              child: Text(
-                _fmt(s.urgency),
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  color: s.urgency < 0 ? theme.colorScheme.tertiary : null,
+              width: phone ? 64 : 72,
+              // One line always: a long number shrinks instead of wrapping,
+              // the name (Expanded, ellipsis) gives way instead.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  _fmt(s.urgency),
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: s.urgency < 0 ? theme.colorScheme.tertiary : null,
+                  ),
                 ),
               ),
             ),
@@ -441,13 +417,14 @@ class _BalanceRowTile extends StatelessWidget {
                   textAlign: TextAlign.right,
                 ),
               ),
-            SizedBox(
-              width: 32,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: _LevelRing(level: m.importanceLevel),
+            if (!phone)
+              SizedBox(
+                width: 32,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _LevelRing(level: m.importanceLevel),
+                ),
               ),
-            ),
           ],
         ),
       ),

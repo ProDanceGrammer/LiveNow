@@ -52,36 +52,77 @@ final currentBoardNowProvider = Provider.autoDispose<DateTime>((ref) {
   return DateTime.now().toUtc();
 });
 
+/// The Current board's search text (the name filter; '' = no search).
+final currentSearchProvider = StateProvider<String>((ref) => '');
+
+/// The ids matching the search, or null while there is none. Only watched
+/// while a search is active, so it costs nothing otherwise.
+final currentSearchIdsProvider = StreamProvider.autoDispose<Set<String>?>((
+  ref,
+) {
+  final q = ref.watch(currentSearchProvider).trim().toLowerCase();
+  if (q.isEmpty) return Stream.value(null);
+  return ref.watch(viewQueriesProvider).watchNameMatchIds(q);
+});
+
+/// Runs [build] with the search's id filter; while the ids are still loading
+/// the board keeps its previous rows (an empty stream stays "loading").
+Stream<T> _withSearch<T>(Ref ref, Stream<T> Function(Set<String>? ids) build) {
+  final ids = ref.watch(currentSearchIdsProvider);
+  if (!ids.hasValue) return const Stream.empty();
+  return build(ids.value);
+}
+
 final currentNotDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref
-      .watch(viewQueriesProvider)
-      .watchCurrentNotDone(
-        limit: ref.watch(currentNotDoneLimitProvider),
-        nowUtc: ref.watch(currentBoardNowProvider),
-      ),
+  (ref) => _withSearch(
+    ref,
+    (ids) => ref
+        .watch(viewQueriesProvider)
+        .watchCurrentNotDone(
+          limit: ref.watch(currentNotDoneLimitProvider),
+          nowUtc: ref.watch(currentBoardNowProvider),
+          onlyIds: ids,
+        ),
+  ),
 );
 
 final currentDoneProvider = StreamProvider.autoDispose<List<ActionListItem>>(
-  (ref) => ref
-      .watch(viewQueriesProvider)
-      .watchCurrentDone(
-        limit: ref.watch(currentDoneLimitProvider),
-        nowUtc: ref.watch(currentBoardNowProvider),
-      ),
+  (ref) => _withSearch(
+    ref,
+    (ids) => ref
+        .watch(viewQueriesProvider)
+        .watchCurrentDone(
+          limit: ref.watch(currentDoneLimitProvider),
+          nowUtc: ref.watch(currentBoardNowProvider),
+          onlyIds: ids,
+        ),
+  ),
 );
 
 /// Total not-done actions (the column header shows this, not the page size).
 final currentNotDoneCountProvider = StreamProvider.autoDispose<int>(
-  (ref) => ref
-      .watch(viewQueriesProvider)
-      .watchCurrentNotDoneCount(nowUtc: ref.watch(currentBoardNowProvider)),
+  (ref) => _withSearch(
+    ref,
+    (ids) => ref
+        .watch(viewQueriesProvider)
+        .watchCurrentNotDoneCount(
+          nowUtc: ref.watch(currentBoardNowProvider),
+          onlyIds: ids,
+        ),
+  ),
 );
 
 /// Total done actions.
 final currentDoneCountProvider = StreamProvider.autoDispose<int>(
-  (ref) => ref
-      .watch(viewQueriesProvider)
-      .watchCurrentDoneCount(nowUtc: ref.watch(currentBoardNowProvider)),
+  (ref) => _withSearch(
+    ref,
+    (ids) => ref
+        .watch(viewQueriesProvider)
+        .watchCurrentDoneCount(
+          nowUtc: ref.watch(currentBoardNowProvider),
+          onlyIds: ids,
+        ),
+  ),
 );
 
 /// How many day columns the calendar shows (1..7; a phone offers 1..3).

@@ -3,20 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
-import '../../domain/budget_csv.dart';
-import '../../domain/budget_io_service.dart';
 import '../../domain/budget_rules.dart';
 import '../../domain/budget_service.dart';
 import '../../domain/name_sort.dart';
-import '../budget_files.dart';
 import '../budget_providers.dart';
-import '../dialog_stack.dart';
+import '../data_imports.dart';
 import '../layout.dart';
 import '../open_entity.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/budget_dialogs.dart';
 import '../widgets/budget_format.dart';
-import '../widgets/budget_import_summary_dialog.dart';
 import '../widgets/glass.dart';
 import '../widgets/param_icons.dart';
 
@@ -81,110 +77,11 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
     }
   }
 
-  /// Import: one JSON backup, or any of the three Notion CSVs (recognised by
-  /// their header). Replaces the budget data, after asking when there is some.
-  Future<void> _import() async {
-    final overlay = rootOverlayOf(context);
-    final files = await ref.read(budgetFilesProvider).pickImportFiles();
-    if (files.isEmpty || !mounted) return;
-
-    String? backup, accounts, categories, transactions;
-    final ignored = <String>[];
-    for (final f in files) {
-      if (BudgetIoService.looksLikeBackup(f.text)) {
-        backup = f.text;
-        continue;
-      }
-      switch (detectBudgetCsv(f.text)) {
-        case BudgetCsvKind.accounts:
-          accounts = f.text;
-        case BudgetCsvKind.categories:
-          categories = f.text;
-        case BudgetCsvKind.transactions:
-          transactions = f.text;
-        case null:
-          ignored.add(f.name);
-      }
-    }
-    final anyCsv =
-        accounts != null || categories != null || transactions != null;
-    if (backup == null && !anyCsv) {
-      showInfoToast(overlay, 'No budget data found in the chosen files');
-      return;
-    }
-    if (backup != null && anyCsv) {
-      showInfoToast(overlay, 'Choose either one backup file or the CSV files');
-      return;
-    }
-
-    final io = ref.read(budgetIoServiceProvider);
-    if (await io.hasData()) {
-      if (!mounted) return;
-      final ok = await showStackedDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Replace the budget data?'),
-          content: const Text(
-            'The accounts, categories and transactions now in the app will be '
-            'replaced by the imported ones. Export a backup first if you may '
-            'want them back.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const ValueKey('confirm-budget-import'),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Replace'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true || !mounted) return;
-    }
-
-    try {
-      final summary = backup != null
-          ? await io.importJson(backup)
-          : await io.importNotionCsvs(
-              accountsCsv: accounts,
-              categoriesCsv: categories,
-              transactionsCsv: transactions,
-            );
-      if (!mounted) return;
-      await BudgetImportSummaryDialog.show(
-        context,
-        summary,
-        ignoredFiles: ignored,
-      );
-    } on FormatException catch (e) {
-      showInfoToast(overlay, 'Import failed: ${e.message}');
-    }
-  }
-
-  String get _today {
-    final n = DateTime.now();
-    String p(int v) => v.toString().padLeft(2, '0');
-    return '${n.year}-${p(n.month)}-${p(n.day)}';
-  }
-
-  Future<void> _exportJson() async {
-    final overlay = rootOverlayOf(context);
-    final json = await ref.read(budgetIoServiceProvider).exportJson();
-    final path = await ref
-        .read(budgetFilesProvider)
-        .saveText('livenow-budget-$_today.json', json);
-    if (path != null) showInfoToast(overlay, 'Backup saved: $path');
-  }
-
-  Future<void> _exportCsv() async {
-    final overlay = rootOverlayOf(context);
-    final files = await ref.read(budgetIoServiceProvider).exportCsvs();
-    final dir = await ref.read(budgetFilesProvider).saveFolder(files);
-    if (dir != null) showInfoToast(overlay, '3 CSV files saved to $dir');
-  }
+  // The import/export flows live in data_imports.dart (Settings uses them too).
+  Future<void> _import() => importBudgetData(context, ref);
+  Future<void> _importIcons() => importBudgetIcons(context, ref);
+  Future<void> _exportJson() => exportBudgetJson(context, ref);
+  Future<void> _exportCsv() => exportBudgetCsv(context, ref);
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +121,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
                 tooltip: 'Import / export',
                 onSelected: (v) => switch (v) {
                   'import' => _import(),
+                  'icons' => _importIcons(),
                   'json' => _exportJson(),
                   _ => _exportCsv(),
                 },
@@ -232,6 +130,11 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
                     key: ValueKey('budget-import'),
                     value: 'import',
                     child: Text('Import (CSV or backup)…'),
+                  ),
+                  PopupMenuItem(
+                    key: ValueKey('budget-import-icons'),
+                    value: 'icons',
+                    child: Text('Import category icons (CSV)…'),
                   ),
                   PopupMenuItem(
                     key: ValueKey('budget-export-json'),
@@ -632,53 +535,78 @@ class _BoardColumn extends ConsumerWidget {
         radius: 16,
         shadow: false,
         blurWindow: false,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              if (entries.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Text('—', textAlign: TextAlign.center),
+        child: DecoratedBox(
+          // Green = plan above actual (room left), red = actual above plan.
+          decoration: BoxDecoration(
+            color: switch (columnKey) {
+              'under' => _boardGreen(context),
+              'over' => _boardRed(context),
+              _ => null,
+            },
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-              for (final e in entries)
-                InkWell(
-                  key: ValueKey('budget-board-${e.category.id}'),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () =>
-                      BudgetCategoryDialog.show(context, existing: e.category),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
+                const SizedBox(height: 8),
+                if (entries.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text('—', textAlign: TextAlign.center),
+                  ),
+                for (final e in entries)
+                  InkWell(
+                    key: ValueKey('budget-board-${e.category.id}'),
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => BudgetCategoryDialog.show(
+                      context,
+                      existing: e.category,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(e.category.name),
-                        Text(
-                          'Fact ${budgetMoney(e.figures.factBase)} · '
-                          'Plan ${budgetMoney(e.figures.planBase)}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(e.category.name),
+                          Text(
+                            'Fact ${budgetMoney(e.figures.factBase)} · '
+                            'Plan ${budgetMoney(e.figures.planBase)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 }
+
+/// Soft tints for the plan-vs-actual boards (translucent over the glass, so
+/// the normal text colour keeps its contrast in light and dark).
+Color _boardGreen(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0x4D2E9E5B)
+    : const Color(0x6694E2B1);
+
+Color _boardRed(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0x4DD9534F)
+    : const Color(0x66F4A3A0);
 
 // ---- categories -------------------------------------------------------------
 

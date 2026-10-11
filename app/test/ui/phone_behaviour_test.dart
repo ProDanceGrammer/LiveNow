@@ -133,6 +133,13 @@ void main() {
     await pumpPhone(tester);
     await tester.longPress(find.text('Open one'));
     await settle(tester, 300);
+    // The long-press opens the action list; its "Select" row starts a
+    // multi-selection.
+    expect(find.byKey(const ValueKey('quick-action-select')), findsOneWidget);
+    expect(find.text('Finish'), findsOneWidget);
+    expect(find.text('Continue with same action'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('quick-action-select')));
+    await settle(tester, 300);
     expect(find.byKey(const ValueKey('phone-selection-bar')), findsOneWidget);
     expect(find.text('1 selected'), findsOneWidget);
 

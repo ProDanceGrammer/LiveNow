@@ -9,6 +9,7 @@ import '../../data/database.dart' show ActionRow, Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../open_entity.dart';
 import '../providers.dart';
 import '../time_format.dart';
@@ -58,6 +59,9 @@ class GrowthDirectionDialog extends ConsumerStatefulWidget {
   static Future<void> show(BuildContext context, {GrowthMetric? existing}) {
     return showStackedDialog<void>(
       context: context,
+      // Phone: a tap outside (e.g. to hide the keyboard) must not close the
+      // item; only Cancel / Save / Delete / back do.
+      barrierDismissible: !usePhoneLayout(context),
       builder: (_) => GrowthDirectionDialog(existing: existing),
     );
   }
@@ -125,6 +129,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
   @override
   Widget build(BuildContext context) {
     final numeric = _kind != MetricKind.boolean;
+    final phone = usePhoneLayout(context);
     final snapshot = ref.watch(growthSnapshotProvider).value;
     final live = _isEditing ? snapshot?.byId[widget.existing!.id] : null;
     final stat = _isEditing ? snapshot?.statOf(widget.existing!.id) : null;
@@ -162,7 +167,9 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                         TextFormField(
                           controller: _name,
                           decoration: const InputDecoration(labelText: 'Name'),
-                          autofocus: true,
+                          // Phone: the keyboard opens only when a field is
+                          // tapped, not as soon as the item opens.
+                          autofocus: !phone,
                           // Enter = the Save button (once the relations have loaded).
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) {
@@ -183,6 +190,18 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                             if (_relationsLoaded) _save();
                           },
                         ),
+                        // Progress first, then level, weight, urgency, fact.
+                        if (_isEditing && live != null && stat != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: _GrowthInfoRow(
+                              live: live,
+                              stat: stat,
+                              savedKind: widget.existing!.kind,
+                              style: infoStyle,
+                              stacked: phone,
+                            ),
+                          ),
                         const SizedBox(height: 12),
                         GlassPillSelector<MetricKind>(
                           label: 'Type',
@@ -247,16 +266,6 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                           onChanged: (v) =>
                               setState(() => _isMain = v ?? false),
                         ),
-                        if (_isEditing && live != null && stat != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _GrowthInfoRow(
-                              live: live,
-                              stat: stat,
-                              savedKind: widget.existing!.kind,
-                              style: infoStyle,
-                            ),
-                          ),
                       ],
                     ),
                   ),
@@ -264,33 +273,26 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                     padding: const EdgeInsets.all(12),
                     child: !_relationsLoaded
                         ? const LinearProgressIndicator()
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: MetricPicker(
-                                  label: 'Depends on',
-                                  labelTooltip: 'Sub-directions that build it',
-                                  selectedIds: _dependsOn,
-                                  excludeId: widget.existing?.id,
-                                  onOpen: _openRelated,
-                                  onChanged: (ids) =>
-                                      setState(() => _dependsOn = ids),
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: MetricPicker(
-                                  label: 'Leads to',
-                                  labelTooltip: 'Larger goals it feeds',
-                                  selectedIds: _leadsTo,
-                                  excludeId: widget.existing?.id,
-                                  onOpen: _openRelated,
-                                  onChanged: (ids) =>
-                                      setState(() => _leadsTo = ids),
-                                ),
-                              ),
-                            ],
+                        : _twoLists(
+                            phone,
+                            MetricPicker(
+                              label: 'Depends on',
+                              labelTooltip: 'Sub-directions that build it',
+                              selectedIds: _dependsOn,
+                              excludeId: widget.existing?.id,
+                              onOpen: _openRelated,
+                              onChanged: (ids) =>
+                                  setState(() => _dependsOn = ids),
+                            ),
+                            MetricPicker(
+                              label: 'Leads to',
+                              labelTooltip: 'Larger goals it feeds',
+                              selectedIds: _leadsTo,
+                              excludeId: widget.existing?.id,
+                              onOpen: _openRelated,
+                              onChanged: (ids) =>
+                                  setState(() => _leadsTo = ids),
+                            ),
                           ),
                   ),
                   if (_isEditing) _buildLinkedActions(context),
@@ -335,9 +337,25 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
     if (_relationsLoaded) _save();
   }
 
+  /// Depends on | Leads to side by side; on a phone one list over the other.
+  static Widget _twoLists(bool phone, Widget a, Widget b) => phone
+      ? Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [a, const SizedBox(height: 16), b],
+        )
+      : Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: a),
+            const SizedBox(width: 16),
+            Expanded(child: b),
+          ],
+        );
+
   /// The actions linked to this direction; each chip opens that action's
   /// editor on top of this dialog (every related entity is openable).
   Widget _buildLinkedActions(BuildContext context) {
+    final phone = usePhoneLayout(context);
     final id = widget.existing!.id;
     final linked = [
       for (final (metricId, action)
@@ -374,36 +392,57 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
             Text('None', style: TextStyle(color: context.glass.textSecondary))
           else
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
+              // Phone: a taller area (40% of the screen) and roomier rows.
+              constraints: BoxConstraints(
+                maxHeight: phone
+                    ? MediaQuery.sizeOf(context).height * 0.4
+                    : 220,
+              ),
               child: ListView(
                 shrinkWrap: true,
                 children: [
                   for (final a in sorted)
                     ListTile(
                       key: ValueKey('linked-action-${a.id}'),
-                      dense: true,
+                      dense: !phone,
                       contentPadding: EdgeInsets.zero,
-                      title: Text(a.name, overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        a.name,
+                        maxLines: phone ? 2 : 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: phone
+                          ? Text(
+                              formatShortSchedule(
+                                    dateTimeFromDb(a.startAt),
+                                    dateTimeFromDb(a.endAt),
+                                    isAllDay: a.isAllDay,
+                                    nowUtc: nowUtc,
+                                  ) ??
+                                  '',
+                            )
+                          : null,
                       trailing: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 160),
+                        constraints: BoxConstraints(maxWidth: phone ? 48 : 160),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Flexible(
-                              child: Text(
-                                formatShortSchedule(
-                                      dateTimeFromDb(a.startAt),
-                                      dateTimeFromDb(a.endAt),
-                                      isAllDay: a.isAllDay,
-                                      nowUtc: nowUtc,
-                                    ) ??
-                                    '',
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: context.glass.textSecondary,
+                            if (!phone)
+                              Flexible(
+                                child: Text(
+                                  formatShortSchedule(
+                                        dateTimeFromDb(a.startAt),
+                                        dateTimeFromDb(a.endAt),
+                                        isAllDay: a.isAllDay,
+                                        nowUtc: nowUtc,
+                                      ) ??
+                                      '',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: context.glass.textSecondary,
+                                  ),
                                 ),
                               ),
-                            ),
                             IconButton(
                               key: ValueKey('unlink-action-${a.id}'),
                               icon: const Icon(Icons.close, size: 16),
@@ -509,63 +548,74 @@ String formatFact(MetricKind kind, double fact) {
   return fact.round().toString();
 }
 
-/// level - progress (+ thin bar) - weight - urgency - fact (count/hours only,
-/// by the SAVED kind).
+/// progress (+ thin bar) - level - weight - urgency - fact (count/hours only,
+/// by the SAVED kind). [stacked] (phone): the progress line first, all the
+/// other values together on the line below it.
 class _GrowthInfoRow extends StatelessWidget {
   final GrowthMetric live;
   final MetricStat stat;
   final MetricKind savedKind;
   final TextStyle? style;
+  final bool stacked;
 
   const _GrowthInfoRow({
     required this.live,
     required this.stat,
     required this.savedKind,
     required this.style,
+    this.stacked = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
-    return Wrap(
+    final progress = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ParamValue.progress(
+          '${stat.progress.toStringAsFixed(1)}%',
+          style: style,
+        ),
+        const SizedBox(width: 6),
+        SizedBox(
+          key: const ValueKey('dialogProgressBar'),
+          width: stacked ? 140 : 80,
+          height: 4,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: (stat.progress / 100).clamp(0.0, 1.0),
+              minHeight: 4,
+              color: primary,
+              backgroundColor: primary.withValues(alpha: 0.15),
+            ),
+          ),
+        ),
+      ],
+    );
+    final others = <Widget>[
+      ParamValue.level('${live.importanceLevel}', style: style),
+      ParamValue.weight('${live.weight.round()}', style: style),
+      ParamValue.urgency(stat.urgency.toStringAsFixed(1), style: style),
+      if (savedKind != MetricKind.boolean)
+        ParamValue.fact(
+          formatFact(savedKind, stat.fact),
+          key: const ValueKey('dialogFact'),
+          style: style,
+        ),
+    ];
+    Widget wrap(List<Widget> kids) => Wrap(
       spacing: 12,
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        ParamValue.level('${live.importanceLevel}', style: style),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ParamValue.progress(
-              '${stat.progress.toStringAsFixed(1)}%',
-              style: style,
-            ),
-            const SizedBox(width: 6),
-            SizedBox(
-              key: const ValueKey('dialogProgressBar'),
-              width: 80,
-              height: 4,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: (stat.progress / 100).clamp(0.0, 1.0),
-                  minHeight: 4,
-                  color: primary,
-                  backgroundColor: primary.withValues(alpha: 0.15),
-                ),
-              ),
-            ),
-          ],
-        ),
-        ParamValue.weight('${live.weight.round()}', style: style),
-        ParamValue.urgency(stat.urgency.toStringAsFixed(1), style: style),
-        if (savedKind != MetricKind.boolean)
-          ParamValue.fact(
-            formatFact(savedKind, stat.fact),
-            key: const ValueKey('dialogFact'),
-            style: style,
-          ),
-      ],
+      children: kids,
     );
+    if (stacked) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [progress, const SizedBox(height: 6), wrap(others)],
+      );
+    }
+    return wrap([progress, ...others]);
   }
 }

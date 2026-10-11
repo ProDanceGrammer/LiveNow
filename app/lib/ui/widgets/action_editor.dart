@@ -284,15 +284,26 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         if (_isEditing)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            // Scaled down (never wrapped or clipped) to fit the dialog.
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: QuickActionBar(
-                actionId: widget.existing!.id,
-                onDelete: _deleteAndClose,
-              ),
-            ),
+            child: usePhoneLayout(context)
+                // Phone: big touch-sized tiles wrapped onto rows (a single
+                // row had to be scaled down to unreadably small icons).
+                ? QuickActionBar(
+                    actionId: widget.existing!.id,
+                    onDelete: _deleteAndClose,
+                    tileSize: 40,
+                    iconSize: 24,
+                    hitExtra: 4,
+                    wrap: true,
+                  )
+                // Scaled down (never wrapped or clipped) to fit the dialog.
+                : FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: QuickActionBar(
+                      actionId: widget.existing!.id,
+                      onDelete: _deleteAndClose,
+                    ),
+                  ),
           ),
         const SizedBox(height: 4),
         SectionBlock(

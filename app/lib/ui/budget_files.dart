@@ -22,7 +22,17 @@ class BudgetFiles {
   const BudgetFiles();
 
   static const _types = [
-    XTypeGroup(label: 'Budget data (CSV, JSON)', extensions: ['csv', 'json']),
+    XTypeGroup(
+      label: 'Budget data (CSV, JSON)',
+      extensions: ['csv', 'json'],
+      // iOS needs type identifiers (it ignores extensions).
+      uniformTypeIdentifiers: [
+        'public.comma-separated-values-text',
+        'public.json',
+        'public.text',
+      ],
+      mimeTypes: ['text/csv', 'application/json', 'text/plain'],
+    ),
   ];
 
   /// Any number of CSV/JSON files; empty when cancelled.

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +6,7 @@ import '../budget_providers.dart';
 import 'budget_dialogs.dart';
 import 'budget_format.dart';
 import 'section_block.dart';
+import 'transaction_picker_dialog.dart';
 
 /// "Transactions" block of the action editor: the budget transactions linked
 /// to this action (each opens its editor) and a button to add one. Opens
@@ -13,6 +15,20 @@ class ActionBudgetSection extends ConsumerWidget {
   const ActionBudgetSection({super.key, required this.actionId});
 
   final String actionId;
+
+  /// Find an existing unlinked transaction first (link it to this action), or
+  /// fall through to the "new transaction" dialog.
+  Future<void> _add(BuildContext context, WidgetRef ref) async {
+    final service = ref.read(budgetServiceProvider);
+    final pick = await TransactionPickerDialog.show(context);
+    if (pick == null || !context.mounted) return;
+    final item = pick.item;
+    if (item != null) {
+      await service.updateTransaction(item.row.id, actionId: Value(actionId));
+    } else {
+      await BudgetTransactionDialog.show(context, actionId: actionId);
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -62,8 +78,7 @@ class ActionBudgetSection extends ConsumerWidget {
                   key: const ValueKey('action-add-budget-transaction'),
                   icon: const Icon(Icons.add),
                   label: const Text('Add transaction'),
-                  onPressed: () =>
-                      BudgetTransactionDialog.show(context, actionId: actionId),
+                  onPressed: () => _add(context, ref),
                 ),
               ],
             ),

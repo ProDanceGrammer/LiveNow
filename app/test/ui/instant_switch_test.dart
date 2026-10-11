@@ -56,7 +56,7 @@ void main() {
 
     // Warm-up: visit every section once and let data loading (spinners)
     // settle, so only the switch itself can be running an animation.
-    for (final l in ['Growth directions', 'Templates', 'Actions']) {
+    for (final l in ['Growth directions', 'Budget', 'Actions']) {
       await tester.tap(_railItem(l));
       await tester.pumpAndSettle();
     }
@@ -66,7 +66,7 @@ void main() {
     expect(tester.widget<InstantRail>(_rail).selectedIndex, 1);
     await _noLingeringAnimation(tester);
 
-    await tester.tap(_railItem('Templates'));
+    await tester.tap(_railItem('Budget'));
     await tester.pump();
     expect(tester.widget<InstantRail>(_rail).selectedIndex, 2);
     await _noLingeringAnimation(tester);
@@ -146,7 +146,7 @@ void main() {
     await _pumpApp(tester);
 
     var selected = 0;
-    for (final label in ['Actions', 'Growth directions', 'Templates']) {
+    for (final label in ['Actions', 'Growth directions', 'Budget']) {
       final node = tester.getSemantics(_railItem(label));
       final data = node.getSemanticsData();
       expect(data.label, label);
@@ -179,7 +179,7 @@ void main() {
     await tester.pump();
     expect(tester.widget<InstantRail>(_rail).selectedIndex, 1);
 
-    Focus.of(item('Templates')).requestFocus();
+    Focus.of(item('Budget')).requestFocus();
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pump();

@@ -251,8 +251,8 @@ void main() {
     await openDialog(tester, id);
     final x = [
       for (final t in [
-        'Level',
         'Progress',
+        'Level',
         'Weight',
         'Urgency to Keep in Balance',
         'Fact: reached so far',

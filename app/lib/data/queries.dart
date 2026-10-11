@@ -328,15 +328,44 @@ class ViewQueries {
   Stream<List<ActionListItem>> watchCurrentNotDone({
     required int limit,
     DateTime? nowUtc,
+    Set<String>? onlyIds,
   }) {
     final (now, vars) = _now(nowUtc);
     return _items(
       'SELECT $_itemColumns FROM actions '
-      'WHERE $_timedOnly AND NOT (${doneBeforeSql(now)}) '
+      'WHERE $_timedOnly AND NOT (${doneBeforeSql(now)})${_idFilter(onlyIds)} '
       '$_notDoneOrder LIMIT ?',
       variables: [...vars, Variable.withInt(limit)],
     );
   }
+
+  /// ` AND id IN (...)` for the board's search ([ids] null = no search). The
+  /// ids are our own UUIDs, quoted defensively anyway.
+  static String _idFilter(Set<String>? ids) {
+    if (ids == null) return '';
+    if (ids.isEmpty) return ' AND 0';
+    return ' AND id IN (${ids.map((i) => "'${i.replaceAll("'", "''")}'").join(',')})';
+  }
+
+  /// Ids of the timed actions whose name contains [lowerQuery] (already
+  /// lower-cased). Matched in Dart: SQLite's LIKE/lower() are not
+  /// case-insensitive for Cyrillic.
+  Stream<Set<String>> watchNameMatchIds(String lowerQuery) => debounced(
+    db
+        .customSelect(
+          'SELECT id, name FROM actions WHERE $_timedOnly',
+          readsFrom: {db.actionsTable},
+        )
+        .watch()
+        .map(
+          (rows) => {
+            for (final r in rows)
+              if (r.read<String>('name').toLowerCase().contains(lowerQuery))
+                r.read<String>('id'),
+          },
+        ),
+    kListDebounce,
+  );
 
   /// Current Actions board, left column: done actions, most recently
   /// finished first (`end_at` is the actual finish time — see
@@ -344,30 +373,48 @@ class ViewQueries {
   Stream<List<ActionListItem>> watchCurrentDone({
     required int limit,
     DateTime? nowUtc,
+    Set<String>? onlyIds,
   }) {
     final (now, vars) = _now(nowUtc);
     return _items(
       'SELECT $_itemColumns FROM actions '
-      'WHERE $_timedOnly AND (${doneBeforeSql(now)}) '
+      'WHERE $_timedOnly AND (${doneBeforeSql(now)})${_idFilter(onlyIds)} '
       '$_doneOrder LIMIT ?',
       variables: [...vars, Variable.withInt(limit)],
     );
   }
 
   /// Total number of not-done actions (the column header; not the page size).
-  Stream<int> watchCurrentNotDoneCount({DateTime? nowUtc}) {
+  Stream<int> watchCurrentNotDoneCount({
+    DateTime? nowUtc,
+    Set<String>? onlyIds,
+  }) {
     final (now, vars) = _now(nowUtc);
     return _count(
-      '$_timedOnly AND NOT (${doneBeforeSql(now)})',
+      '$_timedOnly AND NOT (${doneBeforeSql(now)})${_idFilter(onlyIds)}',
       variables: vars,
     );
   }
 
   /// Total number of done actions.
-  Stream<int> watchCurrentDoneCount({DateTime? nowUtc}) {
+  Stream<int> watchCurrentDoneCount({DateTime? nowUtc, Set<String>? onlyIds}) {
     final (now, vars) = _now(nowUtc);
-    return _count('$_timedOnly AND (${doneBeforeSql(now)})', variables: vars);
+    return _count(
+      '$_timedOnly AND (${doneBeforeSql(now)})${_idFilter(onlyIds)}',
+      variables: vars,
+    );
   }
+
+  /// The next timed actions that still have a start or an end ahead of them
+  /// (soonest first, at most [limit]): what the reminders are planned from.
+  /// Live: any change to an action's times (edit, postpone, sync) re-emits.
+  Stream<List<ActionListItem>> watchUpcoming({int limit = 40}) => _items(
+    'SELECT $_itemColumns FROM actions '
+    'WHERE $_timedOnly AND (end_at > $kSqlNowUtc '
+    'OR (end_at IS NULL AND start_at > $kSqlNowUtc)) '
+    'ORDER BY start_at IS NULL ASC, start_at ASC LIMIT ?',
+    variables: [Variable.withInt(limit)],
+  );
 
   (String, List<Variable>) _now(DateTime? nowUtc) => nowUtc == null
       ? (kSqlNowUtc, const [])

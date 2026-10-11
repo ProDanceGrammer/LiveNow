@@ -330,6 +330,39 @@ void main() {
     await settle(tester);
   }
 
+  testWidgets('Import category icons: the file puts an emoji before the name', (
+    tester,
+  ) async {
+    final files = _FakeFiles(
+      picked: [
+        const PickedFile(
+          'icons.csv',
+          'row_in_screenshot,name,icon\n295,Взуття,👟\n296,Немає,❓\n',
+        ),
+      ],
+    );
+    await pump(
+      tester,
+      files: files,
+      seed: () async {
+        await BudgetService(db)
+            .saveCategory(const CategoryInput(name: 'Взуття', price: 10));
+      },
+    );
+    await chooseMenu(tester, 'budget-import-icons');
+    expect(find.textContaining('Icons set on 1 categories'), findsOneWidget);
+    expect(find.text('Names without a category'), findsOneWidget);
+    expect(find.textContaining('Немає'), findsOneWidget);
+
+    final names = (await tester.runAsync(
+      () => db.customSelect('SELECT name FROM budget_categories').get(),
+    ))!;
+    expect(names.single.data['name'], '👟 Взуття');
+    await tester.tap(find.text('Close'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await unmount(tester);
+  });
+
   testWidgets('Import: the three Notion CSVs are recognised and summarised', (
     tester,
   ) async {

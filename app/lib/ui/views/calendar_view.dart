@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart'
         DragStartBehavior,
         GestureBinding,
         PointerCancelEvent,
+        PointerDeviceKind,
         PointerDownEvent,
         PointerEvent,
         PointerMoveEvent,
@@ -26,6 +27,7 @@ import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
 import '../../domain/postpone_rules.dart';
+import '../calendar_fullscreen.dart';
 import '../calendar_icons.dart';
 import '../calendar_selection.dart';
 import '../edit_action.dart';
@@ -550,6 +552,12 @@ class _Header extends ConsumerWidget {
     final g = context.glass;
     final scheme = theme.colorScheme;
     final phone = usePhoneLayout(context);
+    // A phone held upright shows 1-3 days, turned sideways 1-7.
+    final maxDays =
+        !phone || MediaQuery.orientationOf(context) == Orientation.landscape
+        ? 7
+        : 3;
+    final fullScreen = ref.watch(phoneCalendarFullProvider);
     // Each group of controls sits in a soft glass pill.
     Widget pill(Widget child) => GlassSurface(
       radius: 20,
@@ -563,6 +571,18 @@ class _Header extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: _flow(phone, [
+        if (phone)
+          pill(
+            IconButton(
+              key: const ValueKey('calendar-full-toggle'),
+              visualDensity: VisualDensity.compact,
+              icon: Icon(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
+              tooltip: fullScreen ? 'Show menus' : 'Full screen',
+              onPressed: () =>
+                  ref.read(phoneCalendarFullProvider.notifier).state =
+                      !fullScreen,
+            ),
+          ),
         pill(
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -672,7 +692,7 @@ class _Header extends ConsumerWidget {
               ),
             ),
             segments: [
-              for (var n = phone ? 1 : 2; n <= (phone ? 3 : 7); n++)
+              for (var n = phone ? 1 : 2; n <= maxDays; n++)
                 ButtonSegment(value: n, label: Text('$n'), tooltip: '$n days'),
             ],
             selected: {dayCount},
@@ -1724,6 +1744,48 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// One mouse-wheel notch reports 100; a touchpad's small deltas add up.
   static const _wheelPixelsPerStep = 100.0;
 
+  // ---- two-finger pinch (touch) -------------------------------------------
+  // Raw pointers (no gesture recognizer, so one finger still scrolls and
+  // long-press-drags exactly as before). Each time the fingers have moved
+  // apart / together by ~30% the zoom steps one level and the baseline resets.
+  final _pinchPointers = <int, Offset>{};
+  double _pinchBase = 0;
+  bool _pinching = false;
+
+  double _pinchDistance() {
+    final p = _pinchPointers.values.toList();
+    return (p[0] - p[1]).distance;
+  }
+
+  void _pinchDown(PointerDownEvent e) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    _pinchPointers[e.pointer] = e.localPosition;
+    if (_pinchPointers.length == 2) {
+      _pinchBase = _pinchDistance();
+      if (!_pinching) setState(() => _pinching = true);
+    }
+  }
+
+  void _pinchMove(PointerMoveEvent e) {
+    if (!_pinchPointers.containsKey(e.pointer)) return;
+    _pinchPointers[e.pointer] = e.localPosition;
+    if (_pinchPointers.length != 2 || _pinchBase < 24) return;
+    final ratio = _pinchDistance() / _pinchBase;
+    if (ratio > 1.3 || ratio < 0.77) {
+      final p = _pinchPointers.values.toList();
+      _zoomFocal = (p[0].dy + p[1].dy) / 2 - _scroll.offset;
+      zoomCalendar(ref, ratio > 1 ? 1 : -1);
+      _pinchBase = _pinchDistance();
+    }
+  }
+
+  void _pinchEnd(PointerEvent e) {
+    if (_pinchPointers.remove(e.pointer) == null) return;
+    if (_pinchPointers.length < 2 && _pinching) {
+      setState(() => _pinching = false);
+    }
+  }
+
   /// Day segments + lane packing, recomputed only when the items list
   /// instance, the range start or the day count change - never on selection,
   /// hover, drag, zoom or clock ticks.
@@ -2268,11 +2330,17 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
     return SingleChildScrollView(
       controller: _scroll,
+      // Two fingers pinch-zoom the hours; the grid must not also scroll then.
+      physics: _pinching ? const NeverScrollableScrollPhysics() : null,
       child: Listener(
         // Translucent: empty grid space has nothing hit-testable in it, and
         // the wheel must still reach us there.
         behavior: HitTestBehavior.translucent,
         onPointerSignal: _onWheel,
+        onPointerDown: _pinchDown,
+        onPointerMove: _pinchMove,
+        onPointerUp: _pinchEnd,
+        onPointerCancel: _pinchEnd,
         child: SizedBox(
           height: gridHeight + 8,
           child: Row(

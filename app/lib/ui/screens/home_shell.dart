@@ -6,9 +6,13 @@ import 'package:flutter/services.dart' show ServicesBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../widgets/action_editor.dart';
+import '../../data/reminders/reminder_scheduler.dart';
+import '../calendar_fullscreen.dart';
+import '../current_selection.dart';
 import '../layout.dart';
 import '../providers.dart' show setCalendarDayCount;
 import '../rail_collapsed.dart';
+import '../reminders.dart';
 import '../theme_mode.dart';
 import '../widgets/glass.dart';
 import '../sync_providers.dart';
@@ -17,6 +21,7 @@ import '../widgets/sync_status_button.dart';
 import 'actions_section.dart';
 import 'budget_screen.dart';
 import 'growth_directions_screen.dart';
+import 'settings_screen.dart';
 import 'templates_screen.dart';
 
 class HomeShell extends ConsumerStatefulWidget {
@@ -26,7 +31,10 @@ class HomeShell extends ConsumerStatefulWidget {
   ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends ConsumerState<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell>
+    with WidgetsBindingObserver {
+  ReminderScheduler? _reminders;
+
   int _index = 0;
   bool _phoneCalendarInit = false;
 
@@ -46,13 +54,28 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // paired, a phone syncs). Never under `flutter test`: no sockets there.
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
       Future<void>.microtask(() => startSyncForRole(ref));
+      // Start/end notifications (iOS, Windows): no polling, see reminders.dart.
+      Future<void>.microtask(() => _reminders = startReminders(ref));
+      WidgetsBinding.instance.addObserver(this);
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back in the foreground: re-plan from what is already loaded.
+    if (state == AppLifecycleState.resumed) _reminders?.resume();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reminders?.dispose();
+    super.dispose();
   }
 
   static const _destinations = [
     InstantRailItem(icon: Icons.checklist_rounded, label: 'Actions'),
     InstantRailItem(icon: Icons.insights, label: 'Growth directions'),
-    InstantRailItem(icon: Icons.dashboard_customize, label: 'Templates'),
     InstantRailItem(
       icon: Icons.account_balance_wallet_outlined,
       label: 'Budget',
@@ -60,12 +83,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   ];
 
   /// Bottom-navigation labels on a phone (the rail's two-line ones are long).
-  static const _phoneLabels = ['Actions', 'Growth', 'Templates', 'Budget'];
+  static const _phoneLabels = ['Actions', 'Directions', 'Budget'];
 
   static const _titles = [
     null, // Actions: the active sub-view's name
     'Growth directions',
-    'Templates',
     'Budget',
   ];
 
@@ -75,10 +97,14 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget _viewFor(int i) => switch (i) {
     0 => ActionsSection(
       sub: _actionsSub,
-      onChanged: (s) => setState(() => _actionsSub = s),
+      onChanged: (s) => setState(() {
+        if (s == ActionsSub.calendar) {
+          ref.read(phoneCalendarFullProvider.notifier).state = true;
+        }
+        _actionsSub = s;
+      }),
     ),
     1 => const GrowthDirectionsScreen(),
-    2 => const TemplatesScreen(),
     _ => const BudgetScreen(),
   };
 
@@ -90,6 +116,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         _buildMenuBar(context),
         Expanded(child: _buildScaffold(context)),
       ],
+    );
+  }
+
+  /// The round "new" button of the Actions section: a new action, or a new
+  /// template while the Templates tab is open.
+  Widget _newFab(BuildContext context) {
+    final templates = _actionsSub == ActionsSub.templates;
+    return FloatingActionButton(
+      onPressed: () => templates
+          ? TemplatesScreen.showNewTemplate(context)
+          : ActionEditorDialog.show(context),
+      tooltip: templates ? 'New template' : 'New action',
+      child: const Icon(Icons.add),
     );
   }
 
@@ -119,63 +158,81 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       });
     }
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
+    // The Calendar fills the whole screen on a phone: no app bar, no view
+    // tabs (ActionsSection hides them too) and no bottom navigation.
+    final full =
+        _index == 0 &&
+        _actionsSub == ActionsSub.calendar &&
+        ref.watch(phoneCalendarFullProvider);
+    final body = Stack(
+      children: [
+        Positioned.fill(child: _sections()),
+        // Hidden while cards are selected: it sat on top of the selection
+        // bar's Delete button.
+        if (_index < _firstOwnScaffold &&
+            !full &&
+            ref.watch(currentSelectionProvider).isEmpty)
+          Positioned(right: 16, bottom: 16, child: _newFab(context)),
+      ],
+    );
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _titles[_index] ?? _actionsSub.title,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 22),
-        ),
-        actions: [
-          const SyncStatusButton(),
-          PopupMenuButton<String>(
-            key: const ValueKey('phone-menu'),
-            onSelected: (_) => ref.read(themeModeProvider.notifier).toggle(),
-            itemBuilder: (_) => [
-              CheckedPopupMenuItem(
-                value: 'dark',
-                checked: isDark,
-                child: const Text('Dark mode'),
+      appBar: full
+          ? null
+          : AppBar(
+              title: Text(
+                _titles[_index] ?? _actionsSub.title,
+                style: Theme.of(context).textTheme.titleLarge
+                    ?.copyWith(fontSize: 22),
               ),
-            ],
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(child: _sections()),
-          if (_index < _firstOwnScaffold)
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: FloatingActionButton(
-                onPressed: () => ActionEditorDialog.show(context),
-                tooltip: 'New action',
-                child: const Icon(Icons.add),
+              actions: [
+                const SyncStatusButton(),
+                PopupMenuButton<String>(
+                  key: const ValueKey('phone-menu'),
+                  onSelected: (v) => v == 'settings'
+                      ? SettingsScreen.open(context)
+                      : ref.read(themeModeProvider.notifier).toggle(),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      key: ValueKey('phone-menu-settings'),
+                      value: 'settings',
+                      child: Text('Settings'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: 'dark',
+                      checked: isDark,
+                      child: const Text('Dark mode'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+      body: full ? SafeArea(bottom: false, child: body) : body,
+      bottomNavigationBar: full
+          ? null
+          : GlassSurface(
+              radius: 0,
+              shadow: false,
+              child: NavigationBar(
+                key: const ValueKey('phone-nav'),
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                selectedIndex: _index,
+                onDestinationSelected: (i) => setState(() {
+                  if (i == 0 && _actionsSub == ActionsSub.calendar) {
+                    ref.read(phoneCalendarFullProvider.notifier).state = true;
+                  }
+                  _index = i;
+                  _visited.add(i);
+                }),
+                destinations: [
+                  for (var i = 0; i < _destinations.length; i++)
+                    NavigationDestination(
+                      icon: Icon(_destinations[i].icon),
+                      label: _phoneLabels[i],
+                    ),
+                ],
               ),
             ),
-        ],
-      ),
-      bottomNavigationBar: GlassSurface(
-        radius: 0,
-        shadow: false,
-        child: NavigationBar(
-          key: const ValueKey('phone-nav'),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          selectedIndex: _index,
-          onDestinationSelected: (i) => setState(() {
-            _index = i;
-            _visited.add(i);
-          }),
-          destinations: [
-            for (var i = 0; i < _destinations.length; i++)
-              NavigationDestination(
-                icon: Icon(_destinations[i].icon),
-                label: _phoneLabels[i],
-              ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -197,6 +254,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             children: [
               SubmenuButton(
                 menuChildren: [
+                  MenuItemButton(
+                    key: const ValueKey('menu-settings'),
+                    onPressed: () => SettingsScreen.open(context),
+                    child: const MenuAcceleratorLabel('&Settings…'),
+                  ),
                   MenuItemButton(
                     onPressed: () => ServicesBinding.instance.exitApplication(
                       ui.AppExitType.required,
@@ -289,15 +351,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             ),
           ),
           if (_index < _firstOwnScaffold)
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: FloatingActionButton(
-                onPressed: () => ActionEditorDialog.show(context),
-                tooltip: 'New action',
-                child: const Icon(Icons.add),
-              ),
-            ),
+            Positioned(right: 16, bottom: 16, child: _newFab(context)),
         ],
       ),
     );

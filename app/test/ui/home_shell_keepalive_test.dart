@@ -107,12 +107,17 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(_shown<GrowthDirectionsScreen>(), isTrue);
+    // Templates is a tab of the Actions switch now, built on first visit.
     expect(_built<TemplatesScreen>(), isFalse);
     await tester.tap(
-      find.descendant(of: _rail, matching: find.text('Templates')),
+      find.descendant(of: _rail, matching: find.text('Actions')),
     );
     await tester.pumpAndSettle();
+    await tester.tap(_switchLabel('Templates'));
+    await tester.pumpAndSettle();
     expect(_shown<TemplatesScreen>(), isTrue);
+    await tester.tap(_switchLabel('All'));
+    await tester.pumpAndSettle();
 
     // Back to Actions: the remembered sub-view (All) is shown; Calendar's
     // element survives.
@@ -139,7 +144,7 @@ void main() {
     await _unmount(tester);
   });
 
-  testWidgets('rail has exactly Actions, Growth directions, Templates, Budget', (
+  testWidgets('rail has exactly Actions, Growth directions, Budget', (
     tester,
   ) async {
     await _pumpApp(tester);
@@ -149,7 +154,7 @@ void main() {
         .items
         .map((d) => d.label)
         .toList();
-    expect(labels, ['Actions', 'Growth directions', 'Templates', 'Budget']);
+    expect(labels, ['Actions', 'Growth directions', 'Budget']);
     expect(
       find.descendant(of: _rail, matching: find.text('Current')),
       findsNothing,
@@ -186,7 +191,7 @@ void main() {
     );
     expect(
       find.descendant(of: _rail, matching: find.byType(Icon)),
-      findsNWidgets(5), // toggle + 4 destinations
+      findsNWidgets(4), // toggle + 3 destinations
     );
     expect(
       find.byType(CalendarView, skipOffstage: false).evaluate().single,
@@ -284,7 +289,9 @@ void main() {
     expect(container.read(calendarDayCountProvider), 5);
 
     // Another section and back to Actions (Calendar still active).
-    await tester.tap(find.text('Templates'));
+    await tester.tap(
+      find.descendant(of: _rail, matching: find.text('Growth directions')),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Actions').first);
     await tester.pumpAndSettle();

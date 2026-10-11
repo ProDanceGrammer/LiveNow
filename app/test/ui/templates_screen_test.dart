@@ -28,6 +28,11 @@ void main() {
   late AppDatabase db;
 
   Future<void> pump(WidgetTester tester, {String? csv}) async {
+    // Wide window: below 900 px the app switches to the phone layout, which
+    // hides the Import CSV button (Settings has it there).
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     await tester.pumpWidget(

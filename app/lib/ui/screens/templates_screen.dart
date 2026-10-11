@@ -7,12 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ids.dart';
 import '../../data/database.dart';
 import '../../domain/template_import_service.dart';
+import '../data_imports.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../open_entity.dart';
 import '../widgets/app_toast.dart';
 import '../providers.dart';
-import '../widgets/action_import_summary_dialog.dart';
-import 'actions_section.dart' show actionsCsvPickerProvider;
 import '../widgets/glass.dart';
 import '../widgets/metric_picker.dart';
 import '../widgets/notes_document.dart';
@@ -26,7 +26,18 @@ final templateImportServiceProvider = Provider<TemplateImportService>(
 /// Saved quick-entry presets: "Use" instantiates a new action from one in a
 /// single tap.
 class TemplatesScreen extends ConsumerStatefulWidget {
-  const TemplatesScreen({super.key});
+  /// [embedded] = shown as a tab of the Actions section: no FAB of its own
+  /// (the shell's round button creates a template while this tab is open).
+  const TemplatesScreen({super.key, this.embedded = false});
+
+  final bool embedded;
+
+  /// The "New template" dialog (the shell's FAB opens it on the Templates tab).
+  static Future<void> showNewTemplate(BuildContext context) =>
+      showStackedDialog<void>(
+        context: context,
+        builder: (_) => const _TemplateEditorDialog(),
+      );
 
   @override
   ConsumerState<TemplatesScreen> createState() => _TemplatesScreenState();
@@ -57,13 +68,16 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                     onChanged: (v) => setState(() => _query = v.toLowerCase()),
                   ),
                 ),
-                const SizedBox(width: 12),
-                TextButton.icon(
-                  key: const ValueKey('import-templates-csv'),
-                  icon: const Icon(Icons.upload_file),
-                  label: const Text('Import CSV'),
-                  onPressed: () => _importCsv(context, ref),
-                ),
+                // On a phone importing lives in Settings.
+                if (!usePhoneLayout(context)) ...[
+                  const SizedBox(width: 12),
+                  TextButton.icon(
+                    key: const ValueKey('import-templates-csv'),
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Import CSV'),
+                    onPressed: () => _importCsv(context, ref),
+                  ),
+                ],
               ],
             ),
           ),
@@ -143,11 +157,13 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showEditor(context),
-        tooltip: 'New template',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: widget.embedded
+          ? null
+          : FloatingActionButton(
+              onPressed: () => _showEditor(context),
+              tooltip: 'New template',
+              child: const Icon(Icons.add),
+            ),
     );
   }
 
@@ -159,22 +175,8 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     return h == 0 ? '$r min' : (r == 0 ? '$h h' : '$h h $r min');
   }
 
-  Future<void> _importCsv(BuildContext context, WidgetRef ref) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final text = await ref.read(actionsCsvPickerProvider)();
-    if (text == null || !context.mounted) return;
-    try {
-      final result = await ref
-          .read(templateImportServiceProvider)
-          .importCsv(text);
-      if (!context.mounted) return;
-      await TemplateImportSummaryDialog.show(context, result);
-    } on FormatException catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Import failed: ${e.message}')),
-      );
-    }
-  }
+  Future<void> _importCsv(BuildContext context, WidgetRef ref) =>
+      importTemplatesCsv(context, ref);
 
   /// Start now ([finished] false) or Finish now (true): creates the action
   /// from the template; the toast's Undo deletes it again.

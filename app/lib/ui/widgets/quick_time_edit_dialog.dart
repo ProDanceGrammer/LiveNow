@@ -1,3 +1,10 @@
+import 'package:flutter/cupertino.dart'
+    show
+        CupertinoDatePicker,
+        CupertinoDatePickerMode,
+        CupertinoTextThemeData,
+        CupertinoTheme,
+        CupertinoThemeData;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +13,7 @@ import '../../data/queries.dart';
 import '../../domain/action_service.dart' show ScheduleChange;
 import '../../domain/time_edit_math.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../time_format.dart';
 import '../undo.dart';
 
@@ -211,9 +219,141 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
     );
   }
 
+  String _fmtWall(DateTime w) {
+    final d =
+        '${w.year.toString().padLeft(4, '0')}-${twoDigits(w.month)}-${twoDigits(w.day)}';
+    return widget.isAllDay
+        ? d
+        : '$d ${twoDigits(w.hour)}:${twoDigits(w.minute)}';
+  }
+
+  /// Phone: no keyboard segments - a Start/End switch and one Cupertino wheel
+  /// that edits whichever row is chosen (hour/minute/date wheels, scrolled by
+  /// finger).
+  Widget _phoneBody(String? error) {
+    final theme = Theme.of(context);
+    Widget chip(String label, bool isEnd, DateTime? value) {
+      final selected = _onEnd == isEnd;
+      return Expanded(
+        child: InkWell(
+          key: ValueKey('time-chip-${isEnd ? 'end' : 'start'}'),
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => setState(() {
+            if (isEnd) _end ??= _defaultEnd();
+            _onEnd = isEnd;
+          }),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+            decoration: BoxDecoration(
+              color: selected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.22)
+                  : null,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outlineVariant,
+              ),
+            ),
+            child: Column(
+              children: [
+                Text(label, style: theme.textTheme.labelSmall),
+                Text(
+                  value == null ? 'Not set' : _fmtWall(value),
+                  style: theme.textTheme.bodyMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            chip('Start', false, _start),
+            if (widget.showEnd) ...[
+              const SizedBox(width: 8),
+              chip('End', true, _end),
+            ],
+          ],
+        ),
+        if (widget.showEnd && _end != null && _onEnd)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const ValueKey('time-end-clear'),
+              onPressed: () => setState(() {
+                _end = null;
+                _onEnd = false;
+              }),
+              child: const Text('Clear end'),
+            ),
+          ),
+        SizedBox(
+          height: 200,
+          child: CupertinoTheme(
+            data: CupertinoThemeData(
+              brightness: theme.brightness,
+              textTheme: CupertinoTextThemeData(
+                dateTimePickerTextStyle: TextStyle(
+                  fontSize: 20,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+            child: CupertinoDatePicker(
+              // A new picker per row so the wheels jump to that row's value.
+              key: ValueKey('time-wheel-${_onEnd ? 'end' : 'start'}'),
+              mode: widget.isAllDay
+                  ? CupertinoDatePickerMode.date
+                  : CupertinoDatePickerMode.dateAndTime,
+              use24hFormat: true,
+              initialDateTime: _current,
+              minimumYear: 2000,
+              maximumYear: 2100,
+              onDateTimeChanged: (v) => setState(() => _setCurrent(v)),
+            ),
+          ),
+        ),
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              error,
+              key: const ValueKey('time-error'),
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final error = _error;
+    if (usePhoneLayout(context)) {
+      return AlertDialog(
+        title: Text(widget.title),
+        content: SizedBox(width: 400, child: _phoneBody(error)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('time-save'),
+            onPressed: error == null ? _save : null,
+            child: const Text('Save'),
+          ),
+        ],
+      );
+    }
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,

@@ -8,6 +8,7 @@ import '../core/settings.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'budget_csv.dart';
+import 'budget_icons.dart';
 import 'budget_rules.dart';
 import 'budget_service.dart';
 
@@ -75,6 +76,50 @@ class BudgetIoService {
   BudgetIoService(this.db);
 
   final AppDatabase db;
+
+  /// Puts an emoji at the start of category names: a category called "Взуття"
+  /// with the row `Взуття,👟` becomes "👟 Взуття" (emoji, one space, name). A
+  /// name is matched without any emoji it already has, so a second import
+  /// changes the icon instead of stacking another one; every category with that
+  /// name gets it (names repeat in the Notion data). One transaction; the rename
+  /// is an ordinary edit (`updated_at` moves, sync sees it).
+  Future<CategoryIconResult> applyCategoryIcons(List<CategoryIcon> icons) {
+    final byKey = {for (final i in icons) categoryNameKey(i.name): i};
+    return db.transaction(() async {
+      final rows = await db
+          .customSelect('SELECT id, name FROM budget_categories')
+          .get();
+      final now = dateTimeToDb(DateTime.now().toUtc())!;
+      final used = <String>{};
+      var updated = 0, unchanged = 0;
+      for (final r in rows) {
+        final name = r.read<String>('name');
+        final base = stripLeadingIcon(name);
+        final key = categoryNameKey(base);
+        final icon = byKey[key];
+        if (icon == null) continue;
+        used.add(key);
+        final renamed = '${icon.icon} $base';
+        if (renamed == name) {
+          unchanged++;
+          continue;
+        }
+        await db.customStatement(
+          'UPDATE budget_categories SET name = ?, updated_at = ? WHERE id = ?',
+          [renamed, now, r.read<String>('id')],
+        );
+        updated++;
+      }
+      return CategoryIconResult(
+        updated: updated,
+        unchanged: unchanged,
+        notFound: [
+          for (final e in byKey.entries)
+            if (!used.contains(e.key)) e.value.name,
+        ],
+      );
+    });
+  }
 
   Future<bool> hasData() async {
     final row = await db

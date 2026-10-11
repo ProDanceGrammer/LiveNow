@@ -150,16 +150,21 @@ void main() {
     check('Actions/Current');
     await tapText(tester, 'Calendar');
     check('Actions/Calendar');
+    // The Calendar is full screen on a phone: bring the menus back.
+    expect(find.byKey(const ValueKey('phone-nav')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('calendar-full-toggle')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('phone-nav')), findsOneWidget);
     await tapText(tester, 'All');
     check('Actions/All');
-    await tapText(tester, 'Growth');
+    await tapText(tester, 'Templates');
+    check('Templates');
+    await tapText(tester, 'Directions');
     check('Growth/Balance');
     for (final tab in ['List', 'Mindmap']) {
       await tapText(tester, tab);
       check('Growth/$tab');
     }
-    await tapText(tester, 'Templates');
-    check('Templates');
     await tapText(tester, 'Budget');
     check('Budget/Overview');
     for (final tab in ['Categories', 'Transactions', 'Accounts']) {
@@ -199,14 +204,15 @@ void main() {
     // The sync dialog (client role).
     await dialog('Sync dialog', find.byKey(const ValueKey('sync-status')));
     // Growth: a direction (List tab) and the new-direction dialog.
-    await tapText(tester, 'Growth');
+    await tapText(tester, 'Directions');
     await tapText(tester, 'List');
     await dialog('Growth direction (existing)', find.text('Exercise'));
     await dialog(
       'Growth direction (new)',
       find.byTooltip('New growth direction'),
     );
-    // Templates: the editor.
+    // Templates (a tab of Actions): the editor.
+    await tapText(tester, 'Actions');
     await tapText(tester, 'Templates');
     await dialog('Template editor', find.byTooltip('New template'));
     // Budget: category, transaction, account, settings.

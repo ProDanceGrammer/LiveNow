@@ -61,6 +61,18 @@ class SyncSettingsDialog extends ConsumerWidget {
   }
 }
 
+/// The sync controls themselves (PC or phone, by role), without a dialog
+/// around them: the Settings page embeds this.
+class SyncSettingsBody extends ConsumerWidget {
+  const SyncSettingsBody({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final host = ref.watch(syncRoleProvider) == SyncRole.host;
+    return host ? const _HostPanel() : const _ClientPanel();
+  }
+}
+
 class _ConflictsRow extends ConsumerWidget {
   const _ConflictsRow();
 
