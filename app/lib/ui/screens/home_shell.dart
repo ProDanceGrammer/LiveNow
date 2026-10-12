@@ -11,6 +11,7 @@ import '../calendar_fullscreen.dart';
 import '../current_selection.dart';
 import '../layout.dart';
 import '../providers.dart' show setCalendarDayCount;
+import '../notch_side.dart';
 import '../rail_collapsed.dart';
 import '../reminders.dart';
 import '../theme_mode.dart';
@@ -241,7 +242,16 @@ class _HomeShellState extends ConsumerState<HomeShell>
                 ),
               ],
             ),
-      body: full ? SafeArea(bottom: false, child: body) : body,
+      // Full screen sideways: only the notch side keeps its safe-area band, the
+      // other side is used (iOS reports the same inset on both sides).
+      body: full
+          ? SafeArea(
+              left: !landscape || ref.watch(notchOnLeftProvider),
+              right: !landscape || !ref.watch(notchOnLeftProvider),
+              bottom: false,
+              child: body,
+            )
+          : body,
       bottomNavigationBar: full
           ? null
           : GlassSurface(

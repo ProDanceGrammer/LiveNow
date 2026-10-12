@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/reminders/local_notifications_sink.dart';
 import '../data_imports.dart';
 import '../reminders.dart';
+import '../notch_side.dart';
 import '../work_hours.dart';
+import '../layout.dart';
 import '../../domain/work_hours.dart';
 import '../theme_mode.dart';
 import '../theme/glass_theme.dart';
@@ -108,6 +110,48 @@ class SettingsScreen extends ConsumerWidget {
                     value: ref.watch(remindersEnabledProvider),
                     onChanged: (v) =>
                         ref.read(remindersEnabledProvider.notifier).set(v),
+                  ),
+                ),
+              ],
+              if (usePhoneLayout(context)) ...[
+                title('Screen'),
+                _Panel(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Notch side (phone held sideways)'),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Full-screen views keep a free band on this side and '
+                          'use the other side for more width',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            ChoiceChip(
+                              key: const ValueKey('settings-notch-left'),
+                              label: const Text('Left'),
+                              selected: ref.watch(notchOnLeftProvider),
+                              onSelected: (_) => ref
+                                  .read(notchOnLeftProvider.notifier)
+                                  .set(true),
+                            ),
+                            ChoiceChip(
+                              key: const ValueKey('settings-notch-right'),
+                              label: const Text('Right'),
+                              selected: !ref.watch(notchOnLeftProvider),
+                              onSelected: (_) => ref
+                                  .read(notchOnLeftProvider.notifier)
+                                  .set(false),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],

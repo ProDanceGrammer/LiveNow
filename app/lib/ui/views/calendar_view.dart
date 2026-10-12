@@ -1892,6 +1892,15 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// Refreshed on every build; everything vertical is measured with it.
   double _hourHeight = kHourHeight;
   double _viewportHeight = 0;
+
+  /// The minute shown at the top of the viewport, as the USER left it. The
+  /// grid's hour height follows the viewport height (a keyboard under a dialog
+  /// shrinks it), so scroll PIXELS alone would mean another time after the
+  /// height returns; this time is what gets restored. Only user scrolling and
+  /// zoom update it, never our own restore.
+  double? _anchorMinute;
+  bool _restoring = false;
+  double _lastViewportHeight = 0;
   double get _pxPerMinute => _hourHeight / 60;
   double _px(num minutes) => minutesToPx(minutes, pxPerMinute: _pxPerMinute);
 
@@ -2465,11 +2474,40 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         _viewportHeight = box.maxHeight;
         _hourHeight = math.max(_kMinHourHeight, box.maxHeight / visibleHours);
         if (_scrollController == null) {
-          _scrollController = ScrollController(
-            initialScrollOffset: math.max(0, _px(_minutesNow() - 60)),
-          )..addListener(_onScrolled);
+          // The red now-line in the vertical centre (the Now button does the
+          // same); near midnight it pins to the top/bottom edge.
+          final initial = math.max(0.0, _px(_minutesNow()) - box.maxHeight / 2);
+          _anchorMinute = initial / _pxPerMinute;
+          _scrollController = ScrollController(initialScrollOffset: initial)
+            ..addListener(_onScrolled);
           // The first layout may clamp the initial offset; re-sync then.
           WidgetsBinding.instance.addPostFrameCallback((_) => _onScrolled());
+        }
+        // The viewport got taller/shorter (keyboard, rotation): keep the TIME
+        // the user was looking at, not the raw pixels.
+        final heightChanged =
+            _lastViewportHeight > 0 &&
+            (box.maxHeight - _lastViewportHeight).abs() > 0.5;
+        _lastViewportHeight = box.maxHeight;
+        final anchor = _anchorMinute;
+        if (heightChanged && anchor != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final controller = _scrollController;
+            if (!mounted || controller == null || !controller.hasClients) {
+              return;
+            }
+            _restoring = true;
+            try {
+              controller.jumpTo(
+                (anchor * _pxPerMinute).clamp(
+                  0.0,
+                  controller.position.maxScrollExtent,
+                ),
+              );
+            } finally {
+              _restoring = false;
+            }
+          });
         }
         _updateWindow();
         return _buildGrid(context);
@@ -2704,6 +2742,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final offset = _scrollOffsetNow;
     final last = _lastOffset;
     _lastOffset = offset;
+    if (!_restoring && _pxPerMinute > 0) {
+      _anchorMinute = offset / _pxPerMinute;
+    }
     if (last != null && last != offset) {
       _cross.scrolling.value = true;
       _settle?.cancel();
