@@ -148,6 +148,57 @@ class SettingsScreen extends ConsumerWidget {
                         onPick: (m) =>
                             _setHours(context, ref, hours.copyWith(morning: m)),
                       ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Working days',
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Next working morning and "What is done?" skip '
+                              'the other days',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: [
+                                for (var d = 1; d <= 7; d++)
+                                  FilterChip(
+                                    key: ValueKey('settings-workday-$d'),
+                                    label: Text(
+                                      const [
+                                        'Mon',
+                                        'Tue',
+                                        'Wed',
+                                        'Thu',
+                                        'Fri',
+                                        'Sat',
+                                        'Sun',
+                                      ][d - 1],
+                                    ),
+                                    selected: hours.workingWeekdays.contains(d),
+                                    onSelected: (on) => _setHours(
+                                      context,
+                                      ref,
+                                      hours.copyWith(
+                                        workingWeekdays: {
+                                          ...hours.workingWeekdays,
+                                        }..addAll(on ? {d} : {})
+                                          ..removeWhere((x) => !on && x == d),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),

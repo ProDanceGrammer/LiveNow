@@ -6,13 +6,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ids.dart';
 import '../../data/database.dart';
+import '../../domain/action_urgency.dart';
+import '../../domain/growth_rules.dart';
 import '../../domain/template_import_service.dart';
 import '../../domain/template_search.dart';
 import '../data_imports.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
 import '../open_entity.dart';
+import '../widgets/action_tile.dart' show formatUrgency;
 import '../widgets/app_toast.dart';
+import '../widgets/param_icons.dart';
 import '../providers.dart';
 import '../widgets/glass.dart';
 import '../widgets/metric_picker.dart';
@@ -94,6 +98,10 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                   for (final m in ref.watch(metricsProvider).value ?? const [])
                     m.id: m.name.toLowerCase(),
                 };
+                final averages =
+                    ref.watch(templateAveragesProvider).value ??
+                    const <String, Duration>{};
+                final stats = ref.watch(growthSnapshotProvider).value?.stats;
                 final templates = _query.isEmpty
                     ? all
                     : [
@@ -119,9 +127,12 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       title: Text(t.name),
-                      subtitle: _durationLabel(t) == null
-                          ? null
-                          : Text(_durationLabel(t)!),
+                      subtitle: _subtitle(
+                        context,
+                        t,
+                        averages[t.id],
+                        stats,
+                      ),
                       onTap: () => _showEditor(context, existing: t),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -180,12 +191,64 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     );
   }
 
-  static String? _durationLabel(ActionTemplate t) {
-    final m =
-        (jsonDecode(t.payload) as Map<String, dynamic>)['estimatedMinutes'];
-    if (m is! int || m <= 0) return null;
+  static String _minutesLabel(int m) {
     final h = m ~/ 60, r = m % 60;
     return h == 0 ? '$r min' : (r == 0 ? '$h h' : '$h h $r min');
+  }
+
+  /// Manual duration, average of past runs (the one the template uses is
+  /// bold) and the "Urgency to Keep in Balance" of its directions.
+  static Widget? _subtitle(
+    BuildContext context,
+    ActionTemplate t,
+    Duration? average,
+    Map<String, MetricStat>? stats,
+  ) {
+    final payload = jsonDecode(t.payload) as Map<String, dynamic>;
+    final m = payload['estimatedMinutes'];
+    final manual = (m is int && m > 0) ? m : null;
+    final useAverage = payload['useAverage'] == true;
+    final avgMin = average == null
+        ? null
+        : (average.inSeconds / 60).round().clamp(1, 1 << 30);
+    final urgency = stats == null
+        ? null
+        : actionUrgency(
+            ((payload['metricIds'] as List<dynamic>?)?.cast<String>() ??
+                    const <String>[])
+                .toSet(),
+            stats,
+          );
+    if (manual == null && avgMin == null && urgency == null) return null;
+    final base = Theme.of(context).textTheme.bodyMedium!;
+    final bold = base.copyWith(fontWeight: FontWeight.w700);
+    return Wrap(
+      spacing: 14,
+      runSpacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (manual != null)
+          Text(
+            _minutesLabel(manual),
+            key: ValueKey('template-manual-${t.id}'),
+            style: useAverage && avgMin != null ? base : bold,
+          ),
+        if (avgMin != null)
+          Text(
+            'avg ${_minutesLabel(avgMin)}',
+            key: ValueKey('template-average-${t.id}'),
+            style: useAverage || manual == null ? bold : base,
+          ),
+        if (urgency != null)
+          ParamValue.urgency(
+            formatUrgency(urgency),
+            size: 18,
+            key: ValueKey('template-urgency-${t.id}'),
+            style: base,
+            color: base.color,
+          ),
+      ],
+    );
   }
 
   Future<void> _importCsv(BuildContext context, WidgetRef ref) =>
@@ -278,9 +341,12 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _minutesController;
+  late final TextEditingController _blocksController;
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
   String? _notes;
+  bool _useAverage = false;
+  Duration? _average;
 
   @override
   void initState() {
@@ -297,8 +363,20 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
     _minutesController = TextEditingController(
       text: (payload?['estimatedMinutes'] as int?)?.toString() ?? '',
     );
+    _blocksController = TextEditingController(
+      text: payload?['diaryBlocks'] as String? ?? '',
+    );
     _isAllDay = payload?['isAllDay'] as bool? ?? false;
     _notes = payload?['notes'] as String?;
+    _useAverage = payload?['useAverage'] as bool? ?? false;
+    if (existing != null) {
+      ref
+          .read(actionServiceProvider)
+          .templateAverage(existing.name)
+          .then((d) {
+            if (mounted) setState(() => _average = d);
+          });
+    }
     _selectedMetricIds =
         ((payload?['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
             .toSet();
@@ -308,6 +386,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
   void dispose() {
     _nameController.dispose();
     _minutesController.dispose();
+    _blocksController.dispose();
     super.dispose();
   }
 
@@ -366,7 +445,38 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
                     return (n == null || n <= 0) ? 'Whole minutes > 0' : null;
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const ValueKey('template-diary-blocks'),
+                  controller: _blocksController,
+                  decoration: const InputDecoration(
+                    labelText: '"What is done?" blocks',
+                    helperText:
+                        'Codes such as KBT, Target:Jeremy (empty = every '
+                        'tagged action); copied to actions made from this '
+                        'template',
+                    helperMaxLines: 2,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _average == null
+                            ? 'Use average time (no runs yet)'
+                            : 'Use average time (${_average!.inMinutes} min)',
+                      ),
+                    ),
+                    Switch(
+                      key: const ValueKey('template-use-average'),
+                      value: _useAverage,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => setState(() => _useAverage = v),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 MetricPicker(
                   label: 'Growth directions',
                   selectedIds: _selectedMetricIds,
@@ -422,6 +532,10 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
       'name': name,
       'estimatedMinutes': ?int.tryParse(_minutesController.text.trim()),
       'isAllDay': _isAllDay,
+      'useAverage': ?(_useAverage ? true : null),
+      'diaryBlocks': ?(_blocksController.text.trim().isEmpty
+          ? null
+          : _blocksController.text.trim()),
       'metricIds': _selectedMetricIds.toList(),
       // Notes document JSON (copied into the action by
       // ActionService.createFromTemplate); omitted when empty.

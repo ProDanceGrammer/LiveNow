@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'domain/postpone_rules.dart';
+import 'ui/link_launcher.dart';
 import 'ui/root_navigator.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/theme/app_theme.dart';
@@ -13,6 +14,7 @@ import 'ui/undo.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initPostponeTimeZoneData();
+  installNotesLinkLauncher();
   final initialTheme = await loadThemeMode();
   runApp(
     ProviderScope(

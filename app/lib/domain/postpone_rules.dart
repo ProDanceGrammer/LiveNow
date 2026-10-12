@@ -77,6 +77,7 @@ ActionSchedule applyPostponeRule(
     PostponeRule.workingMorning => _nextWorkingAtMinute(
       _relativeBase(current.startAt, now, location),
       hours.morning,
+      hours.workingWeekdays,
     ),
     PostponeRule.nextMondayMorning => _nextWeekdayAt(
       _relativeBase(current.startAt, now, location),
@@ -131,9 +132,13 @@ tz.TZDateTime _nextAtMinute(tz.TZDateTime base, int minutes) {
 }
 
 /// Like [_nextAtMinute], then skips non-working weekdays.
-tz.TZDateTime _nextWorkingAtMinute(tz.TZDateTime base, int minutes) {
+tz.TZDateTime _nextWorkingAtMinute(
+  tz.TZDateTime base,
+  int minutes,
+  Set<int> workingWeekdays,
+) {
   var candidate = _nextAtMinute(base, minutes);
-  while (!AppSettings.workingWeekdays.contains(candidate.weekday)) {
+  while (!workingWeekdays.contains(candidate.weekday)) {
     candidate = _atMinuteOnDate(_nextDay(candidate), minutes);
   }
   return candidate;

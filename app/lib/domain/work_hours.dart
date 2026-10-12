@@ -9,10 +9,14 @@ class WorkHours {
   final int workEnd;
   final int morning;
 
+  /// ISO weekdays (1 = Monday .. 7 = Sunday) that count as working days.
+  final Set<int> workingWeekdays;
+
   const WorkHours({
     this.workStart = AppSettings.workStartMinutes,
     this.workEnd = AppSettings.afterWorkHour * 60,
     this.morning = AppSettings.morningHour * 60,
+    this.workingWeekdays = AppSettings.workingWeekdays,
   });
 
   static const defaults = WorkHours();
@@ -25,13 +29,20 @@ class WorkHours {
       return 'Times must be within one day.';
     }
     if (workEnd <= workStart) return 'Work must end after it starts.';
+    if (workingWeekdays.isEmpty) return 'Pick at least one working day.';
     return null;
   }
 
-  WorkHours copyWith({int? workStart, int? workEnd, int? morning}) => WorkHours(
+  WorkHours copyWith({
+    int? workStart,
+    int? workEnd,
+    int? morning,
+    Set<int>? workingWeekdays,
+  }) => WorkHours(
     workStart: workStart ?? this.workStart,
     workEnd: workEnd ?? this.workEnd,
     morning: morning ?? this.morning,
+    workingWeekdays: workingWeekdays ?? this.workingWeekdays,
   );
 
   /// "09:00" for minutes-since-midnight [m].
@@ -42,6 +53,7 @@ class WorkHours {
     'workStart': workStart,
     'workEnd': workEnd,
     'morning': morning,
+    'workingWeekdays': (workingWeekdays.toList()..sort()),
   };
 
   /// Reads a saved value; anything missing, mistyped or invalid falls back to
@@ -53,7 +65,17 @@ class WorkHours {
       return v is int ? v : null;
     }
 
+    final days = json['workingWeekdays'];
+    final weekdays = days is List
+        ? {
+            for (final d in days)
+              if (d is int && d >= 1 && d <= 7) d,
+          }
+        : null;
     final h = WorkHours(
+      workingWeekdays: (weekdays == null || weekdays.isEmpty)
+          ? defaults.workingWeekdays
+          : weekdays,
       workStart: read('workStart') ?? defaults.workStart,
       workEnd: read('workEnd') ?? defaults.workEnd,
       morning: read('morning') ?? defaults.morning,
@@ -66,8 +88,15 @@ class WorkHours {
       other is WorkHours &&
       other.workStart == workStart &&
       other.workEnd == workEnd &&
-      other.morning == morning;
+      other.morning == morning &&
+      other.workingWeekdays.length == workingWeekdays.length &&
+      other.workingWeekdays.containsAll(workingWeekdays);
 
   @override
-  int get hashCode => Object.hash(workStart, workEnd, morning);
+  int get hashCode => Object.hash(
+    workStart,
+    workEnd,
+    morning,
+    Object.hashAllUnordered(workingWeekdays),
+  );
 }

@@ -42,6 +42,7 @@ import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
 import '../widgets/direction_badge.dart';
 import '../widgets/glass.dart';
+import '../widgets/continue_icon.dart';
 import '../widgets/glass_icon_tile.dart';
 import 'calendar_layout.dart';
 
@@ -158,6 +159,16 @@ DateTime _effectiveEnd(ActionListItem a) {
   const min = Duration(minutes: kMinDurationMinutes);
   return start.add(d < min ? min : d);
 }
+
+/// End of [a] as the data says (the block may be drawn taller): what the
+/// time label must show.
+DateTime _realEnd(ActionListItem a) => a.startAt!.add(
+  computeActionDuration(
+    startAt: a.startAt!,
+    endAt: a.endAt,
+    legacyEstimatedMinutes: a.estimatedMinutes,
+  ),
+);
 
 // Selection by pointer. A press is handled the moment the button goes down
 // (the tap recognizers wait out the double-tap timeout, by which time Shift
@@ -374,6 +385,10 @@ class CalendarView extends ConsumerWidget {
                                       start: start,
                                       dayCount: dayCount,
                                       dayWidth: dayW,
+                                      // One day on a phone: centre the label
+                                      // on the whole panel, not on the part
+                                      // right of the time gutter.
+                                      centerOnPanel: phone && dayCount == 1,
                                     ),
                                     if (allDay)
                                       _AllDayStrip(
@@ -396,11 +411,53 @@ class CalendarView extends ConsumerWidget {
                                 );
                                 // A finger swipe turns the pages (phone).
                                 return phone
-                                    ? _SwipeDays(child: content)
+                                    ? _SwipeDays(pageKey: start, child: content)
                                     : content;
                               },
                             ),
                     ),
+                    if (phone)
+                      Positioned(
+                        top: 4,
+                        right: 70,
+                        height: 34,
+                        child: TextButton(
+                          key: const ValueKey('calendar-now-phone'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            minimumSize: const Size(0, 30),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          onPressed: () => goToCalendarToday(ref),
+                          child: const Text('Now'),
+                        ),
+                      ),
+                    if (phone)
+                      Positioned(
+                        top: 4,
+                        right: 36,
+                        width: 34,
+                        height: 34,
+                        child: Builder(
+                          builder: (context) {
+                            final full = ref.watch(phoneCalendarFullProvider);
+                            return IconButton(
+                              key: const ValueKey('calendar-full-toggle'),
+                              padding: EdgeInsets.zero,
+                              iconSize: 22,
+                              tooltip: full ? 'Show app menus' : 'Full screen',
+                              icon: Icon(
+                                full ? Icons.fullscreen_exit : Icons.fullscreen,
+                              ),
+                              onPressed: () =>
+                                  ref
+                                          .read(phoneCalendarFullProvider.notifier)
+                                          .state =
+                                      !full,
+                            );
+                          },
+                        ),
+                      ),
                     if (phone)
                       const Positioned(
                         top: 4,
@@ -428,13 +485,36 @@ class CalendarView extends ConsumerWidget {
 /// that wobbles sideways never changes the day.
 class _SwipeDays extends ConsumerStatefulWidget {
   final Widget child;
-  const _SwipeDays({required this.child});
+
+  /// The first day shown: when it changes the page fades in.
+  final DateTime pageKey;
+  const _SwipeDays({required this.child, required this.pageKey});
 
   @override
   ConsumerState<_SwipeDays> createState() => _SwipeDaysState();
 }
 
-class _SwipeDaysState extends ConsumerState<_SwipeDays> {
+class _SwipeDaysState extends ConsumerState<_SwipeDays>
+    with SingleTickerProviderStateMixin {
+  // A new page fades in (opacity only: the grid and its scroll state stay).
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 160),
+    value: 1,
+  );
+
+  @override
+  void didUpdateWidget(_SwipeDays old) {
+    super.didUpdateWidget(old);
+    if (old.pageKey != widget.pageKey) _fade.forward(from: 0.35);
+  }
+
+  @override
+  void dispose() {
+    _fade.dispose();
+    super.dispose();
+  }
+
   static const _slop = 24.0;
   static const _commit = 64.0;
 
@@ -498,7 +578,7 @@ class _SwipeDaysState extends ConsumerState<_SwipeDays> {
     onPointerMove: _onMove,
     onPointerUp: _onUp,
     onPointerCancel: _onUp,
-    child: widget.child,
+    child: FadeTransition(opacity: _fade, child: widget.child),
   );
 }
 
@@ -814,7 +894,6 @@ class _CalendarMenu extends ConsumerWidget {
         : 3;
     final iconsOn = ref.watch(calendarIconsProvider);
     final allDayOn = ref.watch(calendarAllDayProvider);
-    final full = ref.watch(phoneCalendarFullProvider);
     return PopupMenuButton<String>(
       key: const ValueKey('calendar-menu'),
       tooltip: 'Calendar options',
@@ -830,8 +909,6 @@ class _CalendarMenu extends ConsumerWidget {
           ref.read(calendarAllDayProvider.notifier).toggle();
         } else if (v == 'icons') {
           ref.read(calendarIconsProvider.notifier).toggle();
-        } else if (v == 'full') {
-          ref.read(phoneCalendarFullProvider.notifier).state = !full;
         }
       },
       itemBuilder: (_) => [
@@ -861,12 +938,6 @@ class _CalendarMenu extends ConsumerWidget {
           checked: iconsOn,
           child: const Text('Growth direction icons'),
         ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          key: const ValueKey('calendar-menu-full'),
-          value: 'full',
-          child: Text(full ? 'Show app menus' : 'Full screen'),
-        ),
       ],
     );
   }
@@ -876,11 +947,13 @@ class _DayHeaderRow extends StatelessWidget {
   final DateTime start;
   final int dayCount;
   final double dayWidth;
+  final bool centerOnPanel;
 
   const _DayHeaderRow({
     required this.start,
     required this.dayCount,
     required this.dayWidth,
+    this.centerOnPanel = false,
   });
 
   @override
@@ -907,39 +980,44 @@ class _DayHeaderRow extends StatelessWidget {
                 return SizedBox(
                   key: ValueKey('day-header-$i'),
                   width: dayWidth,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        narrow
-                            ? _dayNames[l.weekday - 1].substring(0, 1)
-                            : _dayNames[l.weekday - 1],
-                        style: TextStyle(
-                          color: isToday ? scheme.primary : g.textSecondary,
-                          fontWeight: isToday ? FontWeight.w600 : null,
-                        ),
-                      ),
-                      SizedBox(width: narrow ? 2 : 6),
-                      Container(
-                        constraints: const BoxConstraints(minWidth: 26),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: narrow ? 3 : 6,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isToday ? scheme.primary : null,
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: Text(
-                          '${l.day}',
-                          textAlign: TextAlign.center,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: centerOnPanel ? _kGutter : 0,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          narrow
+                              ? _dayNames[l.weekday - 1].substring(0, 1)
+                              : _dayNames[l.weekday - 1],
                           style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: isToday ? scheme.onPrimary : g.textPrimary,
+                            color: isToday ? scheme.primary : g.textSecondary,
+                            fontWeight: isToday ? FontWeight.w600 : null,
                           ),
                         ),
-                      ),
-                    ],
+                        SizedBox(width: narrow ? 2 : 6),
+                        Container(
+                          constraints: const BoxConstraints(minWidth: 26),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: narrow ? 3 : 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isToday ? scheme.primary : null,
+                            borderRadius: BorderRadius.circular(13),
+                          ),
+                          child: Text(
+                            '${l.day}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: isToday ? scheme.onPrimary : g.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -1550,7 +1628,7 @@ class _Toolbar extends StatelessWidget {
               _tile(Icons.play_arrow_rounded, GlassHue.blue, 'Start', onStart),
               _tile(Icons.stop_rounded, GlassHue.pink, 'Finish', onFinish),
               _tile(
-                Icons.autorenew_rounded,
+                continueIconData,
                 GlassHue.green,
                 'Continue with same action',
                 onContinue,
@@ -1983,7 +2061,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       if (a.isAllDay || a.startAt == null) continue;
       final s = a.startAt!;
       final e = _effectiveEnd(a);
-      final range = '${_hhmm(s)}–${_hhmm(e)}';
+      final range = '${_hhmm(s)}–${_hhmm(_realEnd(a))}';
       for (var d = 0; d < widget.dayCount; d++) {
         final ds = dayStarts[d];
         final de = dayStarts[d + 1];

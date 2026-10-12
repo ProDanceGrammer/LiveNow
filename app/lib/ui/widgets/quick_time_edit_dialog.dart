@@ -101,6 +101,9 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
   late DateTime _start; // wall values
   DateTime? _end;
   bool _onEnd = false;
+  // True once the END itself was edited (then it is saved as typed); until
+  // then it only follows the start and keeps its exact length, seconds too.
+  bool _endEdited = false;
   late TimeUnit _unit;
   String _typed = '';
 
@@ -124,9 +127,16 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
 
   void _setCurrent(DateTime v) {
     if (_onEnd) {
+      _endEdited = true;
       _end = _normalize(v);
     } else {
+      final old = _start;
       _start = _normalize(v);
+      // The length stays: moving the start carries the end along.
+      final end = _end;
+      if (end != null && !widget.isAllDay) {
+        _end = end.add(_start.difference(old));
+      }
     }
   }
 
@@ -211,12 +221,17 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
       return utcFromWall(wall);
     }
 
-    Navigator.of(context).pop(
-      TimeEditResult(
-        start: back(_start, widget.initialStart),
-        end: _end == null ? null : back(_end!, widget.initialEnd),
-      ),
-    );
+    final start = back(_start, widget.initialStart);
+    DateTime? end;
+    if (_end != null) {
+      final iStart = widget.initialStart;
+      final iEnd = widget.initialEnd;
+      end = (!_endEdited && !widget.isAllDay && iStart != null && iEnd != null)
+          // Only the start moved: same length to the second.
+          ? iEnd.add(start.difference(iStart))
+          : back(_end!, widget.initialEnd);
+    }
+    Navigator.of(context).pop(TimeEditResult(start: start, end: end));
   }
 
   String _fmtWall(DateTime w) {

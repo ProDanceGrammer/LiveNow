@@ -137,6 +137,41 @@ void main() {
     expect((await row(created)).name, '[#5] Pray');
   });
 
+  test('removing the number from the name restarts at [#1] / [#2]', () async {
+    final sourceId = await service.createAction(name: 'Read a Bible');
+    var current = sourceId;
+    for (var i = 0; i < 3; i++) {
+      current = (await service.continueSameAction(current)).newActionId;
+    }
+    expect((await row(current)).name, '[#4] Read a Bible');
+    expect((await row(current)).sequenceNumber, 4);
+
+    // The user deletes the "[#4]" from the name (the stored counter stays 4).
+    await (db.update(db.actionsTable)..where((t) => t.id.equals(current)))
+        .write(const ActionsTableCompanion(name: Value('Read a Bible')));
+    final result = await service.continueSameAction(current);
+
+    expect((await row(current)).name, '[#1] Read a Bible');
+    expect((await row(current)).sequenceNumber, 1);
+    expect((await row(result.newActionId)).name, '[#2] Read a Bible');
+    expect((await row(result.newActionId)).sequenceNumber, 2);
+
+    // Undo still puts the source back the way it was.
+    await service.undoContinue(result.undo);
+    expect((await row(current)).name, 'Read a Bible');
+  });
+
+  test('an edited number wins over the stored counter', () async {
+    final sourceId = await service.createAction(name: 'Pray');
+    final second = (await service.continueSameAction(sourceId)).newActionId;
+    expect((await row(second)).sequenceNumber, 2);
+    await (db.update(db.actionsTable)..where((t) => t.id.equals(second)))
+        .write(const ActionsTableCompanion(name: Value('[#7] Pray')));
+    final third = (await service.continueSameAction(second)).newActionId;
+    expect((await row(second)).name, '[#7] Pray');
+    expect((await row(third)).name, '[#8] Pray');
+  });
+
   test('next actions move to the new action; predecessors stay put', () async {
     final p = await service.createAction(name: 'P');
     final s = await service.createAction(name: 'S');

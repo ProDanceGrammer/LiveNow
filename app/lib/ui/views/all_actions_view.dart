@@ -167,7 +167,9 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
               const SizedBox(width: 4),
               IconButton(
                 key: const ValueKey('allOptionsToggle'),
-                tooltip: _panelOpen ? 'Hide sort and filters' : 'Sort and filters',
+                tooltip: _panelOpen
+                    ? 'Hide sort and filters'
+                    : 'Sort and filters',
                 isSelected: _panelOpen || filtering,
                 icon: const Icon(Icons.tune),
                 onPressed: () => setState(() => _panelOpen = !_panelOpen),
@@ -179,33 +181,43 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Wrap(
-              spacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text('Search in', style: Theme.of(context).textTheme.bodySmall),
-                FilterChip(
-                  key: const ValueKey('searchFlagName'),
-                  visualDensity: VisualDensity.compact,
-                  label: const Text('Name'),
-                  selected: flags.name,
-                  onSelected: (v) => setFlags(flags.copyWith(name: v)),
-                ),
-                FilterChip(
-                  key: const ValueKey('searchFlagNotes'),
-                  visualDensity: VisualDensity.compact,
-                  label: const Text('Notes'),
-                  selected: flags.notes,
-                  onSelected: (v) => setFlags(flags.copyWith(notes: v)),
-                ),
-                FilterChip(
-                  key: const ValueKey('searchFlagDirections'),
-                  visualDensity: VisualDensity.compact,
-                  label: const Text('Directions'),
-                  selected: flags.directions,
-                  onSelected: (v) => setFlags(flags.copyWith(directions: v)),
-                ),
-              ],
+            // One row that scales down to fit a narrow phone (no wrapping).
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Search in',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(width: 8),
+                  FilterChip(
+                    key: const ValueKey('searchFlagName'),
+                    visualDensity: VisualDensity.compact,
+                    label: const Text('Name'),
+                    selected: flags.name,
+                    onSelected: (v) => setFlags(flags.copyWith(name: v)),
+                  ),
+                  const SizedBox(width: 8),
+                  FilterChip(
+                    key: const ValueKey('searchFlagNotes'),
+                    visualDensity: VisualDensity.compact,
+                    label: const Text('Notes'),
+                    selected: flags.notes,
+                    onSelected: (v) => setFlags(flags.copyWith(notes: v)),
+                  ),
+                  const SizedBox(width: 8),
+                  FilterChip(
+                    key: const ValueKey('searchFlagDirections'),
+                    visualDensity: VisualDensity.compact,
+                    label: const Text('Directions'),
+                    selected: flags.directions,
+                    onSelected: (v) => setFlags(flags.copyWith(directions: v)),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -103,6 +103,9 @@ class NotesEditor extends StatefulWidget {
   /// package would use the key to toggle a checkbox.
   final VoidCallback? onSave;
 
+  /// Extra controls in the toolbar row (the action editor's "What is done?").
+  final Widget? toolbarExtra;
+
   const NotesEditor({
     super.key,
     this.initialJson,
@@ -111,6 +114,7 @@ class NotesEditor extends StatefulWidget {
     this.expanded = false,
     this.onToggleExpand,
     this.onSave,
+    this.toolbarExtra,
   });
 
   @override
@@ -250,6 +254,36 @@ class NotesEditorState extends State<NotesEditor> {
 
   Future<void> _resetChecklist() => resetChecklist(_editorState);
 
+  /// Appends a new section at the end: a heading, then one empty checkbox per
+  /// group with its items nested below it. Returns false when [groups] is
+  /// empty. The whole append is one editor transaction (editor Undo reverts it).
+  Future<bool> appendChecklistSection(
+    String heading,
+    List<(String, List<String>)> groups,
+  ) async {
+    if (groups.isEmpty) return false;
+    final root = _editorState.document.root;
+    final transaction = _editorState.transaction;
+    final nodes = <Node>[
+      headingNode(level: 2, text: heading),
+      for (final (tag, items) in groups)
+        todoListNode(
+          checked: false,
+          text: tag,
+          children: [
+            for (final item in items) todoListNode(checked: false, text: item),
+          ],
+        ),
+    ];
+    transaction.insertNodes([root.children.length], nodes);
+    await _editorState.apply(transaction);
+    _flush();
+    return true;
+  }
+
+  /// Reverts the last editor change (used by the transfer's Undo).
+  void undoLastEdit() => _editorState.undoManager.undo();
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -308,6 +342,7 @@ class NotesEditorState extends State<NotesEditor> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildToolbarRow(scheme),
+        if (widget.toolbarExtra != null) widget.toolbarExtra!,
         const SizedBox(height: 4),
         Container(
           height: widget.height,

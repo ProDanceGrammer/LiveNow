@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/glass_theme.dart';
+import 'continue_icon.dart';
 
 /// Which palette hue a [GlassIconTile] is tinted with.
 enum GlassHue { blue, green, lavender, pink, cyan, peach, error }
@@ -100,11 +101,18 @@ class _GlassIconTileState extends State<GlassIconTile> {
               child: SizedBox(
                 width: widget.size,
                 height: widget.size,
-                child: Icon(
-                  widget.icon,
-                  size: widget.iconSize,
-                  color: iconColor,
-                ),
+                child: widget.icon == continueIconData
+                    ? Center(
+                        child: ContinueIcon(
+                          size: widget.iconSize,
+                          color: iconColor,
+                        ),
+                      )
+                    : Icon(
+                        widget.icon,
+                        size: widget.iconSize,
+                        color: iconColor,
+                      ),
               ),
             ),
           ),

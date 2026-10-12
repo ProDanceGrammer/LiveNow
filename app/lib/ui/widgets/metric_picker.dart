@@ -6,7 +6,9 @@ import '../../domain/growth_rules.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
+import 'action_tile.dart' show formatUrgency;
 import 'growth_direction_dialog.dart';
+import 'param_icons.dart';
 
 /// Chips for the chosen growth directions plus an "Add" button that opens a
 /// searchable multi-select. There are hundreds of directions, so a chip per
@@ -40,12 +42,36 @@ class MetricPicker extends ConsumerWidget {
     this.excludeId,
     this.onOpen,
     this.allowCreate = false,
+    this.showUrgency = false,
   });
+
+  /// Shows each direction's "Urgency to Keep in Balance" before its chip.
+  final bool showUrgency;
+
+  Widget _withUrgency(BuildContext context, MetricStat? stat, Widget chip) {
+    if (stat == null) return chip;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ParamValue.urgency(
+          formatUrgency(stat.urgency),
+          size: 18,
+          style: Theme.of(context).textTheme.bodyMedium,
+          color: Theme.of(context).textTheme.bodyMedium?.color,
+        ),
+        const SizedBox(width: 6),
+        Flexible(child: chip),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final metrics = ref.watch(metricsProvider).value ?? const <Metric>[];
     final byId = {for (final m in metrics) m.id: m};
+    final stats = showUrgency
+        ? ref.watch(growthSnapshotProvider).value?.stats
+        : null;
     // Ids of deleted directions can linger in a form; just don't show them.
     final chosen = [
       for (final id in selectedIds)
@@ -116,11 +142,15 @@ class MetricPicker extends ConsumerWidget {
             runSpacing: 4,
             children: [
               for (final m in chosen)
-                InputChip(
-                  label: Text(metricLabel(m.name, m.icon)),
-                  tooltip: onOpen == null ? null : 'Open this direction',
-                  onPressed: onOpen == null ? null : () => onOpen!(m),
-                  onDeleted: () => onChanged({...selectedIds}..remove(m.id)),
+                _withUrgency(
+                  context,
+                  stats?[m.id],
+                  InputChip(
+                    label: Text(metricLabel(m.name, m.icon)),
+                    tooltip: onOpen == null ? null : 'Open this direction',
+                    onPressed: onOpen == null ? null : () => onOpen!(m),
+                    onDeleted: () => onChanged({...selectedIds}..remove(m.id)),
+                  ),
                 ),
             ],
           ),

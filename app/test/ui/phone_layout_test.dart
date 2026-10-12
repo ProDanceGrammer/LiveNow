@@ -152,9 +152,7 @@ void main() {
     check('Actions/Calendar');
     // The Calendar is full screen on a phone: bring the menus back.
     expect(find.byKey(const ValueKey('phone-nav')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('calendar-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('calendar-menu-full')));
+    await tester.tap(find.byKey(const ValueKey('calendar-full-toggle')));
     await settle(tester);
     expect(find.byKey(const ValueKey('phone-nav')), findsOneWidget);
     await tapText(tester, 'All');

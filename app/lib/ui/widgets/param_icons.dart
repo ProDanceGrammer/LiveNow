@@ -141,7 +141,12 @@ class ParamLabel extends StatelessWidget {
 /// ordinary `Text` (tests keep matching `find.text('910')`).
 class ParamValue extends StatelessWidget {
   const ParamValue(this.param, this.text,
-      {super.key, this.color, this.iconColor, this.style, this.size = 14});
+      {super.key,
+      this.color,
+      this.iconColor,
+      this.style,
+      this.size = 14,
+      this.iconAfter = false});
 
   const ParamValue.urgency(String text, {Key? key, Color? color, Color? iconColor, TextStyle? style, double size = 20})
       : this(Param.urgency, text,
@@ -154,8 +159,10 @@ class ParamValue extends StatelessWidget {
       : this(Param.level, text, key: key, color: color, style: style, size: size);
   const ParamValue.fact(String text, {Key? key, Color? color, TextStyle? style, double size = 14})
       : this(Param.fact, text, key: key, color: color, style: style, size: size);
-  const ParamValue.plan(String text, {Key? key, Color? color, TextStyle? style, double size = 16})
-      : this(Param.plan, text, key: key, color: color, style: style, size: size);
+  const ParamValue.plan(String text,
+      {Key? key, Color? color, TextStyle? style, double size = 16, bool iconAfter = false})
+      : this(Param.plan, text,
+            key: key, color: color, style: style, size: size, iconAfter: iconAfter);
   const ParamValue.actual(String text, {Key? key, Color? color, TextStyle? style, double size = 16})
       : this(Param.actual, text, key: key, color: color, style: style, size: size);
 
@@ -168,20 +175,24 @@ class ParamValue extends StatelessWidget {
   final TextStyle? style;
   final double size;
 
+  /// Number first, then the icon (so a plan figure can touch the fact icon
+  /// that follows it).
+  final bool iconAfter;
+
   @override
   Widget build(BuildContext context) {
     final base = style ?? DefaultTextStyle.of(context).style;
     final c = color ?? style?.color ?? context.glass.textSecondary;
+    final icon = ParamIcon(param,
+        color: iconColor ?? (param == Param.urgency ? context.glass.urgencyIcon : c),
+        size: size,
+        tapToShow: param == Param.plan || param == Param.actual);
+    final label = Text(text, style: base.copyWith(color: c));
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        ParamIcon(param,
-            color: iconColor ?? (param == Param.urgency ? context.glass.urgencyIcon : c),
-            size: size,
-            tapToShow: param == Param.plan || param == Param.actual),
-        const SizedBox(width: 3),
-        Text(text, style: base.copyWith(color: c)),
-      ],
+      children: iconAfter
+          ? [label, const SizedBox(width: 3), icon]
+          : [icon, const SizedBox(width: 3), label],
     );
   }
 }

@@ -25,6 +25,7 @@ import 'date_time_field.dart';
 import 'metric_picker.dart';
 import 'notes_document.dart';
 import 'notes_editor.dart';
+import 'what_is_done_button.dart';
 import 'param_icons.dart';
 import 'quick_action_bar.dart';
 import 'section_block.dart';
@@ -88,7 +89,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   String? _notes;
   bool _notesOpen = false; // the Notes section (tile) is open
   bool _notesExpanded = false; // the editor's wide "Expand" mode
-  final _notesKey = GlobalKey();
+  final _notesKey = GlobalKey<NotesEditorState>();
   StreamSubscription<ActionRow?>? _rowSub;
   ActionRow? _seen; // the last database row seen (to spot external changes)
   String? _openStamp; // sync clock stamp of the row when the form was opened
@@ -186,6 +187,9 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         ? math.min(1100.0, screen.width - 48)
         : math.min(720.0, screen.width - 80);
     final notesHeight = expanded ? math.max(320.0, screen.height - 260) : 320.0;
+    final compactLandscape =
+        usePhoneLayout(context) &&
+        MediaQuery.orientationOf(context) == Orientation.landscape;
     // Ctrl+Enter = Save from anywhere in the dialog (the notes editor has its
     // own command, see NotesEditor.onSave, so it does not swallow the key).
     return CallbackShortcuts(
@@ -195,7 +199,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
             _save,
       },
       child: AlertDialog(
-        title: _isEditing && usePhoneLayout(context)
+        // Landscape phone: the title scrolls with the content (see below) so
+        // the keyboard leaves room for the Name field; Save/Cancel stay pinned.
+        insetPadding: compactLandscape
+            ? const EdgeInsets.symmetric(horizontal: 16, vertical: 6)
+            : null,
+        contentPadding: compactLandscape
+            ? const EdgeInsets.fromLTRB(20, 8, 20, 0)
+            : null,
+        actionsPadding: compactLandscape
+            ? const EdgeInsets.fromLTRB(16, 0, 16, 4)
+            : null,
+        title: compactLandscape
+            ? null
+            : _isEditing && usePhoneLayout(context)
             // Phone: Delete sits in the dialog's top-right corner.
             ? Row(
                 children: [
@@ -219,6 +236,26 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (compactLandscape)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _isEditing ? 'Edit action' : 'New action',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        if (_isEditing)
+                          IconButton(
+                            key: const ValueKey('editor-delete'),
+                            tooltip: 'Delete',
+                            visualDensity: VisualDensity.compact,
+                            color: Theme.of(context).colorScheme.error,
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            onPressed: _deleteAndClose,
+                          ),
+                      ],
+                    ),
                   TextFormField(
                     controller: _nameController,
                     // A hint (not a label) so the word disappears once filled.
@@ -272,6 +309,13 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                           initialJson: _notes,
                           onChanged: (json) => _notes = json,
                           onSave: _save,
+                          toolbarExtra: widget.existing == null
+                              ? null
+                              : WhatIsDoneControl(
+                                  actionId: widget.existing!.id,
+                                  notesKey: _notesKey,
+                                  initialBlocks: widget.existing!.resultNote,
+                                ),
                           height: notesHeight,
                           expanded: expanded,
                           onToggleExpand: () =>
@@ -368,7 +412,16 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                     label: 'Start',
                     value: _startAt,
                     includeTime: !_isAllDay,
-                    onChanged: (v) => setState(() => _startAt = v),
+                    onChanged: (v) => setState(() {
+                      // The length stays: the end follows the start (form
+                      // state only, saved with the action).
+                      final old = _startAt;
+                      final end = _endAt;
+                      if (!_isAllDay && v != null && old != null && end != null) {
+                        _endAt = end.add(v.difference(old));
+                      }
+                      _startAt = v;
+                    }),
                   ),
                   DateTimeField(
                     label: 'End',
@@ -450,6 +503,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
               MetricPicker(
                 label: '',
                 allowCreate: true,
+                showUrgency: true,
                 selectedIds: _selectedMetricIds,
                 onOpen: (m) => openDirectionById(context, ref, m.id),
                 onChanged: (ids) => setState(() => _selectedMetricIds = ids),

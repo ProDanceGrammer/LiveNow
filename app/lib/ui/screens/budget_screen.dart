@@ -104,48 +104,51 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
                     radius: 20,
                     shadow: false,
                     blurWindow: false,
-                    child: TabBar(
-                      key: const ValueKey('budget-switch'),
-                      controller: _tabs,
-                      // Four tabs do not fit a phone: scroll them.
-                      isScrollable: usePhoneLayout(context),
-                      tabAlignment: usePhoneLayout(context)
-                          ? TabAlignment.start
-                          : null,
-                      splashFactory: NoSplash.splashFactory,
-                      tabs: [
-                        for (final t in BudgetTab.values)
-                          Tab(
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                switch (t) {
-                                  BudgetTab.overview => const Icon(
-                                    Icons.pie_chart_outline,
-                                    size: 18,
-                                  ),
-                                  BudgetTab.categories => const ParamIcon(
-                                    Param.categories,
-                                    size: 18,
-                                    tooltip: false,
-                                  ),
-                                  BudgetTab.transactions => const ParamIcon(
-                                    Param.transactions,
-                                    size: 18,
-                                    tooltip: false,
-                                  ),
-                                  BudgetTab.accounts => const ParamIcon(
-                                    Param.accounts,
-                                    size: 18,
-                                    tooltip: false,
-                                  ),
-                                },
-                                const SizedBox(width: 6),
-                                Text(t.label),
-                              ],
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: TabBar(
+                        key: const ValueKey('budget-switch'),
+                        controller: _tabs,
+                        // Four tabs do not fit a phone: scroll them.
+                        isScrollable: usePhoneLayout(context),
+                        tabAlignment: usePhoneLayout(context)
+                            ? TabAlignment.start
+                            : null,
+                        splashFactory: NoSplash.splashFactory,
+                        tabs: [
+                          for (final t in BudgetTab.values)
+                            Tab(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  switch (t) {
+                                    BudgetTab.overview => const Icon(
+                                      Icons.pie_chart_outline,
+                                      size: 18,
+                                    ),
+                                    BudgetTab.categories => const ParamIcon(
+                                      Param.categories,
+                                      size: 18,
+                                      tooltip: false,
+                                    ),
+                                    BudgetTab.transactions => const ParamIcon(
+                                      Param.transactions,
+                                      size: 18,
+                                      tooltip: false,
+                                    ),
+                                    BudgetTab.accounts => const ParamIcon(
+                                      Param.accounts,
+                                      size: 18,
+                                      tooltip: false,
+                                    ),
+                                  },
+                                  const SizedBox(width: 6),
+                                  Text(t.label),
+                                ],
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -383,7 +386,7 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
         _BoardColumn(
           columnKey: 'over',
           semanticTitle: 'Actual above plan',
-          title: const [Param.actual, ' above ', Param.plan],
+          title: const [Param.plan, ' below ', Param.actual],
           entries: over,
         ),
         _BoardColumn(
@@ -640,9 +643,9 @@ class _BoardColumn extends ConsumerWidget {
                                     part,
                                     size: 18,
                                     tooltip: false,
-                                    color: DefaultTextStyle.of(
-                                      context,
-                                    ).style.color,
+                                    color: DefaultTextStyle.of(context)
+                                        .style
+                                        .color,
                                   ),
                                 )
                               : Text(
@@ -706,8 +709,15 @@ class _BoardEntryBlock extends StatelessWidget {
                     spacing: 12,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      ParamValue.plan(budgetMoney(e.figures.planBase), style: small),
-                      ParamValue.actual(budgetMoney(e.figures.factBase), style: small),
+                      ParamValue.plan(
+                        budgetMoney(e.figures.planBase),
+                        style: small,
+                        iconAfter: true,
+                      ),
+                      ParamValue.actual(
+                        budgetMoney(e.figures.factBase),
+                        style: small,
+                      ),
                     ],
                   ),
                 ],
@@ -1196,7 +1206,7 @@ class _CategoryCard extends ConsumerWidget {
                     spacing: 12,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      ParamValue.plan(money(f?.planBase)),
+                      ParamValue.plan(money(f?.planBase), iconAfter: true),
                       ParamValue.actual(money(f?.factBase)),
                     ],
                   ),
@@ -1355,8 +1365,7 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                             category: cats[t.row.categoryId],
                             currency: accounts[t.row.accountCountId]?.currency,
                             accountIcon: accounts[t.row.accountCountId]?.icon,
-                            hasAccount:
-                                accounts[t.row.accountCountId] != null,
+                            hasAccount: accounts[t.row.accountCountId] != null,
                           ),
                         ],
                       );

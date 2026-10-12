@@ -38,6 +38,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
 
   int _index = 0;
   bool _phoneCalendarInit = false;
+  final _bodyKey = GlobalKey();
 
   /// Sections opened so far. A section is built the first time it is shown
   /// and then kept alive (hidden, not painted, no tickers, no focus), so
@@ -167,17 +168,25 @@ class _HomeShellState extends ConsumerState<HomeShell>
     // The Calendar fills the whole screen on a phone: no app bar, no view
     // tabs (ActionsSection hides them too) and no bottom navigation.
     final full =
-        _index == 0 &&
-        _actionsSub == ActionsSub.calendar &&
-        ref.watch(phoneCalendarFullProvider);
+        (_index == 0 &&
+            _actionsSub == ActionsSub.calendar &&
+            ref.watch(phoneCalendarFullProvider)) ||
+        (_index == 1 && ref.watch(phoneMindmapFullProvider));
     // Toasts sit above the bottom navigation while it is on screen.
-    final navInset = full ? 0.0 : 80.0;
+    // Landscape trades the title row and bottom bar for a slim side rail
+    // (more height for the content, and it clears the camera notch).
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final navInset = (full || landscape) ? 0.0 : 80.0;
     if (toastBottomInset.value != navInset) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         toastBottomInset.value = navInset;
       });
     }
     final body = Stack(
+      // Keeps the sections' state when the layout around them changes (full
+      // screen, landscape rail).
+      key: _bodyKey,
       children: [
         Positioned.fill(child: _sections()),
         // Hidden while cards are selected: it sat on top of the selection
@@ -188,6 +197,18 @@ class _HomeShellState extends ConsumerState<HomeShell>
           Positioned(right: 16, bottom: 16, child: _newFab(context)),
       ],
     );
+    if (landscape && !full) {
+      return Scaffold(
+        body: SafeArea(
+          child: Row(
+            children: [
+              _buildLandscapeRail(context, isDark),
+              Expanded(child: body),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: full
           ? null
@@ -231,10 +252,8 @@ class _HomeShellState extends ConsumerState<HomeShell>
                 data: NavigationBarTheme.of(context).copyWith(
                   labelPadding: EdgeInsets.zero,
                   labelTextStyle: WidgetStatePropertyAll(
-                    Theme.of(context).textTheme.labelMedium?.copyWith(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w500,
-                    ),
+                    Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(fontSize: 10.5, fontWeight: FontWeight.w500),
                   ),
                 ),
                 child: NavigationBar(
@@ -259,6 +278,71 @@ class _HomeShellState extends ConsumerState<HomeShell>
                 ),
               ),
             ),
+    );
+  }
+
+  /// Landscape phone: the three sections as an icon-only strip on the left,
+  /// with sync and the menu at its bottom (the way the desktop rail collapses).
+  Widget _buildLandscapeRail(BuildContext context, bool isDark) {
+    final scheme = Theme.of(context).colorScheme;
+    return GlassSurface(
+      key: const ValueKey('phone-rail'),
+      radius: 0,
+      shadow: false,
+      child: SizedBox(
+        width: 56,
+        child: Material(
+          type: MaterialType.transparency,
+          child: Column(
+            children: [
+              const SizedBox(height: 4),
+              for (var i = 0; i < _destinations.length; i++)
+                IconButton(
+                  key: ValueKey('phone-rail-$i'),
+                  isSelected: i == _index,
+                  tooltip: _phoneLabels[i],
+                  icon: Icon(_destinations[i].icon),
+                  style: IconButton.styleFrom(
+                    backgroundColor: i == _index
+                        ? scheme.primaryContainer
+                        : null,
+                    foregroundColor: i == _index
+                        ? scheme.onPrimaryContainer
+                        : null,
+                  ),
+                  onPressed: () => setState(() {
+                    if (i == 0 && _actionsSub == ActionsSub.calendar) {
+                      ref.read(phoneCalendarFullProvider.notifier).state = true;
+                    }
+                    _index = i;
+                    _visited.add(i);
+                  }),
+                ),
+              const Spacer(),
+              const SyncStatusButton(),
+              PopupMenuButton<String>(
+                key: const ValueKey('phone-menu'),
+                onSelected: (v) => v == 'settings'
+                    ? SettingsScreen.open(context)
+                    : ref.read(themeModeProvider.notifier).toggle(),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    key: ValueKey('phone-menu-settings'),
+                    value: 'settings',
+                    child: Text('Settings'),
+                  ),
+                  CheckedPopupMenuItem(
+                    value: 'dark',
+                    checked: isDark,
+                    child: const Text('Dark mode'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

@@ -214,11 +214,14 @@ void main() {
   ) async {
     await pumpCard(tester, start: start, end: start);
     await openDialog(tester);
-    await ctrl(tester, LogicalKeyboardKey.arrowUp);
+    // Moving the START now carries the end along, so the error needs the END
+    // itself to go before the start.
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await ctrl(tester, LogicalKeyboardKey.arrowDown);
     expect(find.byKey(const ValueKey('time-error')), findsOneWidget);
     await key(tester, LogicalKeyboardKey.enter);
     expect(find.byType(AlertDialog), findsOneWidget);
-    await ctrl(tester, LogicalKeyboardKey.arrowDown);
+    await ctrl(tester, LogicalKeyboardKey.arrowUp);
     expect(find.byKey(const ValueKey('time-error')), findsNothing);
     await key(tester, LogicalKeyboardKey.escape);
     await tester.pump(const Duration(milliseconds: 400));
@@ -230,9 +233,8 @@ void main() {
   ) async {
     await pumpCard(tester, start: start, end: end);
     await openDialog(tester);
-    await ctrl(tester, LogicalKeyboardKey.arrowUp); // 14:31
-    await key(tester, LogicalKeyboardKey.arrowDown);
-    await ctrl(tester, LogicalKeyboardKey.arrowUp); // end 15:31
+    // Start 14:31: the end follows (15:31), keeping the length.
+    await ctrl(tester, LogicalKeyboardKey.arrowUp);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pump();
     await afterWrite(tester);

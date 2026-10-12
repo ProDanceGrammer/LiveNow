@@ -184,22 +184,25 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
                     radius: 20,
                     shadow: false,
                     blurWindow: false,
-                    child: TabBar(
-                      key: const ValueKey('actions-switch'),
-                      controller: _tabs,
-                      // Four tabs plus the two icon buttons do not fit 375 px:
-                      // on a phone the tabs scroll sideways instead of
-                      // clipping their names.
-                      isScrollable: phone,
-                      tabAlignment: phone ? TabAlignment.start : null,
-                      splashFactory: NoSplash.splashFactory,
-                      labelPadding: phone
-                          ? const EdgeInsets.symmetric(horizontal: 12)
-                          : null,
-                      tabs: [
-                        for (final s in ActionsSub.values)
-                          Tab(text: phone ? s.phoneLabel : s.label),
-                      ],
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: TabBar(
+                        key: const ValueKey('actions-switch'),
+                        controller: _tabs,
+                        // Four tabs plus the two icon buttons do not fit 375 px:
+                        // on a phone the tabs scroll sideways instead of
+                        // clipping their names.
+                        isScrollable: phone,
+                        tabAlignment: phone ? TabAlignment.start : null,
+                        splashFactory: NoSplash.splashFactory,
+                        labelPadding: phone
+                            ? const EdgeInsets.symmetric(horizontal: 12)
+                            : null,
+                        tabs: [
+                          for (final s in ActionsSub.values)
+                            Tab(text: phone ? s.phoneLabel : s.label),
+                        ],
+                      ),
                     ),
                   ),
                 ),

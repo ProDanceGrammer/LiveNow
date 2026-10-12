@@ -200,6 +200,41 @@ void main() {
     });
   });
 
+  group('workingMorning with custom working days', () {
+    test('Saturday works: Friday afternoon -> Saturday morning', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 5, 10)),
+        nowUtc: istanbul(2024, 1, 1, 9),
+        hours: const WorkHours(workingWeekdays: {1, 2, 3, 4, 5, 6}),
+      );
+      expect(next.startAt, istanbul(2024, 1, 6, 9));
+    });
+
+    test('only Wednesday works: Monday -> Wednesday', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 1, 10)),
+        nowUtc: istanbul(2024, 1, 1, 9),
+        hours: const WorkHours(workingWeekdays: {3}),
+      );
+      expect(next.startAt, istanbul(2024, 1, 3, 9));
+    });
+
+    test('JSON round-trip; an empty or damaged list falls back to Mon-Fri', () {
+      const h = WorkHours(workingWeekdays: {1, 3, 7});
+      expect(WorkHours.fromJson(h.toJson()), h);
+      expect(
+        WorkHours.fromJson({'workingWeekdays': <int>[]}).workingWeekdays,
+        {1, 2, 3, 4, 5},
+      );
+      expect(
+        WorkHours.fromJson({'workingWeekdays': 'x'}).workingWeekdays,
+        {1, 2, 3, 4, 5},
+      );
+    });
+  });
+
   group('workingMorning', () {
     test('Friday after 09:00 -> Monday 09:00', () {
       final next = applyPostponeRule(

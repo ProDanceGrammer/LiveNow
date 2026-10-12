@@ -175,9 +175,7 @@ void main() {
     expect(containerOf(tester).read(calendarDayCountProvider), 2);
 
     // Leaving full screen brings the app bar and bottom navigation back.
-    await tester.tap(find.byKey(const ValueKey('calendar-menu')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('calendar-menu-full')));
+    await tester.tap(find.byKey(const ValueKey('calendar-full-toggle')));
     await settle(tester, 300);
     expect(find.byKey(const ValueKey('phone-nav')), findsOneWidget);
     await unmount(tester);

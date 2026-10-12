@@ -18,6 +18,7 @@ import '../../domain/mindmap_layout.dart'
         mindmapNodeWidth,
         radialLayout,
         treeLayout;
+import '../calendar_fullscreen.dart';
 import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
@@ -862,9 +863,19 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
           'Tree of selected',
           one ? () => _treeOfSelected(s) : null,
         ),
-        button(Icons.zoom_out, 'Zoom out', () => _zoomBy(1 / 1.25)),
-        button(Icons.zoom_in, 'Zoom in', () => _zoomBy(1.25)),
+        // Zoom is by pinch on a phone (the buttons made room for full screen).
         button(Icons.fit_screen, 'Fit all', _fitAll),
+        button(
+          ref.watch(phoneMindmapFullProvider)
+              ? Icons.fullscreen_exit
+              : Icons.fullscreen,
+          ref.watch(phoneMindmapFullProvider)
+              ? 'Leave full screen'
+              : 'Full screen',
+          () => ref.read(phoneMindmapFullProvider.notifier).state = !ref.read(
+            phoneMindmapFullProvider,
+          ),
+        ),
       ],
     );
   }

@@ -797,7 +797,9 @@ class ActionService {
               .toList();
 
       final (prefixNumber, baseName) = parseSequencePrefix(source.name);
-      final sequence = source.sequenceNumber ?? prefixNumber ?? 1;
+      // The name is the truth: a removed `[#n]` restarts the count at 1, an
+      // edited one is honoured (the stored counter is only rewritten below).
+      final sequence = prefixNumber ?? 1;
 
       final predicted = predictedDuration(
         ownDuration: computeActionDuration(
@@ -948,6 +950,44 @@ class ActionService {
             ))
             .get();
     final durations = _actualDurations(rows);
+    if (durations.isEmpty) return null;
+    final totalMicros = durations.fold<int>(0, (s, d) => s + d.inMicroseconds);
+    return Duration(microseconds: totalMicros ~/ durations.length);
+  }
+
+  /// Mean real duration of the finished runs of a template over the last
+  /// [_countableAverageWindow]: actions of the Countable Activity named like it
+  /// (that covers "Continue" copies and actions added to the activity) plus any
+  /// finished action with the same normalized name (what the template created).
+  /// Null when there is none.
+  Future<Duration?> templateAverage(String name, {DateTime? nowUtc}) async {
+    final now = nowUtc ?? DateTime.now().toUtc();
+    final wanted = name.trim().toLowerCase();
+    String? activityId;
+    for (final c in await db.select(db.countableActivitiesTable).get()) {
+      if (c.name.trim().toLowerCase() == wanted) {
+        activityId = c.id;
+        break;
+      }
+    }
+    final key = normalizeForMatch(name);
+    final cutoff = dateTimeToDb(now.subtract(_countableAverageWindow))!;
+    final rows =
+        await (db.select(db.actionsTable)..where(
+              (t) =>
+                  t.done.equals(true) &
+                  t.completedAt.isBiggerOrEqualValue(cutoff) &
+                  t.startAt.isNotNull() &
+                  t.endAt.isNotNull(),
+            ))
+            .get();
+    final durations = _actualDurations(
+      rows.where(
+        (r) =>
+            (activityId != null && r.countableActivityId == activityId) ||
+            normalizeForMatch(r.name) == key,
+      ),
+    );
     if (durations.isEmpty) return null;
     final totalMicros = durations.fold<int>(0, (s, d) => s + d.inMicroseconds);
     return Duration(microseconds: totalMicros ~/ durations.length);
@@ -1134,7 +1174,7 @@ class ActionService {
   Future<String> createFromTemplate(String templateId) async {
     final payload = await _templatePayload(templateId);
     final a = await _templateArgs(payload);
-    return createAction(
+    final id = await createAction(
       name: a.name,
       postponeFlex: a.postponeFlex,
       depthLevel: a.depthLevel,
@@ -1143,6 +1183,20 @@ class ActionService {
       notes: a.notes,
       metricIds: a.metricIds,
     );
+    await _applyTemplateBlocks(id, payload);
+    return id;
+  }
+
+  /// Copies the template's "What is done?" Blocks codes (payload
+  /// `diaryBlocks`) onto the new action (`result_note` holds them).
+  Future<void> _applyTemplateBlocks(
+    String actionId,
+    Map<String, dynamic> payload,
+  ) async {
+    final blocks = (payload['diaryBlocks'] as String?)?.trim();
+    if (blocks == null || blocks.isEmpty) return;
+    await (db.update(db.actionsTable)..where((t) => t.id.equals(actionId)))
+        .write(ActionsTableCompanion(resultNote: Value(blocks)));
   }
 
   /// Quick "Start now" from a template. Timed: runs from now for the
@@ -1191,10 +1245,16 @@ class ActionService {
         endAt = null;
       } else {
         final minutes = a.estimatedMinutes;
-        final duration = (minutes != null && minutes > 0)
+        final manual = (minutes != null && minutes > 0)
             ? Duration(minutes: minutes)
-            : (await _countableAverage(activityId, nowUtc) ??
-                  defaultActionDuration);
+            : null;
+        final average = await templateAverage(a.name, nowUtc: nowUtc);
+        // The template's switch picks which one wins; the other is the
+        // fallback.
+        final useAverage = payload['useAverage'] == true;
+        final duration = useAverage
+            ? (average ?? manual ?? defaultActionDuration)
+            : (manual ?? average ?? defaultActionDuration);
         if (finished) {
           occStart = nowUtc.subtract(duration);
           startAt = occStart;
@@ -1217,6 +1277,7 @@ class ActionService {
         notes: a.notes,
         metricIds: a.metricIds,
       );
+      await _applyTemplateBlocks(id, payload);
 
       if (finished) {
         await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/growth_rules.dart';
 import '../data_imports.dart';
+import '../calendar_fullscreen.dart';
 import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
@@ -68,48 +69,54 @@ class GrowthDirectionsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Phone: a full-screen Mindmap hides the tabs and the new-direction button.
+    final full = usePhoneLayout(context) && ref.watch(phoneMindmapFullProvider);
     return DefaultTabController(
       length: 3,
       animationDuration: Duration.zero,
       child: Scaffold(
         body: Column(
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(12, 8, 4, 4),
-                    child: GlassSurface(
-                      radius: 20,
-                      shadow: false,
-                      blurWindow: false,
-                      child: TabBar(
-                        splashFactory: NoSplash.splashFactory,
-                        tabs: [
-                          Tab(text: 'Balance'),
-                          Tab(text: 'List'),
-                          Tab(text: 'Mindmap'),
-                        ],
+            if (!full)
+              Row(
+                children: [
+                  const Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(12, 8, 4, 4),
+                      child: GlassSurface(
+                        radius: 20,
+                        shadow: false,
+                        blurWindow: false,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.all(Radius.circular(20)),
+                          child: TabBar(
+                            splashFactory: NoSplash.splashFactory,
+                            tabs: [
+                              Tab(text: 'Balance'),
+                              Tab(text: 'List'),
+                              Tab(text: 'Mindmap'),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                // Importing is a desktop job (Notion exports live on the PC).
-                if (!usePhoneLayout(context))
-                  IconButton(
-                    icon: const Icon(Icons.emoji_emotions_outlined),
-                    tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
-                    onPressed: () => _importIcons(context, ref),
-                  ),
-                if (!usePhoneLayout(context))
-                  IconButton(
-                    icon: const Icon(Icons.upload_file),
-                    tooltip: 'Import growth directions from CSV…',
-                    onPressed: () => _import(context, ref),
-                  ),
-                const SizedBox(width: 8),
-              ],
-            ),
+                  // Importing is a desktop job (Notion exports live on the PC).
+                  if (!usePhoneLayout(context))
+                    IconButton(
+                      icon: const Icon(Icons.emoji_emotions_outlined),
+                      tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
+                      onPressed: () => _importIcons(context, ref),
+                    ),
+                  if (!usePhoneLayout(context))
+                    IconButton(
+                      icon: const Icon(Icons.upload_file),
+                      tooltip: 'Import growth directions from CSV…',
+                      onPressed: () => _import(context, ref),
+                    ),
+                  const SizedBox(width: 8),
+                ],
+              ),
             const Expanded(
               child: TabBarView(
                 // No swiping between tabs: horizontal drags belong to the
@@ -120,11 +127,13 @@ class GrowthDirectionsScreen extends ConsumerWidget {
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () => GrowthDirectionDialog.show(context),
-          tooltip: 'New growth direction',
-          child: const Icon(Icons.add),
-        ),
+        floatingActionButton: full
+            ? null
+            : FloatingActionButton(
+                onPressed: () => GrowthDirectionDialog.show(context),
+                tooltip: 'New growth direction',
+                child: const Icon(Icons.add),
+              ),
       ),
     );
   }

@@ -8,6 +8,7 @@ import '../../domain/work_hours.dart';
 import '../providers.dart';
 import '../undo.dart';
 import '../work_hours.dart';
+import 'continue_icon.dart';
 import 'glass_icon_tile.dart';
 
 /// One quick action (Start, Finish, a postpone rule, Delete). [group] only
@@ -62,7 +63,7 @@ List<QuickActionSpec> quickActionSpecs(
       () => run('Finished', () => service.finish(actionId)),
     ),
     QuickActionSpec(
-      Icons.autorenew_rounded,
+      continueIconData,
       GlassHue.green,
       'Continue with same action',
       0,

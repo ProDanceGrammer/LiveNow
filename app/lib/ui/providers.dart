@@ -1,4 +1,5 @@
-import 'package:drift/drift.dart' show OrderingTerm, innerJoin;
+import 'package:drift/drift.dart'
+    show OrderingTerm, TableUpdate, TableUpdateQuery, innerJoin;
 import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
@@ -289,6 +290,30 @@ final actionUrgencyProvider = Provider.autoDispose<Map<String, double>>((ref) {
     for (final (metricId, action) in linked) (metricId, action.id),
   ], snapshot.stats);
 });
+
+final _actionsWrittenProvider = StreamProvider.autoDispose<Set<TableUpdate>>((
+  ref,
+) {
+  final db = ref.watch(databaseProvider);
+  return db.tableUpdates(TableUpdateQuery.onTable(db.actionsTable));
+});
+
+/// Average real duration per template id (30-day mean of its runs, see
+/// `ActionService.templateAverage`); templates without runs are absent.
+/// Recomputed when actions or templates change and every minute.
+final templateAveragesProvider =
+    FutureProvider.autoDispose<Map<String, Duration>>((ref) async {
+      ref.watch(minuteTickProvider);
+      final templates = ref.watch(templatesProvider).value ?? const [];
+      ref.watch(_actionsWrittenProvider); // any write re-runs this
+      final service = ref.read(actionServiceProvider);
+      final out = <String, Duration>{};
+      for (final t in templates) {
+        final avg = await service.templateAverage(t.name);
+        if (avg != null) out[t.id] = avg;
+      }
+      return out;
+    });
 
 /// All Countable Activities, for the action editor's activity picker.
 final countableActivitiesProvider =
