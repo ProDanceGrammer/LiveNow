@@ -62,6 +62,11 @@ jobs:
 
       - run: flutter pub get
 
+      # The app icon (Urgency flame + scales on light violet) replaces the
+      # default Flutter icon of the generated ios/ project.
+      - name: App icon
+        run: dart run flutter_launcher_icons -f icons_ios.yaml
+
       - name: Build (no code signing)
         run: flutter build ios --release --no-codesign
 

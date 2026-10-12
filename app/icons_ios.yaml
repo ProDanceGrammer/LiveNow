@@ -1,0 +1,6 @@
+# iOS app icon: very light violet background (assets/icon/app_icon_ios.png).
+# Run by the CI workflow after `flutter create` has produced the ios/ folder.
+flutter_launcher_icons:
+  ios: true
+  image_path: "assets/icon/app_icon_ios.png"
+  remove_alpha_ios: true
