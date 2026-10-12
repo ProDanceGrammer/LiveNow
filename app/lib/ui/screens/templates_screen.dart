@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ids.dart';
 import '../../data/database.dart';
 import '../../domain/template_import_service.dart';
+import '../../domain/template_search.dart';
 import '../data_imports.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
@@ -61,7 +62,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                   child: TextField(
                     key: const ValueKey('templates-search'),
                     decoration: const InputDecoration(
-                      hintText: 'Search templates',
+                      hintText: 'Search by name or direction',
                       prefixIcon: Icon(Icons.search),
                       isDense: true,
                     ),
@@ -87,11 +88,23 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                 if (all.isEmpty) {
                   return const Center(child: Text('No templates yet.'));
                 }
+                // The search also looks at the names of the growth directions a
+                // template links to.
+                final directionNames = <String, String>{
+                  for (final m in ref.watch(metricsProvider).value ?? const [])
+                    m.id: m.name.toLowerCase(),
+                };
                 final templates = _query.isEmpty
                     ? all
                     : [
                         for (final t in all)
-                          if (t.name.toLowerCase().contains(_query)) t,
+                          if (templateMatches(
+                            name: t.name,
+                            payloadJson: t.payload,
+                            query: _query,
+                            directionNames: directionNames,
+                          ))
+                            t,
                       ];
                 if (templates.isEmpty) {
                   return const Center(child: Text('No matches'));

@@ -51,6 +51,17 @@ int snapMinutes(double dy, {double pxPerMinute = kPxPerMinute}) {
   return steps * kSnapMinutes;
 }
 
+/// The minutes a dragged block has moved: the pointer's vertical travel
+/// [pointerDy] PLUS how far the grid has scrolled since the drag began
+/// ([scrollDelta], positive = scrolled down). A mouse wheel turning during the
+/// drag moves the grid under a pointer that did not move, and the block must
+/// follow the content, not stay behind with the pointer travel alone.
+int dragMinuteDelta(
+  double pointerDy,
+  double scrollDelta, {
+  double pxPerMinute = kPxPerMinute,
+}) => snapMinutes(pointerDy + scrollDelta, pxPerMinute: pxPerMinute);
+
 double minutesToPx(num minutes, {double pxPerMinute = kPxPerMinute}) =>
     minutes * pxPerMinute;
 

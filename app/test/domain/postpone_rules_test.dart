@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/domain/work_hours.dart';
 
 // Europe/Istanbul has had a fixed UTC+3 offset (no DST) since 2016, so every
 // "local" instant below is just UTC-3h — no timezone package needed to build
@@ -307,6 +308,86 @@ void main() {
         nowUtc: now,
       );
       expect(next.startAt, istanbul(2023, 12, 8, 9));
+    });
+  });
+
+  group('working hours', () {
+    const custom = WorkHours(
+      workStart: 9 * 60,
+      workEnd: 17 * 60 + 30,
+      morning: 8 * 60 + 15,
+    );
+
+    test('after work lands at the configured end of work', () {
+      final next = applyPostponeRule(
+        PostponeRule.afterWork,
+        hourLong(istanbul(2024, 1, 2, 10)),
+        nowUtc: istanbul(2024, 1, 2, 9),
+        hours: custom,
+      );
+      expect(next.startAt, istanbul(2024, 1, 2, 17, 30));
+    });
+
+    test('morning uses its own time, not the start of work', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 2, 10)),
+        nowUtc: istanbul(2024, 1, 2, 9),
+        hours: custom,
+      );
+      // 08:15 today is before the 10:00 start, so it is tomorrow's.
+      expect(next.startAt, istanbul(2024, 1, 3, 8, 15));
+    });
+
+    test(
+      'next working morning skips the weekend; next Monday uses the morning',
+      () {
+        final fri = hourLong(istanbul(2024, 1, 5, 12));
+        expect(
+          applyPostponeRule(
+            PostponeRule.workingMorning,
+            fri,
+            nowUtc: istanbul(2024, 1, 5, 9),
+            hours: custom,
+          ).startAt,
+          istanbul(2024, 1, 8, 8, 15),
+        );
+        expect(
+          applyPostponeRule(
+            PostponeRule.nextMondayMorning,
+            fri,
+            nowUtc: istanbul(2024, 1, 5, 9),
+            hours: custom,
+          ).startAt,
+          istanbul(2024, 1, 8, 8, 15),
+        );
+      },
+    );
+
+    test('the defaults keep the old 18:00 / 09:00 behaviour', () {
+      final next = applyPostponeRule(
+        PostponeRule.afterWork,
+        hourLong(istanbul(2024, 1, 2, 10)),
+        nowUtc: istanbul(2024, 1, 2, 9),
+      );
+      expect(next.startAt, istanbul(2024, 1, 2, 18));
+    });
+
+    test('WorkHours: validation, formatting and a damaged saved value', () {
+      expect(WorkHours.defaults.problem, isNull);
+      expect(const WorkHours(workStart: 600, workEnd: 600).problem, isNotNull);
+      expect(const WorkHours(workEnd: 24 * 60 + 5).problem, isNotNull);
+      expect(WorkHours.format(8 * 60 + 5), '08:05');
+      expect(WorkHours.fromJson(custom.toJson()), custom);
+      expect(WorkHours.fromJson('junk'), WorkHours.defaults);
+      expect(
+        WorkHours.fromJson({'workStart': 700, 'workEnd': 100}),
+        WorkHours.defaults,
+      );
+      expect(
+        WorkHours.fromJson({'workEnd': 'x'}).workEnd,
+        WorkHours.defaults.workEnd,
+      );
     });
   });
 }

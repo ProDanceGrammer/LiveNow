@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
+import 'work_hours.dart';
 import '../domain/action_urgency.dart';
 import '../domain/all_actions_view_rules.dart';
 import '../domain/dependency_service.dart';
@@ -21,7 +22,11 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 });
 
 final actionServiceProvider = Provider<ActionService>(
-  (ref) => ActionService(ref.watch(databaseProvider)),
+  (ref) => ActionService(
+    ref.watch(databaseProvider),
+    // Read at the moment of a postpone, so a change in Settings applies at once.
+    workHours: () => ref.read(workHoursProvider),
+  ),
 );
 
 final dependencyServiceProvider = Provider<DependencyService>(

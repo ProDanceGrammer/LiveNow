@@ -1,4 +1,5 @@
 import '../data/queries.dart';
+import 'date_range_filter.dart';
 import 'duration_rules.dart';
 
 /// Pure sort / filter / search rules of the All Actions list (the UI in
@@ -104,6 +105,11 @@ class AllActionsFilters {
   final double? minUrgency;
   final double? maxUrgency;
 
+  /// Days the action's START must fall on. An action with no start (not
+  /// scheduled) never matches while this is active; all-day actions count by
+  /// their day.
+  final DateRangeFilter dateRange;
+
   const AllActionsFilters({
     this.nameText = '',
     this.metricIds = const {},
@@ -114,6 +120,7 @@ class AllActionsFilters {
     this.maxMinutes,
     this.minUrgency,
     this.maxUrgency,
+    this.dateRange = const DateRangeFilter(),
   });
 
   bool get usesUrgency => minUrgency != null || maxUrgency != null;
@@ -125,7 +132,8 @@ class AllActionsFilters {
       next.active ||
       minMinutes != null ||
       maxMinutes != null ||
-      usesUrgency;
+      usesUrgency ||
+      dateRange.active;
 
   /// [clearMin] etc. exist because null means "keep" in a plain copyWith.
   AllActionsFilters copyWith({
@@ -142,6 +150,7 @@ class AllActionsFilters {
     bool clearMinUrgency = false,
     double? maxUrgency,
     bool clearMaxUrgency = false,
+    DateRangeFilter? dateRange,
   }) => AllActionsFilters(
     nameText: nameText ?? this.nameText,
     metricIds: metricIds ?? this.metricIds,
@@ -152,6 +161,7 @@ class AllActionsFilters {
     maxMinutes: clearMaxMinutes ? null : (maxMinutes ?? this.maxMinutes),
     minUrgency: clearMinUrgency ? null : (minUrgency ?? this.minUrgency),
     maxUrgency: clearMaxUrgency ? null : (maxUrgency ?? this.maxUrgency),
+    dateRange: dateRange ?? this.dateRange,
   );
 }
 
@@ -289,6 +299,10 @@ List<ActionListItem> arrangeActions({
       final m = _durationMinutes(a);
       if (filters.minMinutes != null && m < filters.minMinutes!) return false;
       if (filters.maxMinutes != null && m > filters.maxMinutes!) return false;
+    }
+    if (filters.dateRange.active) {
+      final start = a.startAt;
+      if (start == null || !filters.dateRange.contains(start)) return false;
     }
     if (filters.usesUrgency) {
       final u = urgency[a.id];

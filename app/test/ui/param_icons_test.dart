@@ -31,7 +31,7 @@ void main() {
         ),
       );
       expect(tester.takeException(), isNull);
-      expect(find.byType(ParamIcon), findsNWidgets(18));
+      expect(find.byType(ParamIcon), findsNWidgets(Param.values.length * 3));
     });
   }
 

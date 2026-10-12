@@ -6,6 +6,7 @@ import '../../domain/all_actions_view_rules.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
+import 'date_range_fields.dart';
 import 'glass.dart';
 import 'metric_picker.dart';
 import 'param_icons.dart';
@@ -338,6 +339,13 @@ class _FilterSectionState extends ConsumerState<_FilterSection> {
                 );
               },
               prefix: const ParamIcon.urgency(size: 16),
+            ),
+            // Actions whose START falls on these days (unscheduled ones are
+            // left out while a date is set).
+            DateRangeFields(
+              keyPrefix: 'filterDate',
+              value: filters.dateRange,
+              onChanged: (r) => _set(_f.copyWith(dateRange: r)),
             ),
             _LinkFilterField(
               label: 'Previous',

@@ -74,7 +74,13 @@ void main() {
       );
       expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
     }
-    await tester.ensureVisible(find.byKey(const ValueKey('settings-theme')));
+    // The list was scrolled to the bottom: the theme switch is built lazily, so
+    // scroll back up to it.
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('settings-theme')),
+      -300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pump();
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsScreen)),

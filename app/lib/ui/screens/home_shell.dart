@@ -14,6 +14,7 @@ import '../providers.dart' show setCalendarDayCount;
 import '../rail_collapsed.dart';
 import '../reminders.dart';
 import '../theme_mode.dart';
+import '../widgets/app_toast.dart' show toastBottomInset;
 import '../widgets/glass.dart';
 import '../sync_providers.dart';
 import '../widgets/instant_rail.dart';
@@ -83,7 +84,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   ];
 
   /// Bottom-navigation labels on a phone (the rail's two-line ones are long).
-  static const _phoneLabels = ['Actions', 'Directions', 'Budget'];
+  static const _phoneLabels = ['Actions', 'Growth Directions', 'Budget'];
 
   static const _titles = [
     null, // Actions: the active sub-view's name
@@ -111,6 +112,11 @@ class _HomeShellState extends ConsumerState<HomeShell>
   @override
   Widget build(BuildContext context) {
     if (usePhoneLayout(context)) return _buildPhone(context);
+    if (toastBottomInset.value != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        toastBottomInset.value = 0;
+      });
+    }
     return Column(
       children: [
         _buildMenuBar(context),
@@ -164,6 +170,13 @@ class _HomeShellState extends ConsumerState<HomeShell>
         _index == 0 &&
         _actionsSub == ActionsSub.calendar &&
         ref.watch(phoneCalendarFullProvider);
+    // Toasts sit above the bottom navigation while it is on screen.
+    final navInset = full ? 0.0 : 80.0;
+    if (toastBottomInset.value != navInset) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        toastBottomInset.value = navInset;
+      });
+    }
     final body = Stack(
       children: [
         Positioned.fill(child: _sections()),
@@ -212,25 +225,38 @@ class _HomeShellState extends ConsumerState<HomeShell>
           : GlassSurface(
               radius: 0,
               shadow: false,
-              child: NavigationBar(
-                key: const ValueKey('phone-nav'),
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-                selectedIndex: _index,
-                onDestinationSelected: (i) => setState(() {
-                  if (i == 0 && _actionsSub == ActionsSub.calendar) {
-                    ref.read(phoneCalendarFullProvider.notifier).state = true;
-                  }
-                  _index = i;
-                  _visited.add(i);
-                }),
-                destinations: [
-                  for (var i = 0; i < _destinations.length; i++)
-                    NavigationDestination(
-                      icon: Icon(_destinations[i].icon),
-                      label: _phoneLabels[i],
+              // A smaller label so "Growth Directions" stays on ONE line (a
+              // wrapped label pushed its icon up out of line with the others).
+              child: NavigationBarTheme(
+                data: NavigationBarTheme.of(context).copyWith(
+                  labelPadding: EdgeInsets.zero,
+                  labelTextStyle: WidgetStatePropertyAll(
+                    Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w500,
                     ),
-                ],
+                  ),
+                ),
+                child: NavigationBar(
+                  key: const ValueKey('phone-nav'),
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  selectedIndex: _index,
+                  onDestinationSelected: (i) => setState(() {
+                    if (i == 0 && _actionsSub == ActionsSub.calendar) {
+                      ref.read(phoneCalendarFullProvider.notifier).state = true;
+                    }
+                    _index = i;
+                    _visited.add(i);
+                  }),
+                  destinations: [
+                    for (var i = 0; i < _destinations.length; i++)
+                      NavigationDestination(
+                        icon: Icon(_destinations[i].icon),
+                        label: _phoneLabels[i],
+                      ),
+                  ],
+                ),
               ),
             ),
     );

@@ -153,6 +153,10 @@ class BudgetService {
     required String currency,
     required double rateToBase,
     double openingBalance = 0,
+
+    /// The picture (base64 PNG): absent = leave as it is, `Value(null)` =
+    /// remove it.
+    Value<String?> icon = const Value.absent(),
   }) async {
     if (!(rateToBase > 0)) {
       throw ArgumentError.value(rateToBase, 'rateToBase', 'must be > 0');
@@ -172,6 +176,7 @@ class BudgetService {
               currency: code,
               rateToBase: Value(rateToBase),
               openingBalance: Value(openingBalance),
+              icon: icon,
               createdAt: now,
               updatedAt: now,
             ),
@@ -187,6 +192,7 @@ class BudgetService {
         currency: Value(code),
         rateToBase: Value(rateToBase),
         openingBalance: Value(openingBalance),
+        icon: icon,
         updatedAt: Value(now),
       ),
     );

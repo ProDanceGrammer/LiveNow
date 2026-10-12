@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/direction_search.dart';
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart' show MetricCycleException;
 import '../../domain/mindmap_layout.dart'
@@ -123,6 +124,11 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   Set<String>? _fitOnly;
   bool _syncScheduled = false;
 
+  /// The search box above the map (toolbar magnifier): typing lists matching
+  /// directions, tapping one selects it and centres the map on it.
+  bool _searchOpen = false;
+  final _searchText = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -134,6 +140,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
     _controller.removeListener(_onTransform);
     _controller.dispose();
     _focus.dispose();
+    _searchText.dispose();
     _version.dispose();
     _rubber.dispose();
     _marquee.dispose();
@@ -302,6 +309,107 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
         Matrix4.diagonal3Values(f, f, 1) *
         Matrix4.translationValues(-c.dx, -c.dy, 0) *
         _controller.value;
+  }
+
+  /// Search result tapped: selects the direction and centres the map on it, at
+  /// least readable (below `mindmapLodScale` a node is only a coloured box).
+  void _focusNode(String id) {
+    final n = _pos[id];
+    if (n == null || _viewport == Size.zero) return;
+    _selectNode(id);
+    final scale = math.max(_scale, 0.8).clamp(_minScale, _maxScale).toDouble();
+    final cx = n.value.dx + mindmapNodeWidth / 2;
+    final cy = n.value.dy + mindmapNodeHeight / 2;
+    _controller.value =
+        Matrix4.translationValues(
+          _viewport.width / 2 - scale * cx,
+          _viewport.height / 2 - scale * cy,
+          0,
+        ) *
+        Matrix4.diagonal3Values(scale, scale, 1);
+    // The keyboard goes away so the map is visible; the list stays for the
+    // next pick.
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searchOpen = !_searchOpen;
+      if (!_searchOpen) _searchText.clear();
+    });
+  }
+
+  Widget _searchPanel(GrowthSnapshot s) {
+    final results = searchDirections(s.metrics, _searchText.text);
+    final glass = context.glass;
+    final height = MediaQuery.sizeOf(context).height;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: GlassSurface(
+        radius: 16,
+        shadow: false,
+        blurWindow: false,
+        child: Material(
+          type: MaterialType.transparency,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
+                child: TextField(
+                  key: const ValueKey('mindmap-search-field'),
+                  controller: _searchText,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Find a direction',
+                    prefixIcon: const Icon(Icons.search),
+                    isDense: true,
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Close search',
+                      onPressed: _toggleSearch,
+                    ),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              if (_searchText.text.trim().isNotEmpty)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: (height * 0.28).clamp(120.0, 260.0),
+                  ),
+                  child: results.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Text(
+                            'No direction matches.',
+                            key: const ValueKey('mindmap-search-empty'),
+                            style: TextStyle(color: glass.textSecondary),
+                          ),
+                        )
+                      : ListView(
+                          shrinkWrap: true,
+                          children: [
+                            for (final m in results)
+                              ListTile(
+                                key: ValueKey('mindmap-result-${m.id}'),
+                                dense: true,
+                                selected: _selected.contains(m.id),
+                                title: Text(
+                                  metricLabel(m.name, m.icon),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                onTap: () => _focusNode(m.id),
+                              ),
+                          ],
+                        ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _fitAll({Set<String>? only}) {
@@ -734,6 +842,11 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         button(
+          _searchOpen ? Icons.search_off : Icons.search,
+          _searchOpen ? 'Close search' : 'Find a direction',
+          _toggleSearch,
+        ),
+        button(
           Icons.auto_awesome_mosaic_outlined,
           'Auto layout',
           () => _autoLayout(s),
@@ -840,6 +953,16 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
                             ),
                           ),
                           IconButton(
+                            key: const ValueKey('mindmap-search-toggle'),
+                            icon: Icon(
+                              _searchOpen ? Icons.search_off : Icons.search,
+                            ),
+                            tooltip: _searchOpen
+                                ? 'Close search'
+                                : 'Find a direction',
+                            onPressed: _toggleSearch,
+                          ),
+                          IconButton(
                             icon: const Icon(Icons.zoom_out),
                             tooltip: 'Zoom out',
                             onPressed: () => _zoomBy(1 / 1.25),
@@ -859,6 +982,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
               ),
             ),
           ),
+          if (_searchOpen) _searchPanel(s),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),

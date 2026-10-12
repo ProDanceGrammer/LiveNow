@@ -10,6 +10,7 @@ import '../data/database.dart';
 import 'duration_rules.dart';
 import 'notes_plain_text.dart';
 import 'postpone_rules.dart';
+import 'work_hours.dart';
 import 'sequence_naming.dart';
 
 /// A full copy of one action's row and its entire occurrence history, taken
@@ -142,7 +143,12 @@ const Duration _sameNameWindow = Duration(days: 30);
 class ActionService {
   final AppDatabase db;
 
-  ActionService(this.db);
+  /// The current working hours (postpone "after work" / "morning"); defaults
+  /// when not given.
+  final WorkHours Function() _workHours;
+
+  ActionService(this.db, {WorkHours Function()? workHours})
+    : _workHours = workHours ?? (() => WorkHours.defaults);
 
   Future<String> createAction({
     required String name,
@@ -1045,6 +1051,7 @@ class ActionService {
       rule,
       current,
       nowUtc: DateTime.now().toUtc(),
+      hours: _workHours(),
     );
     final nowText = dateTimeToDb(DateTime.now())!;
 

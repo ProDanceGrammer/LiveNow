@@ -28,6 +28,7 @@ import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
 import '../../domain/postpone_rules.dart';
 import '../calendar_fullscreen.dart';
+import '../calendar_allday.dart';
 import '../calendar_icons.dart';
 import '../calendar_selection.dart';
 import '../edit_action.dart';
@@ -62,10 +63,6 @@ const double _kToolbarHeight = _kToolTile + _kToolHit + 2 * _kToolPad;
 const double _kMinHourHeight = 12;
 
 const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _monthNames = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
 
 /// Build/layout counters so a test can prove that selection, hover, drag and
 /// clock ticks only rebuild what they must.
@@ -216,6 +213,10 @@ class _CrossDrag {
   /// flipping it rebuilds no event block.
   final scrolling = ValueNotifier<bool>(false);
 
+  /// True while the grid has a block drag (move/resize) in progress; the
+  /// touch swipe that turns pages stands down then.
+  bool gridDragging = false;
+
   /// On the strip's root box, to hit-test it in global coordinates.
   final stripKey = GlobalKey(debugLabel: 'all-day strip');
 
@@ -325,54 +326,90 @@ class CalendarView extends ConsumerWidget {
     final running =
         ref.watch(runningOccurrencesProvider).value ?? const <String>{};
 
+    final phone = usePhoneLayout(context);
+    final allDay = ref.watch(calendarAllDayProvider);
+    // Turned upright with 4+ days showing: a phone offers 1-3 there.
+    if (phone &&
+        dayCount > 3 &&
+        MediaQuery.orientationOf(context) == Orientation.portrait) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted && ref.read(calendarDayCountProvider) > 3) {
+          setCalendarDayCount(ref, 3);
+        }
+      });
+    }
+
     return _CalendarInput(
       child: Column(
         children: [
-          _Header(start: start, dayCount: dayCount),
+          if (!phone) const _Header(),
           Expanded(
             // One large glass panel under the day header, the all-day strip
             // and the grid, so the background clouds show around it. No blur
             // window: it is too big for that to pay off.
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              // A phone gives the panel almost the whole screen.
+              padding: phone
+                  ? const EdgeInsets.fromLTRB(4, 0, 4, 4)
+                  : const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: GlassSurface(
                 radius: GlassTheme.radiusPanel,
                 blurWindow: false,
-                child: Padding(
-                  // Keeps the grid lines out of the rounded corners.
-                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
-                  child: items == null
-                      ? const Center(child: CircularProgressIndicator())
-                      : LayoutBuilder(
-                          builder: (context, box) {
-                            final dayW = (box.maxWidth - _kGutter) / dayCount;
-                            return Column(
-                              children: [
-                                _DayHeaderRow(
-                                  start: start,
-                                  dayCount: dayCount,
-                                  dayWidth: dayW,
-                                ),
-                                _AllDayStrip(
-                                  start: start,
-                                  dayCount: dayCount,
-                                  dayWidth: dayW,
-                                  items: items,
-                                  running: running,
-                                ),
-                                Expanded(
-                                  child: _TimeGrid(
-                                    start: start,
-                                    dayCount: dayCount,
-                                    dayWidth: dayW,
-                                    items: items,
-                                    running: running,
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
+                child: Stack(
+                  children: [
+                    Padding(
+                      // Keeps the grid lines out of the rounded corners.
+                      padding: phone
+                          ? const EdgeInsets.fromLTRB(4, 2, 4, 8)
+                          : const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                      child: items == null
+                          ? const Center(child: CircularProgressIndicator())
+                          : LayoutBuilder(
+                              builder: (context, box) {
+                                final dayW =
+                                    (box.maxWidth - _kGutter) / dayCount;
+                                final content = Column(
+                                  children: [
+                                    _DayHeaderRow(
+                                      start: start,
+                                      dayCount: dayCount,
+                                      dayWidth: dayW,
+                                    ),
+                                    if (allDay)
+                                      _AllDayStrip(
+                                        start: start,
+                                        dayCount: dayCount,
+                                        dayWidth: dayW,
+                                        items: items,
+                                        running: running,
+                                      ),
+                                    Expanded(
+                                      child: _TimeGrid(
+                                        start: start,
+                                        dayCount: dayCount,
+                                        dayWidth: dayW,
+                                        items: items,
+                                        running: running,
+                                      ),
+                                    ),
+                                  ],
+                                );
+                                // A finger swipe turns the pages (phone).
+                                return phone
+                                    ? _SwipeDays(child: content)
+                                    : content;
+                              },
+                            ),
+                    ),
+                    if (phone)
+                      const Positioned(
+                        top: 4,
+                        right: 2,
+                        width: 34,
+                        height: 34,
+                        child: _CalendarMenu(),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -381,6 +418,88 @@ class CalendarView extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Touch swipe over the calendar: a clear horizontal drag turns the page like
+/// the Windows ‹ › buttons (finger left = next, right = previous). Raw
+/// pointers, no gesture recognizer, so a vertical scroll, a block's
+/// long-press-drag and the pinch (two fingers cancel the swipe) behave as
+/// before. The direction locks after a short slop, so a mostly-vertical scroll
+/// that wobbles sideways never changes the day.
+class _SwipeDays extends ConsumerStatefulWidget {
+  final Widget child;
+  const _SwipeDays({required this.child});
+
+  @override
+  ConsumerState<_SwipeDays> createState() => _SwipeDaysState();
+}
+
+class _SwipeDaysState extends ConsumerState<_SwipeDays> {
+  static const _slop = 24.0;
+  static const _commit = 64.0;
+
+  final _down = <int, Offset>{};
+  int? _tracked;
+  Offset _delta = Offset.zero;
+  bool _locked = false; // horizontal swipe confirmed
+  bool _dead = false; // vertical scroll or multi-touch: ignore until up
+
+  void _reset() {
+    _tracked = null;
+    _delta = Offset.zero;
+    _locked = false;
+    _dead = false;
+  }
+
+  void _onDown(PointerDownEvent e) {
+    if (e.kind != PointerDeviceKind.touch) return;
+    _down[e.pointer] = e.position;
+    if (_down.length > 1) {
+      _dead = true; // pinch or a second finger
+    } else {
+      _reset();
+      _tracked = e.pointer;
+    }
+  }
+
+  void _onMove(PointerMoveEvent e) {
+    if (e.pointer != _tracked || _dead) return;
+    final cross = ref.read(_crossDragProvider);
+    if (cross.gridDragging || cross.chip.value != null) {
+      _dead = true;
+      return;
+    }
+    _delta += e.delta;
+    if (!_locked && _delta.distance > _slop) {
+      if (_delta.dx.abs() > _delta.dy.abs() * 1.5) {
+        _locked = true;
+      } else {
+        _dead = true;
+      }
+    }
+  }
+
+  void _onUp(PointerEvent e) {
+    final wasTracked = e.pointer == _tracked;
+    _down.remove(e.pointer);
+    if (!wasTracked) return;
+    final swipe = _locked && !_dead && _delta.dx.abs() >= _commit;
+    final dx = _delta.dx;
+    _reset();
+    if (e is PointerUpEvent && swipe) {
+      shiftCalendarRange(ref, dx < 0 ? 1 : -1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Listener(
+    behavior: HitTestBehavior.translucent,
+    onPointerDown: _onDown,
+    onPointerMove: _onMove,
+    onPointerUp: _onUp,
+    onPointerCancel: _onUp,
+    child: widget.child,
+  );
 }
 
 /// Keyboard and wheel navigation for the whole calendar: Left/Right arrows
@@ -403,6 +522,7 @@ class _CalendarInput extends ConsumerStatefulWidget {
 final calendarFocusRequestProvider = StateProvider<int>((ref) => 0);
 
 const _digitKeys = [
+  LogicalKeyboardKey.digit1,
   LogicalKeyboardKey.digit2,
   LogicalKeyboardKey.digit3,
   LogicalKeyboardKey.digit4,
@@ -411,6 +531,7 @@ const _digitKeys = [
   LogicalKeyboardKey.digit7,
 ];
 const _numpadKeys = [
+  LogicalKeyboardKey.numpad1,
   LogicalKeyboardKey.numpad2,
   LogicalKeyboardKey.numpad3,
   LogicalKeyboardKey.numpad4,
@@ -487,11 +608,11 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
               shiftCalendarDays(ref, -1),
           const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
               shiftCalendarDays(ref, 1),
-          // 2..7 (also on the numpad) set the number of day columns.
-          for (var n = 2; n <= 7; n++) ...{
-            SingleActivator(_digitKeys[n - 2]): () =>
+          // 1..7 (also on the numpad) set the number of day columns.
+          for (var n = 1; n <= 7; n++) ...{
+            SingleActivator(_digitKeys[n - 1]): () =>
                 setCalendarDayCount(ref, n),
-            SingleActivator(_numpadKeys[n - 2]): () =>
+            SingleActivator(_numpadKeys[n - 1]): () =>
                 setCalendarDayCount(ref, n),
           },
           const SingleActivator(LogicalKeyboardKey.delete): _deleteSelected,
@@ -531,33 +652,14 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
 // ---- header ---------------------------------------------------------------
 
 class _Header extends ConsumerWidget {
-  final DateTime start;
-  final int dayCount;
-
-  const _Header({required this.start, required this.dayCount});
-
-  String _label() {
-    final a = _local(start);
-    final b = _local(calendarAddDays(start, dayCount - 1));
-    final left = '${_monthNames[a.month - 1]} ${a.day}';
-    final right = a.month == b.month
-        ? '${b.day}'
-        : '${_monthNames[b.month - 1]} ${b.day}';
-    return '$left – $right, ${b.year}';
-  }
+  const _Header();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final g = context.glass;
     final scheme = theme.colorScheme;
-    final phone = usePhoneLayout(context);
-    // A phone held upright shows 1-3 days, turned sideways 1-7.
-    final maxDays =
-        !phone || MediaQuery.orientationOf(context) == Orientation.landscape
-        ? 7
-        : 3;
-    final fullScreen = ref.watch(phoneCalendarFullProvider);
+    final dayCount = ref.watch(calendarDayCountProvider);
     // Each group of controls sits in a soft glass pill.
     Widget pill(Widget child) => GlassSurface(
       radius: 20,
@@ -568,154 +670,206 @@ class _Header extends ConsumerWidget {
         child: child,
       ),
     );
+    Widget toggle(
+      Key key,
+      bool on,
+      IconData icon,
+      String showTip,
+      String hideTip,
+      VoidCallback onTap,
+    ) => pill(
+      IconButton(
+        key: key,
+        isSelected: on,
+        icon: Icon(icon),
+        tooltip: on ? hideTip : showTip,
+        style: IconButton.styleFrom(
+          backgroundColor: on ? scheme.primaryContainer : null,
+          foregroundColor: on ? scheme.onPrimaryContainer : null,
+        ),
+        onPressed: onTap,
+      ),
+    );
+    final iconsOn = ref.watch(calendarIconsProvider);
+    final allDayOn = ref.watch(calendarAllDayProvider);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: _flow(phone, [
-        if (phone)
+      child: Row(
+        children: [
           pill(
-            IconButton(
-              key: const ValueKey('calendar-full-toggle'),
-              visualDensity: VisualDensity.compact,
-              icon: Icon(fullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
-              tooltip: fullScreen ? 'Show menus' : 'Full screen',
-              onPressed: () =>
-                  ref.read(phoneCalendarFullProvider.notifier).state =
-                      !fullScreen,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  tooltip: 'Previous',
+                  onPressed: () => shiftCalendarRange(ref, -1),
+                ),
+                OutlinedButton(
+                  key: const ValueKey('calendar-now'),
+                  onPressed: () => goToCalendarToday(ref),
+                  child: const Text('Now'),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  tooltip: 'Next',
+                  onPressed: () => shiftCalendarRange(ref, 1),
+                ),
+              ],
             ),
           ),
-        pill(
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                visualDensity: phone ? VisualDensity.compact : null,
-                icon: const Icon(Icons.chevron_left),
-                tooltip: 'Previous',
-                onPressed: () => shiftCalendarRange(ref, -1),
-              ),
-              OutlinedButton(
-                onPressed: () => goToCalendarToday(ref),
-                child: const Text('Today'),
-              ),
-              IconButton(
-                visualDensity: phone ? VisualDensity.compact : null,
-                icon: const Icon(Icons.chevron_right),
-                tooltip: 'Next',
-                onPressed: () => shiftCalendarRange(ref, 1),
-              ),
-            ],
+          const Spacer(),
+          // Zoom: how many hours of a day are visible at once.
+          pill(
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.zoom_out),
+                  tooltip: 'Show more hours (Ctrl+−)',
+                  onPressed: () => zoomCalendar(ref, -1),
+                ),
+                Text(
+                  '${ref.watch(calendarVisibleHoursProvider)} h',
+                  key: const ValueKey('zoom-label'),
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: g.textSecondary,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.zoom_in),
+                  tooltip: 'Show fewer hours (Ctrl++)',
+                  onPressed: () => zoomCalendar(ref, 1),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          _label(),
-          style: theme.textTheme.titleMedium?.copyWith(color: g.textPrimary),
-        ),
-        const Spacer(),
-        // Zoom: how many hours of a day are visible at once.
-        pill(
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                visualDensity: phone ? VisualDensity.compact : null,
-                icon: const Icon(Icons.zoom_out),
-                tooltip: 'Show more hours (Ctrl+−)',
-                onPressed: () => zoomCalendar(ref, -1),
-              ),
-              Text(
-                '${ref.watch(calendarVisibleHoursProvider)} h',
-                key: const ValueKey('zoom-label'),
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: g.textSecondary,
+          const SizedBox(width: 12),
+          // The same icon as the 'Growth directions' item in the rail.
+          toggle(
+            const ValueKey('calendar-icons-toggle'),
+            iconsOn,
+            Icons.insights,
+            'Show growth direction icons',
+            'Hide growth direction icons',
+            () => ref.read(calendarIconsProvider.notifier).toggle(),
+          ),
+          const SizedBox(width: 12),
+          toggle(
+            const ValueKey('calendar-allday-toggle'),
+            allDayOn,
+            Icons.view_day_outlined,
+            'Show all-day actions',
+            'Hide all-day actions',
+            () => ref.read(calendarAllDayProvider.notifier).toggle(),
+          ),
+          const SizedBox(width: 12),
+          pill(
+            SegmentedButton<int>(
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                side: const WidgetStatePropertyAll(BorderSide.none),
+                backgroundColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? scheme.primaryContainer
+                      : Colors.transparent,
+                ),
+                foregroundColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? scheme.onPrimaryContainer
+                      : g.textSecondary,
                 ),
               ),
-              IconButton(
-                visualDensity: phone ? VisualDensity.compact : null,
-                icon: const Icon(Icons.zoom_in),
-                tooltip: 'Show fewer hours (Ctrl++)',
-                onPressed: () => zoomCalendar(ref, 1),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        // The direction-icons switch has no room on a phone (default: off).
-        if (!phone)
-          pill(
-            Builder(
-              builder: (context) {
-                final on = ref.watch(calendarIconsProvider);
-                return IconButton(
-                  key: const ValueKey('calendar-icons-toggle'),
-                  isSelected: on,
-                  // The same icon as the 'Growth directions' item in the rail.
-                  icon: const Icon(Icons.insights),
-                  tooltip: on
-                      ? 'Hide growth direction icons'
-                      : 'Show growth direction icons',
-                  style: IconButton.styleFrom(
-                    backgroundColor: on ? scheme.primaryContainer : null,
-                    foregroundColor: on ? scheme.onPrimaryContainer : null,
+              segments: [
+                for (var n = 1; n <= 7; n++)
+                  ButtonSegment(
+                    value: n,
+                    label: Text('$n'),
+                    tooltip: n == 1 ? '1 day' : '$n days',
                   ),
-                  onPressed: () =>
-                      ref.read(calendarIconsProvider.notifier).toggle(),
-                );
-              },
+              ],
+              selected: {dayCount},
+              onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
             ),
           ),
-        const SizedBox(width: 12),
-        pill(
-          SegmentedButton<int>(
-            showSelectedIcon: false,
-            style: ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              // Tighter on a phone so the day selector fits beside the zoom.
-              padding: phone
-                  ? const WidgetStatePropertyAll(
-                      EdgeInsets.symmetric(horizontal: 4),
-                    )
-                  : null,
-              minimumSize: phone
-                  ? const WidgetStatePropertyAll(Size(34, 34))
-                  : null,
-              side: const WidgetStatePropertyAll(BorderSide.none),
-              backgroundColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.selected)
-                    ? scheme.primaryContainer
-                    : Colors.transparent,
-              ),
-              foregroundColor: WidgetStateProperty.resolveWith(
-                (states) => states.contains(WidgetState.selected)
-                    ? scheme.onPrimaryContainer
-                    : g.textSecondary,
-              ),
-            ),
-            segments: [
-              for (var n = phone ? 1 : 2; n <= maxDays; n++)
-                ButtonSegment(value: n, label: Text('$n'), tooltip: '$n days'),
-            ],
-            selected: {dayCount},
-            onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
-          ),
-        ),
-      ]),
+        ],
+      ),
     );
   }
+}
 
-  /// One row on a desktop; on a phone the groups wrap onto as many rows as the
-  /// width needs (the spacers between them are dropped).
-  static Widget _flow(bool phone, List<Widget> kids) => phone
-      ? Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            for (final k in kids)
-              if (k is! Spacer && k is! SizedBox) k,
-          ],
-        )
-      : Row(children: kids);
+/// Phone: the calendar's only control, a small three-dots menu floating over
+/// the panel's top-right corner (the calendar itself fills the screen): Now,
+/// the day count (1-3 upright, 1-7 sideways), all-day on/off, direction icons
+/// and leaving full screen. Zoom is by pinch, days by swiping.
+class _CalendarMenu extends ConsumerWidget {
+  const _CalendarMenu();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dayCount = ref.watch(calendarDayCountProvider);
+    final maxDays = MediaQuery.orientationOf(context) == Orientation.landscape
+        ? 7
+        : 3;
+    final iconsOn = ref.watch(calendarIconsProvider);
+    final allDayOn = ref.watch(calendarAllDayProvider);
+    final full = ref.watch(phoneCalendarFullProvider);
+    return PopupMenuButton<String>(
+      key: const ValueKey('calendar-menu'),
+      tooltip: 'Calendar options',
+      icon: const Icon(Icons.more_vert),
+      padding: EdgeInsets.zero,
+      iconSize: 22,
+      onSelected: (v) {
+        if (v == 'now') {
+          goToCalendarToday(ref);
+        } else if (v.startsWith('days:')) {
+          setCalendarDayCount(ref, int.parse(v.substring(5)));
+        } else if (v == 'allday') {
+          ref.read(calendarAllDayProvider.notifier).toggle();
+        } else if (v == 'icons') {
+          ref.read(calendarIconsProvider.notifier).toggle();
+        } else if (v == 'full') {
+          ref.read(phoneCalendarFullProvider.notifier).state = !full;
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+          key: ValueKey('calendar-menu-now'),
+          value: 'now',
+          child: Text('Now'),
+        ),
+        const PopupMenuDivider(),
+        for (var n = 1; n <= maxDays; n++)
+          CheckedPopupMenuItem(
+            key: ValueKey('calendar-menu-days-$n'),
+            value: 'days:$n',
+            checked: n == dayCount,
+            child: Text(n == 1 ? '1 day' : '$n days'),
+          ),
+        const PopupMenuDivider(),
+        CheckedPopupMenuItem(
+          key: const ValueKey('calendar-menu-allday'),
+          value: 'allday',
+          checked: allDayOn,
+          child: const Text('All-day actions'),
+        ),
+        CheckedPopupMenuItem(
+          key: const ValueKey('calendar-menu-icons'),
+          value: 'icons',
+          checked: iconsOn,
+          child: const Text('Growth direction icons'),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          key: const ValueKey('calendar-menu-full'),
+          value: 'full',
+          child: Text(full ? 'Show app menus' : 'Full screen'),
+        ),
+      ],
+    );
+  }
 }
 
 class _DayHeaderRow extends StatelessWidget {
@@ -1568,6 +1722,9 @@ class _Drag {
   final Offset origin;
   final Offset current;
 
+  /// The grid's scroll offset when the drag began (see [dragMinuteDelta]).
+  final double originScroll;
+
   const _Drag({
     required this.grabbed,
     required this.grabbedColumn,
@@ -1579,6 +1736,7 @@ class _Drag {
     required this.originRangeStart,
     required this.origin,
     required this.current,
+    required this.originScroll,
   });
 
   _Drag at(Offset p) => _Drag(
@@ -1592,6 +1750,7 @@ class _Drag {
     originRangeStart: originRangeStart,
     origin: origin,
     current: p,
+    originScroll: originScroll,
   );
 }
 
@@ -1693,6 +1852,12 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// old one): remembers which time sits at the focal point, then after the
   /// next layout scrolls so the same time is still there.
   void _anchorZoom() {
+    // A zoom change mid-drag alters px-per-minute under the drag's snapshot:
+    // drop the drag instead of moving the block to a wrong time.
+    if (_drag != null && !_committing) {
+      _unroutePointer();
+      _dragCancel();
+    }
     final controller = _scrollController;
     if (controller == null || !controller.hasClients) return;
     final focal = (_zoomFocal ?? _viewportHeight / 2).clamp(
@@ -1910,7 +2075,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       originRangeStart: widget.start,
       origin: pos,
       current: pos,
+      originScroll: _scrollOffsetNow,
     );
+    _cross.gridDragging = true;
     _routePointer();
   }
 
@@ -2009,6 +2176,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   }
 
   void _clearDrag() {
+    _cross.gridDragging = false;
     _cross.stripTarget.value = null;
     _dragN.value = null;
     _draggedIds.value = null;
@@ -2026,9 +2194,14 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final start = item.startAt!;
     final durMin = _effectiveEnd(item).difference(start).inMinutes;
     final startMin = minutesOfDay(start);
-    final dy = d.current.dy - d.origin.dy;
     final dx = d.current.dx - d.origin.dx;
-    var minutes = snapMinutes(dy, pxPerMinute: _pxPerMinute);
+    // Pointer travel + the grid's own scroll since the drag began: a wheel
+    // turning mid-drag must carry the block along.
+    var minutes = dragMinuteDelta(
+      d.current.dy - d.origin.dy,
+      _scrollOffsetNow - d.originScroll,
+      pxPerMinute: _pxPerMinute,
+    );
 
     final scrolled = dayIndexOf(widget.start, d.originRangeStart);
     final column = (d.grabbedColumn + (dx / widget.dayWidth).round()).clamp(
@@ -2457,6 +2630,13 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         _settle = null;
         _cross.scrolling.value = false;
       });
+    }
+    // A drag in progress follows the content: re-derive its preview from the
+    // last pointer position and the new offset (the pointer itself did not
+    // move, so no pointer event will do it).
+    final d = _drag;
+    if (d != null && !_committing && last != null && last != offset) {
+      _dragN.value = d.at(d.current);
     }
     if (_updateWindow()) setState(() {});
   }

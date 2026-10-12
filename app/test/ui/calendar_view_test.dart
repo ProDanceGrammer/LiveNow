@@ -1394,7 +1394,7 @@ void main() {
       position.jumpTo(0);
       await tester.pump();
 
-      await tester.tap(find.text('Today'));
+      await tester.tap(find.text('Now'));
       await tester.pump();
       await tester.pump();
       await settle(tester);

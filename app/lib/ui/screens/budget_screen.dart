@@ -1,15 +1,20 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/budget_rules.dart';
+import '../../domain/budget_tx_view_rules.dart';
 import '../../domain/budget_service.dart';
 import '../../domain/name_sort.dart';
 import '../budget_providers.dart';
 import '../data_imports.dart';
 import '../layout.dart';
+import '../undo.dart' show offerUndo, undoHistoryProvider;
 import '../open_entity.dart';
+import '../widgets/account_icon.dart';
+import '../widgets/budget_tx_options_panel.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/budget_dialogs.dart';
 import '../widgets/budget_format.dart';
@@ -109,7 +114,37 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
                           : null,
                       splashFactory: NoSplash.splashFactory,
                       tabs: [
-                        for (final t in BudgetTab.values) Tab(text: t.label),
+                        for (final t in BudgetTab.values)
+                          Tab(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                switch (t) {
+                                  BudgetTab.overview => const Icon(
+                                    Icons.pie_chart_outline,
+                                    size: 18,
+                                  ),
+                                  BudgetTab.categories => const ParamIcon(
+                                    Param.categories,
+                                    size: 18,
+                                    tooltip: false,
+                                  ),
+                                  BudgetTab.transactions => const ParamIcon(
+                                    Param.transactions,
+                                    size: 18,
+                                    tooltip: false,
+                                  ),
+                                  BudgetTab.accounts => const ParamIcon(
+                                    Param.accounts,
+                                    size: 18,
+                                    tooltip: false,
+                                  ),
+                                },
+                                const SizedBox(width: 6),
+                                Text(t.label),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -219,12 +254,14 @@ Future<void> _deleteCategory(
 ) async {
   final overlay = rootOverlayOf(context);
   final service = ref.read(budgetServiceProvider);
+  final history = ref.read(undoHistoryProvider.notifier);
   final undo = await service.deleteCategory(c.id);
   if (undo == null) return;
-  showUndoToast(
+  offerUndo(
     overlay,
+    history,
     'Deleted "${c.name}"',
-    onUndo: () => service.undoDeleteCategory(undo),
+    () => service.undoDeleteCategory(undo),
   );
 }
 
@@ -235,12 +272,14 @@ Future<void> _deleteAccount(
 ) async {
   final overlay = rootOverlayOf(context);
   final service = ref.read(budgetServiceProvider);
+  final history = ref.read(undoHistoryProvider.notifier);
   final undo = await service.deleteAccount(a.id);
   if (undo == null) return;
-  showUndoToast(
+  offerUndo(
     overlay,
+    history,
     'Deleted "${a.name}"',
-    onUndo: () => service.undoDeleteAccount(undo),
+    () => service.undoDeleteAccount(undo),
   );
 }
 
@@ -251,12 +290,14 @@ Future<void> _deleteTransaction(
 ) async {
   final overlay = rootOverlayOf(context);
   final service = ref.read(budgetServiceProvider);
+  final history = ref.read(undoHistoryProvider.notifier);
   final row = await service.deleteTransaction(t.id);
   if (row == null) return;
-  showUndoToast(
+  offerUndo(
     overlay,
+    history,
     'Deleted transaction',
-    onUndo: () => service.undoDeleteTransaction(row),
+    () => service.undoDeleteTransaction(row),
   );
 }
 
@@ -341,17 +382,20 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
       final boards = [
         _BoardColumn(
           columnKey: 'over',
-          title: 'Actual above plan',
+          semanticTitle: 'Actual above plan',
+          title: const [Param.actual, ' above ', Param.plan],
           entries: over,
         ),
         _BoardColumn(
           columnKey: 'under',
-          title: 'Plan above actual',
+          semanticTitle: 'Plan above actual',
+          title: const [Param.plan, ' above ', Param.actual],
           entries: under,
         ),
         _BoardColumn(
           columnKey: 'within',
-          title: 'Close to plan (±${budgetNumber(s.tolerance)})',
+          semanticTitle: 'Close to plan (±${budgetNumber(s.tolerance)})',
+          title: ['Close to ', Param.plan, ' (±${budgetNumber(s.tolerance)})'],
           entries: within,
         ),
       ];
@@ -405,21 +449,24 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
               children: [
                 _Figure(
                   key: const ValueKey('budget-fact-total'),
+                  icon: Param.actual,
                   label:
-                      'Fact · ${budgetDate(period.factStart)} – ${budgetDate(period.asOf)}',
+                      '${budgetDate(period.factStart)} – ${budgetDate(period.asOf)}',
                   value: snap.factTotal,
                   currency: cur,
                 ),
                 _Figure(
                   key: const ValueKey('budget-plan-total'),
+                  icon: Param.plan,
                   label:
-                      'Plan · ${budgetDate(period.asOf)} – ${budgetDate(period.planEnd)}',
+                      '${budgetDate(period.asOf)} – ${budgetDate(period.planEnd)}',
                   value: snap.planTotal,
                   currency: cur,
                 ),
                 _Figure(
                   key: const ValueKey('budget-position'),
-                  label: 'Position (fact + plan)',
+                  label: 'Position',
+                  trailingIcons: const [Param.actual, Param.plan],
                   value: snap.position,
                   currency: cur,
                   strong: true,
@@ -485,10 +532,16 @@ class _Figure extends StatelessWidget {
     required this.label,
     required this.value,
     required this.currency,
+    this.icon,
+    this.trailingIcons = const [],
     this.strong = false,
   });
 
+  /// The words (a date range, "Position"); a Plan/Fact [icon] replaces the
+  /// word that used to lead it, [trailingIcons] sit after it.
   final String label;
+  final Param? icon;
+  final List<Param> trailingIcons;
   final double value;
   final String currency;
   final bool strong;
@@ -500,7 +553,20 @@ class _Figure extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: theme.textTheme.bodySmall),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              ParamIcon(icon!, size: 18, tapToShow: true),
+              const SizedBox(width: 4),
+            ],
+            Text(label, style: theme.textTheme.bodySmall),
+            for (final p in trailingIcons) ...[
+              const SizedBox(width: 4),
+              ParamIcon(p, size: 16, tapToShow: true),
+            ],
+          ],
+        ),
         const SizedBox(height: 2),
         Text(
           '${budgetMoney(value, sign: true)} $currency',
@@ -519,11 +585,18 @@ class _BoardColumn extends ConsumerWidget {
   const _BoardColumn({
     required this.columnKey,
     required this.title,
+    required this.semanticTitle,
     required this.entries,
   });
 
   final String columnKey;
-  final String title;
+
+  /// The title as text pieces and [Param] icons, e.g. `[plan, ' above ',
+  /// actual]`: the words Plan/Fact are icons everywhere.
+  final List<Object> title;
+
+  /// The same title as plain words (accessibility, tests).
+  final String semanticTitle;
   final List<_BoardEntry> entries;
 
   @override
@@ -550,10 +623,37 @@ class _BoardColumn extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                Semantics(
+                  label: semanticTitle,
+                  child: ExcludeSemantics(
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        for (final part in title)
+                          part is Param
+                              ? Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 2,
+                                  ),
+                                  child: ParamIcon(
+                                    part,
+                                    size: 18,
+                                    tooltip: false,
+                                    color: DefaultTextStyle.of(
+                                      context,
+                                    ).style.color,
+                                  ),
+                                )
+                              : Text(
+                                  part as String,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 8),
                 if (entries.isEmpty)
@@ -561,33 +661,57 @@ class _BoardColumn extends ConsumerWidget {
                     padding: EdgeInsets.all(8),
                     child: Text('—', textAlign: TextAlign.center),
                   ),
-                for (final e in entries)
-                  InkWell(
-                    key: ValueKey('budget-board-${e.category.id}'),
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => BudgetCategoryDialog.show(
-                      context,
-                      existing: e.category,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(e.category.name),
-                          Text(
-                            'Fact ${budgetMoney(e.figures.factBase)} · '
-                            'Plan ${budgetMoney(e.figures.planBase)}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                for (final e in entries) _BoardEntryBlock(entry: e),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One category of a board as its own rounded glass block: the name, then the
+/// plan and the fact (icons, not words) with their amounts.
+class _BoardEntryBlock extends StatelessWidget {
+  const _BoardEntryBlock({required this.entry});
+
+  final _BoardEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    final small = Theme.of(context).textTheme.bodySmall;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: GlassSurface(
+        radius: 14,
+        shadow: false,
+        blurWindow: false,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            key: ValueKey('budget-board-${e.category.id}'),
+            borderRadius: BorderRadius.circular(14),
+            onTap: () =>
+                BudgetCategoryDialog.show(context, existing: e.category),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(e.category.name),
+                  const SizedBox(height: 2),
+                  Wrap(
+                    spacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ParamValue.plan(budgetMoney(e.figures.planBase), style: small),
+                      ParamValue.actual(budgetMoney(e.figures.factBase), style: small),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -611,9 +735,21 @@ Color _boardRed(BuildContext context) =>
 // ---- categories -------------------------------------------------------------
 
 class _Col {
-  const _Col(this.label, this.width, {this.manual = false, this.hint});
+  const _Col(
+    this.label,
+    this.width, {
+    this.manual = false,
+    this.hint,
+    this.icon,
+    this.suffix,
+  });
   final String label;
   final double width;
+
+  /// A Plan/Fact icon replaces the word in the header; [suffix] is the small
+  /// text after it ('base').
+  final Param? icon;
+  final String? suffix;
 
   /// Entered by hand (vs calculated).
   final bool manual;
@@ -628,10 +764,32 @@ const _cols = <_Col>[
   _Col('Every', 78, manual: true, hint: 'Frequency in months'),
   _Col('Ends', 88, manual: true),
   _Col('Monthly', 94, hint: 'Planned cost per month (counting currency)'),
-  _Col('Plan', 90, hint: 'Planned cost for the period (counting currency)'),
-  _Col('Fact', 90, hint: 'Actual cost, last period (counting currency)'),
-  _Col('Plan (base)', 118, hint: 'Plan in the main currency, income +'),
-  _Col('Fact (base)', 118, hint: 'Fact in the main currency, income +'),
+  _Col(
+    'Plan',
+    90,
+    icon: Param.plan,
+    hint: 'Plan: planned cost for the period (counting currency)',
+  ),
+  _Col(
+    'Fact',
+    90,
+    icon: Param.actual,
+    hint: 'Fact: actual cost, last period (counting currency)',
+  ),
+  _Col(
+    'Plan (base)',
+    118,
+    icon: Param.plan,
+    suffix: 'base',
+    hint: 'Plan in the main currency, income +',
+  ),
+  _Col(
+    'Fact (base)',
+    118,
+    icon: Param.actual,
+    suffix: 'base',
+    hint: 'Fact in the main currency, income +',
+  ),
   _Col('Urgency', 92, hint: 'Urgency of the next planned payment’s action'),
 ];
 const _actionsWidth = 96.0;
@@ -777,11 +935,35 @@ class _HeaderRow extends StatelessWidget {
           Icon(c.manual ? Icons.edit_outlined : Icons.functions, size: 12),
           const SizedBox(width: 3),
           Expanded(
-            child: Text(
-              c.label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-            ),
+            child: c.icon == null
+                ? Text(
+                    c.label,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  )
+                : Semantics(
+                    label: c.label,
+                    child: ExcludeSemantics(
+                      child: Row(
+                        children: [
+                          ParamIcon(c.icon!, size: 16, tooltip: false),
+                          if (c.suffix != null) ...[
+                            const SizedBox(width: 3),
+                            Text(
+                              c.suffix!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -1008,11 +1190,16 @@ class _CategoryCard extends ConsumerWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontWeight: group ? FontWeight.w700 : null),
             ),
-            subtitle: Text(
-              f?.noRate ?? false
-                  ? 'No rate: set the account rate'
-                  : 'Plan ${money(f?.planBase)} · Fact ${money(f?.factBase)}',
-            ),
+            subtitle: f?.noRate ?? false
+                ? const Text('No rate: set the account rate')
+                : Wrap(
+                    spacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ParamValue.plan(money(f?.planBase)),
+                      ParamValue.actual(money(f?.factBase)),
+                    ],
+                  ),
             onTap: () => BudgetCategoryDialog.show(context, existing: c),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1052,40 +1239,93 @@ class _TransactionsView extends ConsumerStatefulWidget {
 
 class _TransactionsViewState extends ConsumerState<_TransactionsView> {
   String _query = '';
+  bool _showOptions = false;
+
+  static double _amount(BudgetTransaction t) =>
+      (t.isIncome ? 1 : -1) *
+      (t.isAmount ? t.quantity : t.unitPrice * t.quantity);
 
   @override
   Widget build(BuildContext context) {
+    final sort = ref.watch(budgetTxSortProvider);
+    final flags = ref.watch(budgetTxSearchFlagsProvider);
+    final filters = ref.watch(budgetTxFiltersProvider);
+    final optionsActive =
+        filters.active ||
+        flags != const TxSearchFlags() ||
+        !listEquals(sort, kDefaultTxSort);
     return _loading(ref.watch(budgetViewProvider), (view) {
       final cats = view.categoryById;
       final accounts = view.accountById;
       final now = DateTime.now().toUtc();
-      final items = [
-        for (final t in view.transactions)
-          if (_query.isEmpty ||
-              [
-                t.row.name,
-                cats[t.row.categoryId]?.name ?? '',
-                t.actionName ?? '',
-              ].any((s) => s.toLowerCase().contains(_query)))
-            t,
-      ];
+
+      final byId = {for (final t in view.transactions) t.row.id: t};
+      final ids = arrangeTransactionIds(
+        rows: [
+          for (final t in view.transactions)
+            TxRowView(
+              id: t.row.id,
+              name: t.row.name,
+              categoryId: t.row.categoryId,
+              categoryName: cats[t.row.categoryId]?.name ?? '',
+              accountId: t.row.accountCountId,
+              actionName: t.actionName ?? '',
+              linked: t.row.actionId != null,
+              date: t.date,
+              amount: _amount(t.row),
+            ),
+        ],
+        sort: sort,
+        filters: filters,
+        query: _query,
+        flags: flags,
+        descendants: categoryWithDescendants({
+          for (final c in view.categories) c.id: c.parentId,
+        }),
+      );
+      final items = [for (final id in ids) byId[id]!];
+      // Day headings only make sense while the list is in date order.
+      final byDate = sort.isNotEmpty && sort.first.field == TxSortField.date;
       return Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-            child: TextField(
-              key: const ValueKey('budget-transactions-search'),
-              decoration: const InputDecoration(
-                hintText: 'Search by name, category or action',
-                prefixIcon: Icon(Icons.search),
-                isDense: true,
-              ),
-              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const ValueKey('budget-transactions-search'),
+                    decoration: const InputDecoration(
+                      hintText: 'Search by name, category or action',
+                      prefixIcon: Icon(Icons.search),
+                      isDense: true,
+                    ),
+                    onChanged: (v) =>
+                        setState(() => _query = v.trim().toLowerCase()),
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('budget-tx-options-toggle'),
+                  isSelected: _showOptions || optionsActive,
+                  tooltip: _showOptions
+                      ? 'Hide sort and filters'
+                      : 'Sort and filters',
+                  icon: const Icon(Icons.tune),
+                  onPressed: () => setState(() => _showOptions = !_showOptions),
+                ),
+              ],
             ),
           ),
+          if (_showOptions) const BudgetTxOptionsPanel(),
           Expanded(
             child: items.isEmpty
-                ? const Center(child: Text('No transactions yet.'))
+                ? Center(
+                    child: Text(
+                      view.transactions.isEmpty
+                          ? 'No transactions yet.'
+                          : 'No transaction matches.',
+                    ),
+                  )
                 : ListView.builder(
                     padding: const EdgeInsets.only(bottom: 88),
                     itemCount: items.length,
@@ -1093,8 +1333,9 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                       final t = items[i];
                       final prev = i == 0 ? null : items[i - 1];
                       final newDay =
-                          prev == null ||
-                          budgetDate(prev.date) != budgetDate(t.date);
+                          byDate &&
+                          (prev == null ||
+                              budgetDate(prev.date) != budgetDate(t.date));
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1113,6 +1354,9 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                             item: t,
                             category: cats[t.row.categoryId],
                             currency: accounts[t.row.accountCountId]?.currency,
+                            accountIcon: accounts[t.row.accountCountId]?.icon,
+                            hasAccount:
+                                accounts[t.row.accountCountId] != null,
                           ),
                         ],
                       );
@@ -1130,11 +1374,18 @@ class _TransactionTile extends ConsumerWidget {
     required this.item,
     required this.category,
     required this.currency,
+    this.accountIcon,
+    this.hasAccount = false,
   });
 
   final BudgetTxItem item;
   final BudgetCategory? category;
   final String? currency;
+
+  /// The counting account's picture (null = none) and whether there is an
+  /// account at all (no account = no icon shown).
+  final String? accountIcon;
+  final bool hasAccount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1156,17 +1407,35 @@ class _TransactionTile extends ConsumerWidget {
             borderRadius: BorderRadius.circular(16),
           ),
           dense: true,
-          title: Text(
-            [
-              category?.name ?? 'No category',
-              if (t.name.isNotEmpty) t.name,
-            ].join(' · '),
-          ),
-          subtitle: Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
+          // Line 1: the transaction's own name.
+          title: t.name.isEmpty
+              ? Text(
+                  'No name',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                )
+              : Text(t.name),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              // Line 2: the categories icon and the category name.
+              Row(
+                key: ValueKey('budget-tx-category-${t.id}'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const ParamIcon(Param.categories, size: 14, tooltip: false),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      category?.name ?? 'No category',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              // Line 3: quantity x price.
               if (detail != null) Text(detail),
+              // Line 4: the action, as before.
               if (t.actionId != null)
                 InkWell(
                   key: ValueKey('budget-tx-action-${t.id}'),
@@ -1190,6 +1459,10 @@ class _TransactionTile extends ConsumerWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (hasAccount) ...[
+                AccountIcon(icon: accountIcon, size: 20),
+                const SizedBox(width: 6),
+              ],
               Text(
                 '${budgetMoney(amount, sign: true)} ${currency ?? ''}'.trim(),
                 style: TextStyle(
@@ -1242,6 +1515,11 @@ class _AccountsView extends ConsumerWidget {
                   key: ValueKey('budget-account-${a.id}'),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
+                  ),
+                  leading: AccountIcon(
+                    key: ValueKey('budget-account-icon-${a.id}'),
+                    icon: a.icon,
+                    size: 36,
                   ),
                   title: Text(a.name),
                   subtitle: Text(

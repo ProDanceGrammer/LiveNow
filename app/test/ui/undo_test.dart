@@ -61,7 +61,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
   }
 
-  testWidgets('undo toast auto-dismisses after 5s and clears lastUndo', (
+  testWidgets('undo toast auto-dismisses after 5s; the entry stays undoable', (
     tester,
   ) async {
     await pumpHarness(tester);
@@ -75,16 +75,16 @@ void main() {
     });
     await tester.pump();
     expect(find.text('Renamed'), findsOneWidget);
-    expect(container.read(lastUndoProvider), isNotNull);
+    expect(container.read(undoHistoryProvider), hasLength(1));
 
     await tester.pump(const Duration(milliseconds: 4500)); // ~4.9s total
     expect(find.text('Renamed'), findsOneWidget);
-    expect(container.read(lastUndoProvider), isNotNull);
 
     await tester.pump(const Duration(milliseconds: 700)); // past 5s
     await tester.pump();
     expect(find.text('Renamed'), findsNothing);
-    expect(container.read(lastUndoProvider), isNull);
+    // The toast is gone but the operation can still be undone (Ctrl+Z).
+    expect(container.read(undoHistoryProvider), hasLength(1));
 
     await unmount(tester);
   });
@@ -199,8 +199,8 @@ void main() {
     expect(await currentName(tester), 'original');
     expect(
       ProviderScope.containerOf(tester.element(find.text('go')))
-          .read(lastUndoProvider),
-      isNull,
+          .read(undoHistoryProvider),
+      isEmpty,
     );
 
     await tester.pump(const Duration(seconds: 1));
@@ -253,4 +253,66 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await unmount(tester);
   });
+
+  testWidgets('history keeps the last 10, Ctrl+Z undoes newest first', (
+    tester,
+  ) async {
+    await pumpHarness(tester);
+    final container = ProviderScope.containerOf(
+      tester.element(find.text('go')),
+    );
+    final order = <int>[];
+    final history = container.read(undoHistoryProvider.notifier);
+    final overlay = Overlay.of(tester.element(find.text('go')));
+    for (var i = 0; i < 12; i++) {
+      offerUndo(overlay, history, 'op $i', () async => order.add(i));
+    }
+    await tester.pump();
+    expect(container.read(undoHistoryProvider), hasLength(kUndoHistoryLimit));
+    expect(container.read(undoHistoryProvider).first.description, 'op 2');
+
+    // Newest first, repeatedly; each press takes one step back.
+    await tester.runAsync(() async {
+      expect(await _undo(container), isTrue);
+      expect(await _undo(container), isTrue);
+    });
+    expect(order, [11, 10]);
+    expect(container.read(undoHistoryProvider), hasLength(8));
+
+    // Drain the rest, then there is nothing left to undo.
+    await tester.runAsync(() async {
+      for (var i = 0; i < 8; i++) {
+        await _undo(container);
+      }
+      expect(await _undo(container), isFalse);
+    });
+    expect(order.length, 10);
+    expect(order.last, 2);
+    await tester.pump(const Duration(seconds: 6));
+    await unmount(tester);
+  });
+
+  testWidgets('a revert that throws drops its entry and does not crash', (
+    tester,
+  ) async {
+    await pumpHarness(tester);
+    final container = ProviderScope.containerOf(
+      tester.element(find.text('go')),
+    );
+    final overlay = Overlay.of(tester.element(find.text('go')));
+    offerUndo(
+      overlay,
+      container.read(undoHistoryProvider.notifier),
+      'bad',
+      () async => throw StateError('row is gone'),
+    );
+    await tester.pump();
+    await tester.runAsync(() async => expect(await _undo(container), isFalse));
+    expect(container.read(undoHistoryProvider), isEmpty);
+    await tester.pump(const Duration(seconds: 6));
+    await unmount(tester);
+  });
 }
+
+Future<bool> _undo(ProviderContainer c) =>
+    undoNewest(c.read(undoHistoryProvider.notifier));

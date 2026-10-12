@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -29,6 +30,14 @@ class _ActiveToast {
 }
 
 _ActiveToast? _active;
+
+/// How tall the phone's bottom navigation bar is while it is on screen (0 on
+/// Windows and in the phone's full-screen calendar). Set by the shell; a toast
+/// sits above it so it never hides behind the bar.
+final ValueNotifier<double> toastBottomInset = ValueNotifier<double>(0);
+
+/// Removes the toast on screen, if any (e.g. its Undo was done by Ctrl+Z).
+void dismissActiveToast() => _active?.close();
 
 /// Shows a toast in the ROOT overlay, painted above every dialog and still
 /// clickable. Text is `[leading][name][trailing]`; [name] is tappable when
@@ -141,9 +150,14 @@ class _ToastContentState extends State<_ToastContent> {
   late final Timer _timer;
   TapGestureRecognizer? _tap;
 
+  void _onInset() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void initState() {
     super.initState();
+    toastBottomInset.addListener(_onInset);
     _timer = Timer(widget.duration, widget.onExpired);
     if (widget.onNameTap != null) {
       _tap = TapGestureRecognizer()..onTap = widget.onNameTap;
@@ -152,6 +166,7 @@ class _ToastContentState extends State<_ToastContent> {
 
   @override
   void dispose() {
+    toastBottomInset.removeListener(_onInset);
     _timer.cancel();
     _tap?.dispose();
     widget.onDisposed();
@@ -163,10 +178,18 @@ class _ToastContentState extends State<_ToastContent> {
     final scheme = Theme.of(context).colorScheme;
     final fg = scheme.onInverseSurface;
     final style = TextStyle(color: fg, fontSize: 14);
+    // Above the on-screen keyboard AND above the bottom navigation bar (the
+    // root overlay spans the whole screen, so neither is avoided for us).
+    final media = MediaQuery.of(context);
+    final nav = toastBottomInset.value;
+    final lift = math.max(
+      media.viewInsets.bottom,
+      nav > 0 ? media.padding.bottom + nav : 0.0,
+    );
     return Positioned(
       left: 16,
       right: 16,
-      bottom: 24,
+      bottom: lift + (lift > 0 ? 12 : 24),
       child: Center(
         child: Material(
           color: scheme.inverseSurface,

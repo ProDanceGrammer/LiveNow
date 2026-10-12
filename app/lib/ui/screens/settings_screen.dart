@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/reminders/local_notifications_sink.dart';
 import '../data_imports.dart';
 import '../reminders.dart';
+import '../work_hours.dart';
+import '../../domain/work_hours.dart';
 import '../theme_mode.dart';
 import '../theme/glass_theme.dart';
+import '../widgets/param_icons.dart';
 import '../widgets/section_block.dart';
 import '../widgets/sync_settings_dialog.dart' show SyncSettingsBody;
 
@@ -22,6 +25,7 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final dark = ref.watch(themeModeProvider) == ThemeMode.dark;
+    final hours = ref.watch(workHoursProvider);
 
     Widget title(String text) => Padding(
       padding: const EdgeInsets.fromLTRB(4, 16, 4, 0),
@@ -30,14 +34,15 @@ class SettingsScreen extends ConsumerWidget {
 
     Widget tile(
       String key,
-      IconData icon,
+      IconData? icon,
       String label,
       Future<void> Function(BuildContext, WidgetRef) run, {
       String? subtitle,
+      Widget? leading,
     }) => ListTile(
       key: ValueKey(key),
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      leading: leading ?? Icon(icon),
       title: Text(label),
       subtitle: subtitle == null ? null : Text(subtitle),
       trailing: const Icon(Icons.chevron_right),
@@ -91,7 +96,7 @@ class SettingsScreen extends ConsumerWidget {
                 _Panel(
                   child: SwitchListTile(
                     key: const ValueKey('settings-reminders'),
-                    contentPadding: EdgeInsets.zero,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                     title: const Text(
                       'Remind me when an action starts or ends',
                     ),
@@ -106,6 +111,47 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ],
+              title('Working hours'),
+              _Panel(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    children: [
+                      _TimeTile(
+                        tileKey: 'settings-work-start',
+                        icon: Icons.wb_sunny_outlined,
+                        label: 'Work starts',
+                        minutes: hours.workStart,
+                        onPick: (m) => _setHours(
+                          context,
+                          ref,
+                          hours.copyWith(workStart: m),
+                        ),
+                      ),
+                      _TimeTile(
+                        tileKey: 'settings-work-end',
+                        icon: Icons.nightlight_outlined,
+                        label: 'Work ends',
+                        subtitle: '"After work" postpones go here',
+                        minutes: hours.workEnd,
+                        onPick: (m) =>
+                            _setHours(context, ref, hours.copyWith(workEnd: m)),
+                      ),
+                      _TimeTile(
+                        tileKey: 'settings-morning',
+                        icon: Icons.wb_twilight_rounded,
+                        label: 'Morning',
+                        subtitle:
+                            'The time "morning" postpones go to (it may differ '
+                            'from the start of work)',
+                        minutes: hours.morning,
+                        onPick: (m) =>
+                            _setHours(context, ref, hours.copyWith(morning: m)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               title('Import'),
               _Panel(
                 child: Column(
@@ -147,9 +193,10 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                     tile(
                       'settings-import-budget-icons',
-                      Icons.category_outlined,
+                      null,
                       'Budget category icons (CSV)',
                       importBudgetIcons,
+                      leading: const ParamIcon(Param.categories, size: 24),
                     ),
                   ],
                 ),
@@ -171,6 +218,15 @@ class SettingsScreen extends ConsumerWidget {
                       exportBudgetCsv,
                     ),
                   ],
+                ),
+              ),
+              title('About'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                child: Text(
+                  'Flag emoji on Windows are drawn with Twemoji '
+                  '(© Twitter, Inc. and other contributors, CC-BY 4.0).',
+                  style: theme.textTheme.bodySmall,
                 ),
               ),
             ],
@@ -205,4 +261,56 @@ class _Panel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Applies new working hours, or says why they are refused.
+void _setHours(BuildContext context, WidgetRef ref, WorkHours hours) {
+  final problem = ref.read(workHoursProvider.notifier).set(hours);
+  if (problem != null) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(problem)));
+  }
+}
+
+/// A settings row showing a time of day; a tap opens the time picker.
+class _TimeTile extends StatelessWidget {
+  const _TimeTile({
+    required this.tileKey,
+    required this.icon,
+    required this.label,
+    required this.minutes,
+    required this.onPick,
+    this.subtitle,
+  });
+
+  final String tileKey;
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final int minutes;
+  final ValueChanged<int> onPick;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    key: ValueKey(tileKey),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+    leading: Icon(icon),
+    title: Text(label),
+    subtitle: subtitle == null ? null : Text(subtitle!),
+    trailing: Text(
+      WorkHours.format(minutes),
+      style: Theme.of(context).textTheme.titleMedium,
+    ),
+    onTap: () async {
+      final picked = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+          child: child!,
+        ),
+      );
+      if (picked != null) onPick(picked.hour * 60 + picked.minute);
+    },
+  );
 }

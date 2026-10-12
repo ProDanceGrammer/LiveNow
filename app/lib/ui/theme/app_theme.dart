@@ -377,7 +377,9 @@ final _windowsFonts =
     defaultTargetPlatform != TargetPlatform.android;
 
 const _kFontFamily = 'Segoe UI Variable Text';
-const _kFontFallback = ['Segoe UI', 'Roboto', 'Arial'];
+// TwemojiFlags first: it only has flag glyphs, and Segoe UI Emoji (the system's
+// own emoji fallback, which comes after this list) draws them as letter pairs.
+const _kFontFallback = ['TwemojiFlags', 'Segoe UI', 'Roboto', 'Arial'];
 
 /// The stock Material weights (w400 body text) look thin on translucent
 /// glass, so lift every style one step; styles that set a weight explicitly

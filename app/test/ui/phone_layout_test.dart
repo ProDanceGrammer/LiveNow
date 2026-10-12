@@ -152,14 +152,16 @@ void main() {
     check('Actions/Calendar');
     // The Calendar is full screen on a phone: bring the menus back.
     expect(find.byKey(const ValueKey('phone-nav')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('calendar-full-toggle')));
+    await tester.tap(find.byKey(const ValueKey('calendar-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-menu-full')));
     await settle(tester);
     expect(find.byKey(const ValueKey('phone-nav')), findsOneWidget);
     await tapText(tester, 'All');
     check('Actions/All');
     await tapText(tester, 'Templates');
     check('Templates');
-    await tapText(tester, 'Directions');
+    await tapText(tester, 'Growth Directions');
     check('Growth/Balance');
     for (final tab in ['List', 'Mindmap']) {
       await tapText(tester, tab);
@@ -204,7 +206,7 @@ void main() {
     // The sync dialog (client role).
     await dialog('Sync dialog', find.byKey(const ValueKey('sync-status')));
     // Growth: a direction (List tab) and the new-direction dialog.
-    await tapText(tester, 'Directions');
+    await tapText(tester, 'Growth Directions');
     await tapText(tester, 'List');
     await dialog('Growth direction (existing)', find.text('Exercise'));
     await dialog(

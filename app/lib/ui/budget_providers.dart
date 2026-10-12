@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import '../domain/budget_rules.dart';
+import '../domain/budget_tx_view_rules.dart';
 import '../domain/budget_service.dart';
 import 'providers.dart';
 
@@ -227,3 +228,18 @@ final actionBudgetTransactionsProvider = Provider.autoDispose
           if (t.row.actionId == actionId) t,
       ];
     });
+
+/// The Transactions list's waterfall sort (default: newest first).
+final budgetTxSortProvider = StateProvider.autoDispose<List<TxSortKey>>(
+  (ref) => kDefaultTxSort,
+);
+
+/// Which fields the Transactions search text is matched against.
+final budgetTxSearchFlagsProvider = StateProvider.autoDispose<TxSearchFlags>(
+  (ref) => const TxSearchFlags(),
+);
+
+/// The Transactions list's filters (categories, accounts, action link, dates).
+final budgetTxFiltersProvider = StateProvider.autoDispose<TxFilters>(
+  (ref) => const TxFilters(),
+);

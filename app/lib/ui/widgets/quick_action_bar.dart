@@ -1,9 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/postpone_rules.dart';
+import '../../domain/work_hours.dart';
 import '../providers.dart';
 import '../undo.dart';
+import '../work_hours.dart';
 import 'glass_icon_tile.dart';
 
 /// One quick action (Start, Finish, a postpone rule, Delete). [group] only
@@ -34,6 +38,7 @@ List<QuickActionSpec> quickActionSpecs(
   VoidCallback? onDelete,
 }) {
   final service = ref.read(actionServiceProvider);
+  final hours = ref.read(workHoursProvider);
 
   Future<void> run(String description, Future<void> Function() operation) =>
       runUndoable(context, ref, actionId, description, operation);
@@ -87,7 +92,7 @@ List<QuickActionSpec> quickActionSpecs(
     QuickActionSpec(
       Icons.nightlight_round,
       GlassHue.lavender,
-      'Postpone: after work (18:00)',
+      'Postpone: after work (${WorkHours.format(hours.workEnd)})',
       1,
       () => postpone('Postponed to after work', PostponeRule.afterWork),
     ),
@@ -159,6 +164,15 @@ class QuickActionBar extends ConsumerWidget {
   /// single row forces tiny icons).
   final bool wrap;
 
+  /// Only these groups (0 = Start/Stop/Continue, 1 = postpone + prolong,
+  /// 2 = Delete); null = all of them.
+  final Set<int>? groups;
+
+  /// One row split into its groups across the full width: Start/Stop/Continue
+  /// at the left, the postpones in the middle, Delete at the right (Windows
+  /// editor). Scaled down, never wrapped, when the room is too small.
+  final bool spread;
+
   const QuickActionBar({
     super.key,
     required this.actionId,
@@ -168,11 +182,19 @@ class QuickActionBar extends ConsumerWidget {
     this.hitExtra = 4,
     this.spacing = 6,
     this.wrap = false,
+    this.groups,
+    this.spread = false,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final specs = quickActionSpecs(context, ref, actionId, onDelete: onDelete);
+    final all = quickActionSpecs(context, ref, actionId, onDelete: onDelete);
+    final specs = groups == null
+        ? all
+        : [
+            for (final s in all)
+              if (groups!.contains(s.group)) s,
+          ];
 
     Widget tile(QuickActionSpec s) => GlassIconTile(
       icon: s.icon,
@@ -183,6 +205,40 @@ class QuickActionBar extends ConsumerWidget {
       iconSize: iconSize,
       hitExtra: hitExtra,
     );
+
+    if (spread) {
+      final byGroup = <int, List<QuickActionSpec>>{};
+      for (final s in specs) {
+        (byGroup[s.group] ??= []).add(s);
+      }
+      Widget group(List<QuickActionSpec> g) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < g.length; i++) ...[
+            if (i > 0) SizedBox(width: spacing),
+            tile(g[i]),
+          ],
+        ],
+      );
+      final tileW = tileSize + hitExtra;
+      var natural = 16.0 * (byGroup.length - 1);
+      for (final g in byGroup.values) {
+        natural += g.length * tileW + (g.length - 1) * spacing;
+      }
+      return LayoutBuilder(
+        builder: (context, c) => FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            width: c.hasBoundedWidth ? math.max(natural, c.maxWidth) : natural,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [for (final g in byGroup.values) group(g)],
+            ),
+          ),
+        ),
+      );
+    }
 
     if (wrap) {
       return Wrap(

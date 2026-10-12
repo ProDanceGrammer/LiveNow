@@ -3485,6 +3485,15 @@ class $BudgetAccountsTableTable extends BudgetAccountsTable
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _iconMeta = const VerificationMeta('icon');
+  @override
+  late final GeneratedColumn<String> icon = GeneratedColumn<String>(
+    'icon',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3515,6 +3524,7 @@ class $BudgetAccountsTableTable extends BudgetAccountsTable
     currency,
     rateToBase,
     openingBalance,
+    icon,
     createdAt,
     updatedAt,
   ];
@@ -3575,6 +3585,12 @@ class $BudgetAccountsTableTable extends BudgetAccountsTable
         ),
       );
     }
+    if (data.containsKey('icon')) {
+      context.handle(
+        _iconMeta,
+        icon.isAcceptableOrUnknown(data['icon']!, _iconMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3624,6 +3640,10 @@ class $BudgetAccountsTableTable extends BudgetAccountsTable
         DriftSqlType.double,
         data['${effectivePrefix}opening_balance'],
       )!,
+      icon: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}icon'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_at'],
@@ -3650,6 +3670,11 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
   final String currency;
   final double rateToBase;
   final double openingBalance;
+
+  /// The account's picture: a square PNG (96 px) as base64 text, or null (the
+  /// purse icon is shown instead). Text rather than a BLOB so the sync log and
+  /// the JSON backup carry it like any other column.
+  final String? icon;
   final String createdAt;
   final String updatedAt;
   const BudgetAccount({
@@ -3659,6 +3684,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
     required this.currency,
     required this.rateToBase,
     required this.openingBalance,
+    this.icon,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -3673,6 +3699,9 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
     map['currency'] = Variable<String>(currency);
     map['rate_to_base'] = Variable<double>(rateToBase);
     map['opening_balance'] = Variable<double>(openingBalance);
+    if (!nullToAbsent || icon != null) {
+      map['icon'] = Variable<String>(icon);
+    }
     map['created_at'] = Variable<String>(createdAt);
     map['updated_at'] = Variable<String>(updatedAt);
     return map;
@@ -3686,6 +3715,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
       currency: Value(currency),
       rateToBase: Value(rateToBase),
       openingBalance: Value(openingBalance),
+      icon: icon == null && nullToAbsent ? const Value.absent() : Value(icon),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -3703,6 +3733,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
       currency: serializer.fromJson<String>(json['currency']),
       rateToBase: serializer.fromJson<double>(json['rateToBase']),
       openingBalance: serializer.fromJson<double>(json['openingBalance']),
+      icon: serializer.fromJson<String?>(json['icon']),
       createdAt: serializer.fromJson<String>(json['createdAt']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
     );
@@ -3717,6 +3748,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
       'currency': serializer.toJson<String>(currency),
       'rateToBase': serializer.toJson<double>(rateToBase),
       'openingBalance': serializer.toJson<double>(openingBalance),
+      'icon': serializer.toJson<String?>(icon),
       'createdAt': serializer.toJson<String>(createdAt),
       'updatedAt': serializer.toJson<String>(updatedAt),
     };
@@ -3729,6 +3761,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
     String? currency,
     double? rateToBase,
     double? openingBalance,
+    Value<String?> icon = const Value.absent(),
     String? createdAt,
     String? updatedAt,
   }) => BudgetAccount(
@@ -3738,6 +3771,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
     currency: currency ?? this.currency,
     rateToBase: rateToBase ?? this.rateToBase,
     openingBalance: openingBalance ?? this.openingBalance,
+    icon: icon.present ? icon.value : this.icon,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -3753,6 +3787,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
       openingBalance: data.openingBalance.present
           ? data.openingBalance.value
           : this.openingBalance,
+      icon: data.icon.present ? data.icon.value : this.icon,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -3767,6 +3802,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
           ..write('currency: $currency, ')
           ..write('rateToBase: $rateToBase, ')
           ..write('openingBalance: $openingBalance, ')
+          ..write('icon: $icon, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -3781,6 +3817,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
     currency,
     rateToBase,
     openingBalance,
+    icon,
     createdAt,
     updatedAt,
   );
@@ -3794,6 +3831,7 @@ class BudgetAccount extends DataClass implements Insertable<BudgetAccount> {
           other.currency == this.currency &&
           other.rateToBase == this.rateToBase &&
           other.openingBalance == this.openingBalance &&
+          other.icon == this.icon &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -3805,6 +3843,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
   final Value<String> currency;
   final Value<double> rateToBase;
   final Value<double> openingBalance;
+  final Value<String?> icon;
   final Value<String> createdAt;
   final Value<String> updatedAt;
   final Value<int> rowid;
@@ -3815,6 +3854,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
     this.currency = const Value.absent(),
     this.rateToBase = const Value.absent(),
     this.openingBalance = const Value.absent(),
+    this.icon = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -3826,6 +3866,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
     required String currency,
     this.rateToBase = const Value.absent(),
     this.openingBalance = const Value.absent(),
+    this.icon = const Value.absent(),
     required String createdAt,
     required String updatedAt,
     this.rowid = const Value.absent(),
@@ -3841,6 +3882,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
     Expression<String>? currency,
     Expression<double>? rateToBase,
     Expression<double>? openingBalance,
+    Expression<String>? icon,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<int>? rowid,
@@ -3852,6 +3894,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
       if (currency != null) 'currency': currency,
       if (rateToBase != null) 'rate_to_base': rateToBase,
       if (openingBalance != null) 'opening_balance': openingBalance,
+      if (icon != null) 'icon': icon,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -3865,6 +3908,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
     Value<String>? currency,
     Value<double>? rateToBase,
     Value<double>? openingBalance,
+    Value<String?>? icon,
     Value<String>? createdAt,
     Value<String>? updatedAt,
     Value<int>? rowid,
@@ -3876,6 +3920,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
       currency: currency ?? this.currency,
       rateToBase: rateToBase ?? this.rateToBase,
       openingBalance: openingBalance ?? this.openingBalance,
+      icon: icon ?? this.icon,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -3903,6 +3948,9 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
     if (openingBalance.present) {
       map['opening_balance'] = Variable<double>(openingBalance.value);
     }
+    if (icon.present) {
+      map['icon'] = Variable<String>(icon.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
     }
@@ -3924,6 +3972,7 @@ class BudgetAccountsTableCompanion extends UpdateCompanion<BudgetAccount> {
           ..write('currency: $currency, ')
           ..write('rateToBase: $rateToBase, ')
           ..write('openingBalance: $openingBalance, ')
+          ..write('icon: $icon, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -9901,6 +9950,7 @@ typedef $$BudgetAccountsTableTableCreateCompanionBuilder =
       required String currency,
       Value<double> rateToBase,
       Value<double> openingBalance,
+      Value<String?> icon,
       required String createdAt,
       required String updatedAt,
       Value<int> rowid,
@@ -9913,6 +9963,7 @@ typedef $$BudgetAccountsTableTableUpdateCompanionBuilder =
       Value<String> currency,
       Value<double> rateToBase,
       Value<double> openingBalance,
+      Value<String?> icon,
       Value<String> createdAt,
       Value<String> updatedAt,
       Value<int> rowid,
@@ -10048,6 +10099,11 @@ class $$BudgetAccountsTableTableFilterComposer
 
   ColumnFilters<double> get openingBalance => $composableBuilder(
     column: $table.openingBalance,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get icon => $composableBuilder(
+    column: $table.icon,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10205,6 +10261,11 @@ class $$BudgetAccountsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get icon => $composableBuilder(
+    column: $table.icon,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -10246,6 +10307,9 @@ class $$BudgetAccountsTableTableAnnotationComposer
     column: $table.openingBalance,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get icon =>
+      $composableBuilder(column: $table.icon, builder: (column) => column);
 
   GeneratedColumn<String> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -10407,6 +10471,7 @@ class $$BudgetAccountsTableTableTableManager
                 Value<String> currency = const Value.absent(),
                 Value<double> rateToBase = const Value.absent(),
                 Value<double> openingBalance = const Value.absent(),
+                Value<String?> icon = const Value.absent(),
                 Value<String> createdAt = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -10417,6 +10482,7 @@ class $$BudgetAccountsTableTableTableManager
                 currency: currency,
                 rateToBase: rateToBase,
                 openingBalance: openingBalance,
+                icon: icon,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -10429,6 +10495,7 @@ class $$BudgetAccountsTableTableTableManager
                 required String currency,
                 Value<double> rateToBase = const Value.absent(),
                 Value<double> openingBalance = const Value.absent(),
+                Value<String?> icon = const Value.absent(),
                 required String createdAt,
                 required String updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -10439,6 +10506,7 @@ class $$BudgetAccountsTableTableTableManager
                 currency: currency,
                 rateToBase: rateToBase,
                 openingBalance: openingBalance,
+                icon: icon,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

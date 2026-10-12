@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/queries.dart';
 import 'package:livenow/domain/all_actions_view_rules.dart';
+import 'package:livenow/domain/date_range_filter.dart';
+import 'package:livenow/domain/postpone_rules.dart';
 
 ActionListItem _a(
   String id,
@@ -197,4 +199,41 @@ void main() {
       ['2', '3'],
     );
   });
+
+  test(
+    'date range filters on the START day; unscheduled actions never match',
+    () {
+      initPostponeTimeZoneData();
+      DateTime day(int d) => DateRangeFilter.dayStart(DateTime(2026, 10, d));
+      final items = [
+        _a('before', 'x', start: DateTime.utc(2026, 10, 9, 12)),
+        _a('inside', 'x', start: DateTime.utc(2026, 10, 10, 12)),
+        _a(
+          'late',
+          'x',
+          start: DateTime.utc(2026, 10, 10, 20, 30),
+        ), // 23:30 local
+        _a('after', 'x', start: DateTime.utc(2026, 10, 11, 12)),
+        _a('none', 'x'),
+      ];
+      List<String> run(DateRangeFilter r) => _ids(
+        arrangeActions(
+          items: items,
+          sort: const [],
+          filters: AllActionsFilters(dateRange: r),
+        ),
+      );
+      expect(run(DateRangeFilter(from: day(10), until: day(10))), [
+        'inside',
+        'late',
+      ]);
+      expect(run(DateRangeFilter(from: day(10))), ['inside', 'late', 'after']);
+      expect(run(DateRangeFilter(until: day(9))), ['before']);
+      expect(const AllActionsFilters().active, isFalse);
+      expect(
+        AllActionsFilters(dateRange: DateRangeFilter(from: day(10))).active,
+        isTrue,
+      );
+    },
+  );
 }

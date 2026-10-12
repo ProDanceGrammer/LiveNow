@@ -276,16 +276,17 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                 child: Row(
                   children: [
+                    // Every column name sits in the middle of its column.
                     Expanded(
                       child: Align(
-                        alignment: Alignment.centerLeft,
+                        alignment: Alignment.center,
                         child: ParamLabel(Param.direction, style: headerStyle),
                       ),
                     ),
                     SizedBox(
                       width: phone ? 64 : 72,
                       child: Align(
-                        alignment: Alignment.centerRight,
+                        alignment: Alignment.center,
                         child: ParamIcon(
                           Param.urgency,
                           size: 22,
@@ -298,7 +299,7 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                       child: Padding(
                         padding: EdgeInsets.only(left: phone ? 6 : 12),
                         child: const Align(
-                          alignment: Alignment.centerLeft,
+                          alignment: Alignment.center,
                           child: ParamIcon(Param.progress),
                         ),
                       ),
@@ -309,7 +310,7 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                       const SizedBox(
                         width: 56,
                         child: Align(
-                          alignment: Alignment.centerRight,
+                          alignment: Alignment.center,
                           child: ParamIcon(Param.weight),
                         ),
                       ),
@@ -318,7 +319,7 @@ class _BalanceBoardState extends State<_BalanceBoard> {
                       const SizedBox(
                         width: 32,
                         child: Align(
-                          alignment: Alignment.centerRight,
+                          alignment: Alignment.center,
                           child: ParamIcon(Param.level),
                         ),
                       ),

@@ -15,6 +15,11 @@ import 'reminder_scheduler.dart';
 /// moment and shows its toast (only while the app runs). Every failure is
 /// swallowed: reminders must never be able to break the app.
 class LocalNotificationsSink implements ReminderSink {
+  LocalNotificationsSink({this.onOpenAction});
+
+  /// Called with the action id when the user taps a notification.
+  final void Function(String actionId)? onOpenAction;
+
   final _plugin = FlutterLocalNotificationsPlugin();
   bool? _ready;
   bool _asked = false;
@@ -28,10 +33,31 @@ class LocalNotificationsSink implements ReminderSink {
   /// Which platforms get reminders at all.
   static bool get supported => _isIos || _isWindows;
 
+  /// Starts the plugin (once); false where reminders are unavailable.
+  Future<bool> init() => _init();
+
+  /// The action id of the notification that LAUNCHED the app (a tap while it
+  /// was closed), or null. Ask once, after [init].
+  Future<String?> launchActionId() async {
+    if (!supported || !await _init()) return null;
+    try {
+      final d = await _plugin.getNotificationAppLaunchDetails();
+      if (d?.didNotificationLaunchApp ?? false) {
+        final id = d!.notificationResponse?.payload;
+        return id == null || id.isEmpty ? null : id;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<bool> _init() async {
     if (_ready != null) return _ready!;
     try {
       await _plugin.initialize(
+        onDidReceiveNotificationResponse: (response) {
+          final id = response.payload;
+          if (id != null && id.isNotEmpty) onOpenAction?.call(id);
+        },
         settings: const InitializationSettings(
           iOS: DarwinInitializationSettings(
             requestAlertPermission: false,
@@ -86,6 +112,7 @@ class LocalNotificationsSink implements ReminderSink {
             ),
             title: _title(m),
             body: m.title,
+            payload: m.actionId,
             androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
@@ -110,6 +137,7 @@ class LocalNotificationsSink implements ReminderSink {
           id: next.notificationId,
           title: _title(next),
           body: next.title,
+          payload: next.actionId,
           notificationDetails: const NotificationDetails(),
         );
       } catch (_) {}

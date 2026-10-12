@@ -154,7 +154,7 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('the calendar starts on one day and offers 1 to 3', (
+  testWidgets('the calendar starts on one day; the menu offers 1 to 3', (
     tester,
   ) async {
     await pumpPhone(tester);
@@ -166,16 +166,16 @@ void main() {
     expect(container.read(calendarDayCountProvider), 1);
     expect(find.byKey(const ValueKey('day-header-0')), findsOneWidget);
     expect(find.byKey(const ValueKey('day-header-1')), findsNothing);
-    // Segments 1, 2, 3 only.
-    final seg = find.descendant(
-      of: find.byType(SegmentedButton<int>),
-      matching: find.byType(Text),
-    );
-    expect(
-      [for (final e in seg.evaluate()) (e.widget as Text).data],
-      ['1', '2', '3'],
-    );
-    await tester.tap(find.text('3'));
+    // The day count is chosen in the floating menu (no segmented button on a
+    // phone): 1, 2, 3 only while upright.
+    expect(find.byType(SegmentedButton<int>), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('calendar-menu')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-menu-days-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-menu-days-2')), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-menu-days-3')), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-menu-days-4')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('calendar-menu-days-3')));
     await settle(tester, 300);
     expect(container.read(calendarDayCountProvider), 3);
     expect(find.byKey(const ValueKey('day-header-2')), findsOneWidget);

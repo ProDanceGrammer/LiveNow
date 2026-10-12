@@ -2,6 +2,7 @@ import 'package:timezone/data/latest.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../core/settings.dart';
+import 'work_hours.dart';
 
 /// Must be called once at app startup, before any postpone rule runs.
 void initPostponeTimeZoneData() => tz_data.initializeTimeZones();
@@ -35,6 +36,7 @@ ActionSchedule applyPostponeRule(
   PostponeRule rule,
   ActionSchedule current, {
   required DateTime nowUtc,
+  WorkHours hours = WorkHours.defaults,
 }) {
   final location = tz.getLocation(AppSettings.timeZoneName);
   final now = tz.TZDateTime.from(nowUtc, location);
@@ -64,22 +66,22 @@ ActionSchedule applyPostponeRule(
       now,
       location,
     ).add(const Duration(days: 7)),
-    PostponeRule.afterWork => _nextAtHour(
+    PostponeRule.afterWork => _nextAtMinute(
       _relativeBase(current.startAt, now, location),
-      AppSettings.afterWorkHour,
+      hours.workEnd,
     ),
-    PostponeRule.morning => _nextAtHour(
+    PostponeRule.morning => _nextAtMinute(
       _relativeBase(current.startAt, now, location),
-      AppSettings.morningHour,
+      hours.morning,
     ),
-    PostponeRule.workingMorning => _nextWorkingAtHour(
+    PostponeRule.workingMorning => _nextWorkingAtMinute(
       _relativeBase(current.startAt, now, location),
-      AppSettings.morningHour,
+      hours.morning,
     ),
     PostponeRule.nextMondayMorning => _nextWeekdayAt(
       _relativeBase(current.startAt, now, location),
       DateTime.monday,
-      AppSettings.morningHour,
+      hours.morning,
     ),
     PostponeRule.prolongThirtyMinutes => throw StateError('handled above'),
   };
@@ -102,35 +104,46 @@ tz.TZDateTime _relativeBase(
   return tz.TZDateTime.from(startAtUtc, location);
 }
 
-tz.TZDateTime _atHourOnDate(tz.TZDateTime date, int hour) {
-  return tz.TZDateTime(date.location, date.year, date.month, date.day, hour);
+/// [minutes] since midnight on [date]'s own calendar day.
+tz.TZDateTime _atMinuteOnDate(tz.TZDateTime date, int minutes) {
+  return tz.TZDateTime(
+    date.location,
+    date.year,
+    date.month,
+    date.day,
+    minutes ~/ 60,
+    minutes % 60,
+  );
 }
 
 /// Calendar-day step (wall-clock safe, unlike adding 24 hours).
 tz.TZDateTime _nextDay(tz.TZDateTime date) =>
     tz.TZDateTime(date.location, date.year, date.month, date.day + 1);
 
-/// [hour] on the base's own day if that is strictly after the base, else on
-/// the next day. No "after now" floor: an overdue action follows its own date.
-tz.TZDateTime _nextAtHour(tz.TZDateTime base, int hour) {
-  final sameDay = _atHourOnDate(base, hour);
-  return sameDay.isAfter(base) ? sameDay : _atHourOnDate(_nextDay(base), hour);
+/// The time of day [minutes] on the base's own day if that is strictly after
+/// the base, else on the next day. No "after now" floor: an overdue action
+/// follows its own date.
+tz.TZDateTime _nextAtMinute(tz.TZDateTime base, int minutes) {
+  final sameDay = _atMinuteOnDate(base, minutes);
+  return sameDay.isAfter(base)
+      ? sameDay
+      : _atMinuteOnDate(_nextDay(base), minutes);
 }
 
-/// Like [_nextAtHour], then skips non-working weekdays.
-tz.TZDateTime _nextWorkingAtHour(tz.TZDateTime base, int hour) {
-  var candidate = _nextAtHour(base, hour);
+/// Like [_nextAtMinute], then skips non-working weekdays.
+tz.TZDateTime _nextWorkingAtMinute(tz.TZDateTime base, int minutes) {
+  var candidate = _nextAtMinute(base, minutes);
   while (!AppSettings.workingWeekdays.contains(candidate.weekday)) {
-    candidate = _atHourOnDate(_nextDay(candidate), hour);
+    candidate = _atMinuteOnDate(_nextDay(candidate), minutes);
   }
   return candidate;
 }
 
 /// The next occurrence of [weekday] strictly after the base's date.
-tz.TZDateTime _nextWeekdayAt(tz.TZDateTime base, int weekday, int hour) {
+tz.TZDateTime _nextWeekdayAt(tz.TZDateTime base, int weekday, int minutes) {
   var date = _nextDay(base);
   while (date.weekday != weekday) {
     date = _nextDay(date);
   }
-  return _atHourOnDate(date, hour);
+  return _atMinuteOnDate(date, minutes);
 }

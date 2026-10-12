@@ -33,7 +33,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -121,6 +121,18 @@ class AppDatabase extends _$AppDatabase {
         // updated_at); the triggers are (re)created by beforeOpen below.
         await createSyncTables(this);
         await backfillSyncVersions(this);
+      }
+      if (from >= 10 && from < 12) {
+        // Account pictures. (From < 10 the budget table was just created with
+        // the column already.)
+        // Only when it is really missing, so a half-migrated or hand-built
+        // file cannot fail with "duplicate column".
+        final columns = await customSelect(
+          'PRAGMA table_info(budget_accounts)',
+        ).get();
+        if (!columns.any((r) => r.read<String>('name') == 'icon')) {
+          await m.addColumn(budgetAccountsTable, budgetAccountsTable.icon);
+        }
       }
     },
     // Runs after onCreate/onUpgrade on EVERY open: a TableMigration rebuild

@@ -6,10 +6,12 @@ import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/budget_rules.dart';
 import '../../domain/budget_service.dart';
+import '../account_icon_codec.dart';
 import '../budget_providers.dart';
 import '../dialog_stack.dart';
 import '../open_entity.dart';
 import '../providers.dart';
+import 'account_icon.dart';
 import 'action_picker_dialog.dart';
 import 'budget_format.dart';
 import 'glass_pill_selector.dart';
@@ -164,12 +166,35 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
     text: budgetNumber(widget.existing?.openingBalance ?? 0),
   );
 
+  /// The account's picture (base64 PNG), whether the user changed it in this
+  /// dialog, and the reason a chosen file was refused.
+  late String? _icon = widget.existing?.icon;
+  bool _iconTouched = false;
+  String? _iconError;
+
   @override
   void dispose() {
     for (final c in [_name, _type, _currency, _rate, _opening]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _pickIcon() async {
+    final pick = ref.read(accountIconPickerProvider);
+    final bytes = await pick();
+    if (bytes == null || !mounted) return;
+    try {
+      final encoded = await encodeAccountIcon(bytes);
+      if (!mounted) return;
+      setState(() {
+        _icon = encoded;
+        _iconTouched = true;
+        _iconError = null;
+      });
+    } on AccountIconException catch (e) {
+      if (mounted) setState(() => _iconError = e.message);
+    }
   }
 
   Future<void> _save() async {
@@ -184,6 +209,7 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
           currency: _currency.text,
           rateToBase: parseBudgetNumber(_rate.text)!,
           openingBalance: parseBudgetNumber(_opening.text) ?? 0,
+          icon: _iconTouched ? Value(_icon) : const Value.absent(),
         );
     navigator.pop();
   }
@@ -203,6 +229,51 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
       content: Form(
         key: _form,
         child: _dialogBody([
+          // The picture: shown next to the name wherever the account appears.
+          Row(
+            children: [
+              AccountIcon(
+                key: const ValueKey('account-icon-preview'),
+                icon: _icon,
+                size: 56,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    OutlinedButton.icon(
+                      key: const ValueKey('account-icon-pick'),
+                      icon: const Icon(Icons.image_outlined),
+                      label: Text(_icon == null ? 'Choose image…' : 'Change'),
+                      onPressed: _pickIcon,
+                    ),
+                    if (_icon != null)
+                      TextButton(
+                        key: const ValueKey('account-icon-remove'),
+                        onPressed: () => setState(() {
+                          _icon = null;
+                          _iconTouched = true;
+                          _iconError = null;
+                        }),
+                        child: const Text('Remove'),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (_iconError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                _iconError!,
+                key: const ValueKey('account-icon-error'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          _gap,
           TextFormField(
             key: const ValueKey('account-name'),
             controller: _name,
@@ -492,104 +563,114 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             value: _isIncome,
             onChanged: (v) => setState(() => _isIncome = v),
           ),
-          _gap,
-          GlassPillSelector<BudgetUnit>(
-            label: 'Unit of measure',
-            options: const {
-              BudgetUnit.piece: 'Piece',
-              BudgetUnit.kilogram: 'Kg / liter',
-              BudgetUnit.month: 'Month',
-              BudgetUnit.percentPerMonth: '% per month',
-            },
-            value: _unit,
-            onChanged: (v) => setState(() => _unit = v),
-          ),
-          _gap,
-          if (percent) ...[
-            TextFormField(
-              key: const ValueKey('category-percent'),
-              controller: _percent,
-              decoration: const InputDecoration(labelText: 'Percent'),
-              validator: optionalNumber,
+          // A group only sums its sub-categories: the unit, price, units,
+          // frequency, one-time and end-date fields would all be ignored, so
+          // they are not shown at all.
+          if (!isGroup) ...[
+            _gap,
+            GlassPillSelector<BudgetUnit>(
+              label: 'Unit of measure',
+              options: const {
+                BudgetUnit.piece: 'Piece',
+                BudgetUnit.kilogram: 'Kg / liter',
+                BudgetUnit.month: 'Month',
+                BudgetUnit.percentPerMonth: '% per month',
+              },
+              value: _unit,
+              onChanged: (v) => setState(() => _unit = v),
             ),
             _gap,
-            OutlinedButton.icon(
-              key: const ValueKey('category-percent-of'),
-              icon: const Icon(Icons.percent),
-              label: Text(
-                _percentOfId == null
-                    ? 'Take the percent of…'
-                    : 'Percent of: ${byId[_percentOfId]?.name ?? '?'}',
+            if (percent) ...[
+              TextFormField(
+                key: const ValueKey('category-percent'),
+                controller: _percent,
+                decoration: const InputDecoration(labelText: 'Percent'),
+                validator: optionalNumber,
               ),
-              onPressed: () async {
-                final picked = await pickBudgetCategory(context, excludeId: id);
-                if (picked != null) setState(() => _percentOfId = picked);
-              },
+              _gap,
+              OutlinedButton.icon(
+                key: const ValueKey('category-percent-of'),
+                icon: const Icon(Icons.percent),
+                label: Text(
+                  _percentOfId == null
+                      ? 'Take the percent of…'
+                      : 'Percent of: ${byId[_percentOfId]?.name ?? '?'}',
+                ),
+                onPressed: () async {
+                  final picked = await pickBudgetCategory(
+                    context,
+                    excludeId: id,
+                  );
+                  if (picked != null) setState(() => _percentOfId = picked);
+                },
+              ),
+            ] else
+              TextFormField(
+                key: const ValueKey('category-price'),
+                controller: _price,
+                decoration: const InputDecoration(
+                  labelText: 'Price per unit',
+                  helperText: 'The expected price, even if it varies',
+                ),
+                validator: optionalNumber,
+              ),
+            _gap,
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    key: const ValueKey('category-units'),
+                    controller: _units,
+                    decoration: const InputDecoration(
+                      labelText: 'Units per month (plan)',
+                    ),
+                    validator: optionalNumber,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    key: const ValueKey('category-frequency'),
+                    controller: _frequency,
+                    decoration: const InputDecoration(
+                      labelText: 'Frequency (months)',
+                      helperText: '1 = monthly, 12 = yearly',
+                    ),
+                    validator: optionalNumber,
+                  ),
+                ),
+              ],
             ),
-          ] else
-            TextFormField(
-              key: const ValueKey('category-price'),
-              controller: _price,
-              decoration: const InputDecoration(
-                labelText: 'Price per unit',
-                helperText: 'The expected price, even if it varies',
-              ),
-              validator: optionalNumber,
+            SwitchListTile(
+              key: const ValueKey('category-one-time'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('One-time payment'),
+              value: _oneTime,
+              onChanged: (v) => setState(() => _oneTime = v),
             ),
-          _gap,
-          Row(
-            children: [
-              Expanded(
-                child: TextFormField(
-                  key: const ValueKey('category-units'),
-                  controller: _units,
-                  decoration: const InputDecoration(
-                    labelText: 'Units per month (plan)',
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('category-end-date'),
+                    icon: const Icon(Icons.event),
+                    label: Text(
+                      _end == null
+                          ? 'No end date'
+                          : 'Ends ${budgetDate(_end!)}',
+                    ),
+                    onPressed: _pickEnd,
                   ),
-                  validator: optionalNumber,
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextFormField(
-                  key: const ValueKey('category-frequency'),
-                  controller: _frequency,
-                  decoration: const InputDecoration(
-                    labelText: 'Frequency (months)',
-                    helperText: '1 = monthly, 12 = yearly',
+                if (_end != null)
+                  IconButton(
+                    tooltip: 'Clear end date',
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => setState(() => _end = null),
                   ),
-                  validator: optionalNumber,
-                ),
-              ),
-            ],
-          ),
-          SwitchListTile(
-            key: const ValueKey('category-one-time'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('One-time payment'),
-            value: _oneTime,
-            onChanged: (v) => setState(() => _oneTime = v),
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  key: const ValueKey('category-end-date'),
-                  icon: const Icon(Icons.event),
-                  label: Text(
-                    _end == null ? 'No end date' : 'Ends ${budgetDate(_end!)}',
-                  ),
-                  onPressed: _pickEnd,
-                ),
-              ),
-              if (_end != null)
-                IconButton(
-                  tooltip: 'Clear end date',
-                  icon: const Icon(Icons.clear),
-                  onPressed: () => setState(() => _end = null),
-                ),
-            ],
-          ),
+              ],
+            ),
+          ],
           _gap,
           DropdownButtonFormField<String?>(
             key: const ValueKey('category-parent'),
@@ -620,7 +701,18 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               for (final a in accounts)
                 DropdownMenuItem<String?>(
                   value: a.id,
-                  child: Text('${a.name} (${a.currency})'),
+                  child: Row(
+                    children: [
+                      AccountIcon(icon: a.icon, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${a.name} (${a.currency})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
             ],
             onChanged: (v) => setState(() => _countAccount = v),
@@ -641,7 +733,18 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               for (final a in accounts)
                 DropdownMenuItem<String?>(
                   value: a.id,
-                  child: Text('${a.name} (${a.currency})'),
+                  child: Row(
+                    children: [
+                      AccountIcon(icon: a.icon, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${a.name} (${a.currency})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
             ],
             onChanged: (v) => setState(() => _useAccount = v),
@@ -994,10 +1097,20 @@ class _BudgetTransactionDialogState
           ),
           if (cat != null) ...[
             _gap,
-            Text(
-              'Total: ${budgetMoney(total)} '
-              '${countAccount?.currency ?? ''} '
-              '(${cat.isIncome ? 'income' : 'expense'})',
+            Row(
+              children: [
+                if (countAccount != null) ...[
+                  AccountIcon(icon: countAccount.icon, size: 20),
+                  const SizedBox(width: 6),
+                ],
+                Flexible(
+                  child: Text(
+                    'Total: ${budgetMoney(total)} '
+                    '${countAccount?.currency ?? ''} '
+                    '(${cat.isIncome ? 'income' : 'expense'})',
+                  ),
+                ),
+              ],
             ),
           ],
           if (countAccount != null || useAccount != null) ...[

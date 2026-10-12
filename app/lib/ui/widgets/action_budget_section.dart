@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../budget_providers.dart';
 import 'budget_dialogs.dart';
 import 'budget_format.dart';
+import 'param_icons.dart';
 import 'section_block.dart';
 import 'transaction_picker_dialog.dart';
 
@@ -41,8 +42,20 @@ class ActionBudgetSection extends ConsumerWidget {
       padding: kSectionTileBlockPadding,
       child: ExpansionTile(
         key: ValueKey('action-budget-${items.isEmpty}'),
-        title: Text(
-          items.isEmpty ? 'Transactions' : 'Transactions (${items.length})',
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ParamIcon(Param.transactions, size: 20),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                items.isEmpty
+                    ? 'Transactions'
+                    : 'Transactions (${items.length})',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
         shape: const Border(),
         collapsedShape: const Border(),

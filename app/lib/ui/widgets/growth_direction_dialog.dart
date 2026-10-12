@@ -17,6 +17,7 @@ import '../../core/time_codec.dart';
 import '../theme/glass_theme.dart';
 import '../undo.dart';
 import 'glass_pill_selector.dart';
+import 'action_editor.dart';
 import 'action_picker_dialog.dart';
 import 'metric_picker.dart';
 import 'param_icons.dart';
@@ -56,8 +57,11 @@ class GrowthDirectionDialog extends ConsumerStatefulWidget {
 
   const GrowthDirectionDialog({super.key, this.existing});
 
-  static Future<void> show(BuildContext context, {GrowthMetric? existing}) {
-    return showStackedDialog<void>(
+  /// Opens the dialog; completes with the id of the direction that was saved
+  /// (null when cancelled or deleted), so a caller can use a direction it just
+  /// created (the action editor's "New direction").
+  static Future<String?> show(BuildContext context, {GrowthMetric? existing}) {
+    return showStackedDialog<String>(
       context: context,
       // Phone: a tap outside (e.g. to hide the keyboard) must not close the
       // item; only Cancel / Save / Delete / back do.
@@ -385,6 +389,20 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
                 onPressed: () =>
                     _linkAction(id, {for (final a in sorted) a.id}),
               ),
+              // A brand-new action already linked to this direction. Not when
+              // dialogs are stacked three deep (action -> direction -> action
+              // -> ... must end somewhere).
+              if (openStackedDialogCount < 3)
+                IconButton(
+                  key: const ValueKey('direction-new-action'),
+                  icon: const Icon(Icons.playlist_add),
+                  tooltip: 'New action for this direction',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => ActionEditorDialog.show(
+                    context,
+                    initialMetricIds: {id},
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 4),
@@ -489,7 +507,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
         ? double.parse(_target.text.trim().replaceAll(',', '.'))
         : 1.0;
     try {
-      await ref
+      final savedId = await ref
           .read(metricServiceProvider)
           .saveMetric(
             id: widget.existing?.id,
@@ -502,7 +520,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
             dependsOnIds: _dependsOn.toList(),
             leadsToIds: _leadsTo.toList(),
           );
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop(savedId);
     } on MetricCycleException catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }

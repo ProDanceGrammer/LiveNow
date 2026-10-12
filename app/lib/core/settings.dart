@@ -3,6 +3,9 @@ abstract final class AppSettings {
   static const int afterWorkHour = 18;
   static const int morningHour = 9;
 
+  /// When the working day starts by default (minutes since midnight).
+  static const int workStartMinutes = 9 * 60;
+
   /// DateTime.weekday values: Monday = 1 ... Sunday = 7.
   static const Set<int> workingWeekdays = {1, 2, 3, 4, 5};
 

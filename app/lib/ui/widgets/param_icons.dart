@@ -3,9 +3,28 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../theme/glass_theme.dart';
+import 'param_line_icons.dart';
 
 /// The five parameters shown next to growth-direction / action numbers.
-enum Param { direction, urgency, weight, progress, level, fact }
+enum Param {
+  direction,
+  urgency,
+  weight,
+  progress,
+  level,
+  fact,
+
+  // Line-style icons (see param_line_icons.dart): the budget's Plan / Fact pair
+  // (two halves of one route), its sections, and the action editor's blocks.
+  plan,
+  actual,
+  categories,
+  accounts,
+  transactions,
+  notes,
+  connected,
+  manual,
+}
 
 /// Full tooltip / accessibility names.
 const Map<Param, String> kParamNames = {
@@ -15,6 +34,14 @@ const Map<Param, String> kParamNames = {
   Param.progress: 'Progress',
   Param.level: 'Level',
   Param.fact: 'Fact: reached so far',
+  Param.plan: 'Plan',
+  Param.actual: 'Fact',
+  Param.categories: 'Categories',
+  Param.accounts: 'Accounts',
+  Param.transactions: 'Transactions',
+  Param.notes: 'Notes',
+  Param.connected: 'Connected actions',
+  Param.manual: 'Manual parameters',
 };
 
 /// A small monochrome icon for a [Param], painted from cached static paths in
@@ -22,7 +49,15 @@ const Map<Param, String> kParamNames = {
 /// `direction` is the rail's own `Icons.insights`.
 class ParamIcon extends StatelessWidget {
   const ParamIcon(this.param,
-      {super.key, this.color, this.size = 16, this.tooltip = true});
+      {super.key, this.color, this.size = 16, this.tooltip = true, this.tapToShow = false});
+
+  /// A budget Plan icon (outline pin + dotted trail).
+  const ParamIcon.plan({Key? key, Color? color, double size = 18})
+      : this(Param.plan, key: key, color: color, size: size, tapToShow: true);
+
+  /// A budget Fact icon (solid pin + solid trail); continues [ParamIcon.plan].
+  const ParamIcon.actual({Key? key, Color? color, double size = 18})
+      : this(Param.actual, key: key, color: color, size: size, tapToShow: true);
 
   const ParamIcon.direction({Key? key, Color? color, double size = 16, bool tooltip = true})
       : this(Param.direction, key: key, color: color, size: size, tooltip: tooltip);
@@ -42,6 +77,10 @@ class ParamIcon extends StatelessWidget {
   final double size;
   final bool tooltip;
 
+  /// Touch: a tap (not only a long-press) shows the name. Used by the
+  /// Plan/Fact icons that replace the words; on Windows hover shows it anyway.
+  final bool tapToShow;
+
   @override
   Widget build(BuildContext context) {
     final c = color ??
@@ -57,7 +96,13 @@ class ParamIcon extends StatelessWidget {
           );
     final Widget sized = SizedBox.square(dimension: size, child: icon);
     final Widget semantic = Semantics(label: name, image: true, child: ExcludeSemantics(child: sized));
-    return tooltip ? Tooltip(message: name, child: semantic) : semantic;
+    return tooltip
+        ? Tooltip(
+            message: name,
+            triggerMode: tapToShow ? TooltipTriggerMode.tap : null,
+            child: semantic,
+          )
+        : semantic;
   }
 }
 
@@ -109,6 +154,10 @@ class ParamValue extends StatelessWidget {
       : this(Param.level, text, key: key, color: color, style: style, size: size);
   const ParamValue.fact(String text, {Key? key, Color? color, TextStyle? style, double size = 14})
       : this(Param.fact, text, key: key, color: color, style: style, size: size);
+  const ParamValue.plan(String text, {Key? key, Color? color, TextStyle? style, double size = 16})
+      : this(Param.plan, text, key: key, color: color, style: style, size: size);
+  const ParamValue.actual(String text, {Key? key, Color? color, TextStyle? style, double size = 16})
+      : this(Param.actual, text, key: key, color: color, style: style, size: size);
 
   final Param param;
   final String text;
@@ -128,7 +177,8 @@ class ParamValue extends StatelessWidget {
       children: [
         ParamIcon(param,
             color: iconColor ?? (param == Param.urgency ? context.glass.urgencyIcon : c),
-            size: size),
+            size: size,
+            tapToShow: param == Param.plan || param == Param.actual),
         const SizedBox(width: 3),
         Text(text, style: base.copyWith(color: c)),
       ],
@@ -180,6 +230,15 @@ class ParamIconPainter extends CustomPainter {
               ..isAntiAlias = true);
       case Param.fact:
         canvas.drawPath(_Paths.target, fill);
+      case Param.plan:
+      case Param.actual:
+      case Param.categories:
+      case Param.accounts:
+      case Param.transactions:
+      case Param.notes:
+      case Param.connected:
+      case Param.manual:
+        paintLineIcon(canvas, param, color);
     }
     canvas.restore();
   }

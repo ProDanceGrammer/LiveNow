@@ -6,6 +6,7 @@ import '../../domain/growth_rules.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
+import 'growth_direction_dialog.dart';
 
 /// Chips for the chosen growth directions plus an "Add" button that opens a
 /// searchable multi-select. There are hundreds of directions, so a chip per
@@ -26,6 +27,10 @@ class MetricPicker extends ConsumerWidget {
   /// Longer explanation shown as a tooltip on the heading.
   final String? labelTooltip;
 
+  /// Offers "New…": creates a growth direction in its own dialog and adds it
+  /// to the selection.
+  final bool allowCreate;
+
   const MetricPicker({
     super.key,
     required this.label,
@@ -34,6 +39,7 @@ class MetricPicker extends ConsumerWidget {
     required this.onChanged,
     this.excludeId,
     this.onOpen,
+    this.allowCreate = false,
   });
 
   @override
@@ -60,6 +66,12 @@ class MetricPicker extends ConsumerWidget {
       if (result != null) onChanged(result);
     }
 
+    Future<void> createNew() async {
+      final id = await GrowthDirectionDialog.show(context);
+      if (id != null) onChanged({...selectedIds, id});
+    }
+
+    final canCreate = allowCreate && openStackedDialogCount < 3;
     final hasHeader = label.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -84,6 +96,14 @@ class MetricPicker extends ConsumerWidget {
                 visualDensity: VisualDensity.compact,
                 onPressed: openSearch,
               ),
+              if (canCreate)
+                IconButton(
+                  key: const ValueKey('metric-picker-new'),
+                  icon: const Icon(Icons.library_add_outlined),
+                  tooltip: 'New growth direction…',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: createNew,
+                ),
             ],
           ),
           const SizedBox(height: 4),
@@ -105,10 +125,22 @@ class MetricPicker extends ConsumerWidget {
             ],
           ),
         if (!hasHeader)
-          TextButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('Add…'),
-            onPressed: openSearch,
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text('Add…'),
+                onPressed: openSearch,
+              ),
+              if (canCreate)
+                TextButton.icon(
+                  key: const ValueKey('metric-picker-new'),
+                  icon: const Icon(Icons.library_add_outlined),
+                  label: const Text('New…'),
+                  onPressed: createNew,
+                ),
+            ],
           ),
       ],
     );

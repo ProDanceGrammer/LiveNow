@@ -271,6 +271,11 @@ class BudgetAccountsTable extends Table {
   TextColumn get currency => text()();
   RealColumn get rateToBase => real().withDefault(const Constant(1))();
   RealColumn get openingBalance => real().withDefault(const Constant(0))();
+
+  /// The account's picture: a square PNG (96 px) as base64 text, or null (the
+  /// purse icon is shown instead). Text rather than a BLOB so the sync log and
+  /// the JSON backup carry it like any other column.
+  TextColumn get icon => text().nullable()();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
 

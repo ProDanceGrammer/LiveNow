@@ -75,6 +75,15 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  fonts:
+    # Colour country flags (Twemoji Mozilla, flags only; graphics CC-BY 4.0,
+    # (c) Twitter, Inc. and other contributors). Windows' Segoe UI Emoji draws
+    # a flag emoji as two letters, so this family goes BEFORE it in the Windows
+    # font fallback list (lib/ui/theme/app_theme.dart); iOS draws flags itself.
+    - family: TwemojiFlags
+      fonts:
+        - asset: assets/fonts/TwemojiCountryFlags.ttf
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

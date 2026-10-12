@@ -39,11 +39,16 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
   final DateTime? initialStart;
   final DateTime? initialEnd;
 
+  /// For a new action: growth directions to link from the start (the direction
+  /// dialog's "New action" passes its own id).
+  final Set<String> initialMetricIds;
+
   const ActionEditorDialog({
     super.key,
     this.existing,
     this.initialStart,
     this.initialEnd,
+    this.initialMetricIds = const {},
   });
 
   static Future<void> show(
@@ -51,6 +56,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     ActionRow? existing,
     DateTime? initialStart,
     DateTime? initialEnd,
+    Set<String> initialMetricIds = const {},
   }) {
     return showStackedDialog<void>(
       context: context,
@@ -58,6 +64,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
         existing: existing,
         initialStart: initialStart,
         initialEnd: initialEnd,
+        initialMetricIds: initialMetricIds,
       ),
     );
   }
@@ -99,6 +106,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         _notes != null && !notesDocumentIsEmpty(notesDocumentFromJson(_notes));
     _startAt = widget.initialStart;
     _endAt = widget.initialEnd;
+    _selectedMetricIds = {...widget.initialMetricIds};
 
     if (existing != null) {
       _postponeFlex = existing.postponeFlex;
@@ -187,7 +195,21 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
             _save,
       },
       child: AlertDialog(
-        title: Text(_isEditing ? 'Edit action' : 'New action'),
+        title: _isEditing && usePhoneLayout(context)
+            // Phone: Delete sits in the dialog's top-right corner.
+            ? Row(
+                children: [
+                  const Expanded(child: Text('Edit action')),
+                  IconButton(
+                    key: const ValueKey('editor-delete'),
+                    tooltip: 'Delete',
+                    color: Theme.of(context).colorScheme.error,
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    onPressed: _deleteAndClose,
+                  ),
+                ],
+              )
+            : Text(_isEditing ? 'Edit action' : 'New action'),
         content: SizedBox(
           width: math.max(280.0, width),
           child: SingleChildScrollView(
@@ -221,7 +243,19 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                   SectionBlock(
                     padding: kSectionTileBlockPadding,
                     child: ExpansionTile(
-                      title: const Text('Notes'),
+                      title: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const ParamIcon(Param.notes, size: 20),
+                          const SizedBox(width: 8),
+                          const Flexible(
+                            child: Text(
+                              'Notes',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                       shape: const Border(),
                       collapsedShape: const Border(),
                       initiallyExpanded: _notesOpen,
@@ -285,24 +319,37 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: usePhoneLayout(context)
-                // Phone: big touch-sized tiles wrapped onto rows (a single
-                // row had to be scaled down to unreadably small icons).
-                ? QuickActionBar(
+                // Phone: two groups of touch-sized tiles, each wrapping onto
+                // rows: Start / Stop / Continue, then every postpone and
+                // prolong. (Delete is in the title.)
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      QuickActionBar(
+                        actionId: widget.existing!.id,
+                        groups: const {0},
+                        tileSize: 36,
+                        iconSize: 22,
+                        hitExtra: 4,
+                        wrap: true,
+                      ),
+                      const SizedBox(height: 8),
+                      QuickActionBar(
+                        actionId: widget.existing!.id,
+                        groups: const {1},
+                        tileSize: 36,
+                        iconSize: 22,
+                        hitExtra: 4,
+                        wrap: true,
+                      ),
+                    ],
+                  )
+                // Windows: one row in three parts - Start/Stop/Continue at the
+                // left, the postpones in the middle, Delete at the right.
+                : QuickActionBar(
                     actionId: widget.existing!.id,
                     onDelete: _deleteAndClose,
-                    tileSize: 40,
-                    iconSize: 24,
-                    hitExtra: 4,
-                    wrap: true,
-                  )
-                // Scaled down (never wrapped or clipped) to fit the dialog.
-                : FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: QuickActionBar(
-                      actionId: widget.existing!.id,
-                      onDelete: _deleteAndClose,
-                    ),
+                    spread: true,
                   ),
           ),
         const SizedBox(height: 4),
@@ -380,7 +427,19 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         SectionBlock(
           padding: kSectionTileBlockPadding,
           child: ExpansionTile(
-            title: const Text('Growth directions'),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ParamIcon(Param.direction, size: 20),
+                const SizedBox(width: 8),
+                const Flexible(
+                  child: Text(
+                    'Growth directions',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
             shape: const Border(),
             collapsedShape: const Border(),
             tilePadding: kSectionTilePadding,
@@ -390,6 +449,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
             children: [
               MetricPicker(
                 label: '',
+                allowCreate: true,
                 selectedIds: _selectedMetricIds,
                 onOpen: (m) => openDirectionById(context, ref, m.id),
                 onChanged: (ids) => setState(() => _selectedMetricIds = ids),
@@ -410,7 +470,19 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
           SectionBlock(
             padding: kSectionTileBlockPadding,
             child: ExpansionTile(
-              title: const Text('Connected actions'),
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const ParamIcon(Param.connected, size: 20),
+                  const SizedBox(width: 8),
+                  const Flexible(
+                    child: Text(
+                      'Connected actions',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
               shape: const Border(),
               collapsedShape: const Border(),
               tilePadding: kSectionTilePadding,
@@ -424,7 +496,19 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         SectionBlock(
           padding: kSectionTileBlockPadding,
           child: ExpansionTile(
-            title: const Text('Manual parameters'),
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const ParamIcon(Param.manual, size: 20),
+                const SizedBox(width: 8),
+                const Flexible(
+                  child: Text(
+                    'Manual parameters',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
             shape: const Border(),
             collapsedShape: const Border(),
             tilePadding: kSectionTilePadding,
@@ -739,7 +823,14 @@ class _DependencySection extends ConsumerWidget {
       children: [
         Row(
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            // Shrinks (rather than overflows) when the room is tight.
+            Flexible(
+              child: Text(
+                title,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.add),
               tooltip: isPredecessor

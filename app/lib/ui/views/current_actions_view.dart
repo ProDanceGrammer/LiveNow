@@ -194,9 +194,11 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
     AsyncValue<List<ActionListItem>> cards,
     AsyncValue<int> total, {
     bool header = true,
+    bool compact = false,
   }) => _BoardColumn(
     title: 'Done Before',
     showHeader: header,
+    compact: compact,
     asyncCards: cards,
     total: total.value,
     onShowMore: () =>
@@ -208,9 +210,11 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
     AsyncValue<List<ActionListItem>> cards,
     AsyncValue<int> total, {
     bool header = true,
+    bool compact = false,
   }) => _BoardColumn(
     title: 'Not Done Yet',
     showHeader: header,
+    compact: compact,
     asyncCards: cards,
     total: total.value,
     onShowMore: () => ref.read(currentNotDoneLimitProvider.notifier).state +=
@@ -228,6 +232,10 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
     ref.listen(currentNotDoneProvider, (_, _) => _prune());
     final primary = Theme.of(context).colorScheme.primary;
     final phone = usePhoneLayout(context);
+    // A phone turned sideways has the room for both columns at once (so no
+    // switch): they sit side by side under slim titles.
+    final landscape =
+        phone && MediaQuery.orientationOf(context) == Orientation.landscape;
 
     return Focus(
       focusNode: _focus,
@@ -242,7 +250,34 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: phone
+              child: landscape
+                  ? Column(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: _doneColumn(
+                                  doneAsync,
+                                  doneCount,
+                                  compact: true,
+                                ),
+                              ),
+                              Expanded(
+                                child: _notDoneColumn(
+                                  notDoneAsync,
+                                  notDoneCount,
+                                  compact: true,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const _PhoneSelectionBar(),
+                      ],
+                    )
+                  : phone
                   ? Column(
                       children: [
                         _PhoneSwitch(
@@ -314,8 +349,13 @@ class _BoardColumn extends StatelessWidget {
   /// The title block; a phone shows the column through its own switch instead.
   final bool showHeader;
 
+  /// A slim one-line title instead of the big block (a phone held sideways,
+  /// where both columns share a short screen).
+  final bool compact;
+
   const _BoardColumn({
     this.showHeader = true,
+    this.compact = false,
     required this.title,
     required this.asyncCards,
     required this.total,
@@ -331,11 +371,21 @@ class _BoardColumn extends StatelessWidget {
     // A compact glass header block, then the cards directly on the page
     // background (no big surface behind them).
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: compact ? 4 : 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (showHeader)
+          if (showHeader && compact)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                title,
+                key: _kHeaderKey,
+                textAlign: TextAlign.center,
+                style: text.titleSmall?.copyWith(color: textColor),
+              ),
+            ),
+          if (showHeader && !compact)
             GlassSurface(
               key: _kHeaderKey,
               radius: 20,
@@ -367,7 +417,7 @@ class _BoardColumn extends StatelessWidget {
                 ),
               ),
             ),
-          if (showHeader) const SizedBox(height: 8),
+          if (showHeader && !compact) const SizedBox(height: 8),
           Expanded(
             child: asyncCards.when(
               // Raising the page size restarts the query; keep the cards
@@ -377,6 +427,9 @@ class _BoardColumn extends StatelessWidget {
                 if (cards.isEmpty) return Center(child: Text(emptyMessage));
                 final hasMore = (total ?? 0) > cards.length;
                 return ListView.builder(
+                  // Sideways on a phone the round + button floats over the
+                  // right column: leave room to scroll the last card past it.
+                  padding: EdgeInsets.only(bottom: compact ? 80 : 0),
                   itemCount: cards.length + (hasMore ? 1 : 0),
                   itemBuilder: (context, i) => i == cards.length
                       ? Align(
