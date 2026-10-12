@@ -2,6 +2,8 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import 'dialog_back.dart';
+
 /// Number of dialogs opened through [showStackedDialog] that are still open.
 int _openDialogs = 0;
 
@@ -10,7 +12,10 @@ int get openStackedDialogCount => _openDialogs;
 
 /// Visible for tests: forget dialogs whose futures never completed because
 /// the widget tree was torn down mid-test.
-void resetStackedDialogsForTest() => _openDialogs = 0;
+void resetStackedDialogsForTest() {
+  _openDialogs = 0;
+  setDialogBackHandler(false);
+}
 
 /// Like [showDialog], but only the bottom-most dialog dims the background.
 /// Dialogs opened over another one get a transparent barrier (which still
@@ -27,6 +32,7 @@ Future<T?> showStackedDialog<T>({
 }) {
   final isFirst = _openDialogs == 0;
   _openDialogs++;
+  setDialogBackHandler(true);
   try {
     return showDialog<T>(
       context: context,
@@ -57,9 +63,11 @@ Future<T?> showStackedDialog<T>({
           : const Color(0x401E293B),
     ).whenComplete(() {
       if (_openDialogs > 0) _openDialogs--;
+      if (_openDialogs == 0) setDialogBackHandler(false);
     });
   } catch (_) {
     _openDialogs--;
+    if (_openDialogs == 0) setDialogBackHandler(false);
     rethrow;
   }
 }

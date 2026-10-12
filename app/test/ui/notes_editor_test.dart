@@ -81,7 +81,8 @@ void main() {
     final state = await pumpEditor(tester, json: json, onToggle: () {});
     expect(find.byType(AppFlowyEditor), findsOneWidget);
     expect(find.text('Reset checkboxes'), findsOneWidget);
-    expect(find.text('Paste as Markdown'), findsOneWidget);
+    // Windows: Paste as Markdown is the Ctrl+Shift+V shortcut, no button.
+    expect(find.text('Paste as Markdown'), findsNothing);
     expect(find.text('Expand'), findsOneWidget);
     expect(
       dumpDoc(state.editorState.document),
@@ -183,7 +184,7 @@ void main() {
     );
     final ed = state.editorState;
     ed.selection = Selection.collapsed(Position(path: [0], offset: 2));
-    await tester.tap(find.text('Paste as Markdown'));
+    await state.pasteAsMarkdown();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     expect(
@@ -202,7 +203,7 @@ void main() {
       tester,
       json: jsonOf([paragraphNode(text: 'a')]),
     );
-    await tester.tap(find.text('Paste as Markdown'));
+    await state.pasteAsMarkdown();
     await tester.pump(const Duration(milliseconds: 600));
     expect(dumpDoc(state.editorState.document), 'paragraph:a');
     await unmount(tester);

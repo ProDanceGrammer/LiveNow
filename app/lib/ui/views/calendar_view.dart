@@ -148,6 +148,14 @@ String _hhmm(DateTime utc) {
   return '${twoDigits(l.hour)}:${twoDigits(l.minute)}';
 }
 
+/// The 1 px line round every event block / all-day chip (separates touching
+/// events): light on the dark theme, navy on the light one, translucent so it
+/// works over every urgency colour.
+Color _eventOutline(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? const Color(0x59FFFFFF)
+    : const Color(0x4D1E293B);
+
 /// End of [a] as drawn: never shorter than the minimum block (10 min).
 DateTime _effectiveEnd(ActionListItem a) {
   final start = a.startAt!;
@@ -417,54 +425,57 @@ class CalendarView extends ConsumerWidget {
                             ),
                     ),
                     if (phone)
+                      // Over the time column: Now, full screen, options.
                       Positioned(
                         top: 4,
-                        right: 70,
-                        height: 34,
-                        child: TextButton(
-                          key: const ValueKey('calendar-now-phone'),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            minimumSize: const Size(0, 30),
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                          onPressed: () => goToCalendarToday(ref),
-                          child: const Text('Now'),
-                        ),
-                      ),
-                    if (phone)
-                      Positioned(
-                        top: 4,
-                        right: 36,
-                        width: 34,
-                        height: 34,
+                        left: 8,
+                        width: _kGutter,
+                        height: 38,
                         child: Builder(
                           builder: (context) {
                             final full = ref.watch(phoneCalendarFullProvider);
-                            return IconButton(
-                              key: const ValueKey('calendar-full-toggle'),
-                              padding: EdgeInsets.zero,
-                              iconSize: 22,
-                              tooltip: full ? 'Show app menus' : 'Full screen',
-                              icon: Icon(
-                                full ? Icons.fullscreen_exit : Icons.fullscreen,
-                              ),
-                              onPressed: () =>
-                                  ref
-                                          .read(phoneCalendarFullProvider.notifier)
-                                          .state =
-                                      !full,
+                            Widget small(Widget child) =>
+                                SizedBox(width: 18, child: child);
+                            return Row(
+                              children: [
+                                small(
+                                  IconButton(
+                                    key: const ValueKey('calendar-now-phone'),
+                                    padding: EdgeInsets.zero,
+                                    iconSize: 17,
+                                    tooltip: 'Now',
+                                    icon: const Icon(Icons.access_time_rounded),
+                                    onPressed: () => goToCalendarToday(ref),
+                                  ),
+                                ),
+                                small(
+                                  IconButton(
+                                    key: const ValueKey('calendar-full-toggle'),
+                                    padding: EdgeInsets.zero,
+                                    iconSize: 17,
+                                    tooltip: full
+                                        ? 'Show app menus'
+                                        : 'Full screen',
+                                    icon: Icon(
+                                      full
+                                          ? Icons.fullscreen_exit
+                                          : Icons.fullscreen,
+                                    ),
+                                    onPressed: () =>
+                                        ref
+                                                .read(
+                                                  phoneCalendarFullProvider
+                                                      .notifier,
+                                                )
+                                                .state =
+                                            !full,
+                                  ),
+                                ),
+                                small(const _CalendarMenu()),
+                              ],
                             );
                           },
                         ),
-                      ),
-                    if (phone)
-                      const Positioned(
-                        top: 4,
-                        right: 2,
-                        width: 34,
-                        height: 34,
-                        child: _CalendarMenu(),
                       ),
                   ],
                 ),
@@ -899,11 +910,9 @@ class _CalendarMenu extends ConsumerWidget {
       tooltip: 'Calendar options',
       icon: const Icon(Icons.more_vert),
       padding: EdgeInsets.zero,
-      iconSize: 22,
+      iconSize: 17,
       onSelected: (v) {
-        if (v == 'now') {
-          goToCalendarToday(ref);
-        } else if (v.startsWith('days:')) {
+        if (v.startsWith('days:')) {
           setCalendarDayCount(ref, int.parse(v.substring(5)));
         } else if (v == 'allday') {
           ref.read(calendarAllDayProvider.notifier).toggle();
@@ -912,12 +921,6 @@ class _CalendarMenu extends ConsumerWidget {
         }
       },
       itemBuilder: (_) => [
-        const PopupMenuItem(
-          key: ValueKey('calendar-menu-now'),
-          value: 'now',
-          child: Text('Now'),
-        ),
-        const PopupMenuDivider(),
         for (var n = 1; n <= maxDays; n++)
           CheckedPopupMenuItem(
             key: ValueKey('calendar-menu-days-$n'),
@@ -1339,7 +1342,7 @@ class _AllDayChip extends ConsumerWidget {
               borderRadius: BorderRadius.circular(10),
               side: selected
                   ? BorderSide(color: scheme.onSurface, width: 2)
-                  : BorderSide.none,
+                  : BorderSide(color: _eventOutline(context)),
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
@@ -3387,8 +3390,11 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8),
-        // One filled rounded rectangle; only the selected block is outlined.
-        border: selected ? Border.all(color: scheme.onSurface, width: 2) : null,
+        // One filled rounded rectangle: a thin neutral line keeps neighbouring
+        // blocks apart, the selected one gets a thicker border.
+        border: selected
+            ? Border.all(color: scheme.onSurface, width: 2)
+            : Border.all(color: _eventOutline(context)),
       ),
       child: content,
     );

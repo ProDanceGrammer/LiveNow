@@ -236,6 +236,19 @@ class ActionService {
     );
   }
 
+  /// Writes only the notes (and their search text): the editor's silent
+  /// autosave must not touch anything else of the action.
+  Future<void> updateNotes(String actionId, String? notes) {
+    return (db.update(db.actionsTable)..where((t) => t.id.equals(actionId)))
+        .write(
+          ActionsTableCompanion(
+            notes: Value(notes),
+            notesText: Value(notesPlainText(notes)),
+            updatedAt: Value(dateTimeToDb(DateTime.now())!),
+          ),
+        );
+  }
+
   /// Deletes an action together with its dependency edges, metric links and
   /// occurrence history, and returns everything it removed so [undoDelete]
   /// can put it back. Its neighbours in a chain are left as they are (no

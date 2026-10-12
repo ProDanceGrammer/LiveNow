@@ -11,6 +11,7 @@ import '../../domain/growth_rules.dart';
 import '../../domain/template_import_service.dart';
 import '../../domain/template_search.dart';
 import '../data_imports.dart';
+import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
 import '../open_entity.dart';
@@ -281,10 +282,14 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     );
   }
 
-  Future<void> _showEditor(BuildContext context, {ActionTemplate? existing}) {
+  Future<void> _showEditor(
+    BuildContext context, {
+    ActionTemplate? existing,
+    _TemplateDraft? draft,
+  }) {
     return showStackedDialog<void>(
       context: context,
-      builder: (_) => _TemplateEditorDialog(existing: existing),
+      builder: (_) => _TemplateEditorDialog(existing: existing, draft: draft),
     );
   }
 
@@ -327,17 +332,42 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
   }
 }
 
+/// The unsaved fields of a template form (kept for Undo after Back).
+class _TemplateDraft {
+  const _TemplateDraft({
+    required this.name,
+    required this.minutes,
+    required this.blocks,
+    required this.isAllDay,
+    required this.useAverage,
+    required this.notes,
+    required this.metricIds,
+  });
+
+  final String name;
+  final String minutes;
+  final String blocks;
+  final bool isAllDay;
+  final bool useAverage;
+  final String? notes;
+  final Set<String> metricIds;
+}
+
 class _TemplateEditorDialog extends ConsumerStatefulWidget {
   final ActionTemplate? existing;
 
-  const _TemplateEditorDialog({this.existing});
+  /// Unsaved edits to restore (Undo after a Back-button close).
+  final _TemplateDraft? draft;
+
+  const _TemplateEditorDialog({this.existing, this.draft});
 
   @override
   ConsumerState<_TemplateEditorDialog> createState() =>
       _TemplateEditorDialogState();
 }
 
-class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
+class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
+    implements DraftDialog {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _minutesController;
@@ -380,10 +410,80 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog> {
     _selectedMetricIds =
         ((payload?['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
             .toSet();
+    final d = widget.draft;
+    if (d != null) {
+      _nameController.text = d.name;
+      _minutesController.text = d.minutes;
+      _blocksController.text = d.blocks;
+      _isAllDay = d.isAllDay;
+      _useAverage = d.useAverage;
+      _notes = d.notes;
+      _selectedMetricIds = {...d.metricIds};
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    registerDraftDialog(ModalRoute.of(context), this);
+  }
+
+  Map<String, dynamic> get _basePayload => widget.existing == null
+      ? const {}
+      : jsonDecode(widget.existing!.payload) as Map<String, dynamic>;
+
+  bool get _isDirty {
+    final b = _basePayload;
+    if (_nameController.text != (b['name'] as String? ?? '')) return true;
+    if (_minutesController.text !=
+        ((b['estimatedMinutes'] as int?)?.toString() ?? '')) {
+      return true;
+    }
+    if (_blocksController.text != (b['diaryBlocks'] as String? ?? '')) {
+      return true;
+    }
+    if (_isAllDay != (b['isAllDay'] as bool? ?? false)) return true;
+    if (_useAverage != (b['useAverage'] as bool? ?? false)) return true;
+    if (_notes != (b['notes'] as String?)) return true;
+    final ids = ((b['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
+        .toSet();
+    return !(ids.length == _selectedMetricIds.length &&
+        ids.containsAll(_selectedMetricIds));
+  }
+
+  @override
+  void closeByBack() {
+    final draft = _isDirty
+        ? _TemplateDraft(
+            name: _nameController.text,
+            minutes: _minutesController.text,
+            blocks: _blocksController.text,
+            isAllDay: _isAllDay,
+            useAverage: _useAverage,
+            notes: _notes,
+            metricIds: {..._selectedMetricIds},
+          )
+        : null;
+    final existing = widget.existing;
+    final shown = _nameController.text.trim();
+    closeDraftDialog(
+      context: context,
+      ref: ref,
+      label: shown.isEmpty ? 'template' : '"$shown"',
+      draft: draft,
+      reopen: (root, d) => showStackedDialog<void>(
+        context: root,
+        builder: (_) => _TemplateEditorDialog(
+          existing: existing,
+          draft: d as _TemplateDraft,
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    unregisterDraftDialog(this);
     _nameController.dispose();
     _minutesController.dispose();
     _blocksController.dispose();

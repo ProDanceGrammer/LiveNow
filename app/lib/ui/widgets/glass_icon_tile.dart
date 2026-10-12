@@ -20,6 +20,9 @@ class GlassIconTile extends StatefulWidget {
   final String tooltip;
   final VoidCallback onTap;
 
+  /// False = dimmed and not tappable (the tooltip still explains why).
+  final bool enabled;
+
   /// Edge of the visible rounded square.
   final double size;
   final double iconSize;
@@ -36,6 +39,7 @@ class GlassIconTile extends StatefulWidget {
     this.size = 32,
     this.iconSize = 20,
     this.hitExtra = 4,
+    this.enabled = true,
   });
 
   @override
@@ -77,11 +81,11 @@ class _GlassIconTileState extends State<GlassIconTile> {
     final tint = (g.dark ? 0.24 : 0.18) + (_hover ? 0.12 : 0.0);
     final radius = BorderRadius.circular(widget.size * 0.375);
 
-    return Tooltip(
+    final tile = Tooltip(
       message: widget.tooltip,
       child: InkWell(
         borderRadius: radius,
-        onTap: widget.onTap,
+        onTap: widget.enabled ? widget.onTap : null,
         onHover: (h) => setState(() => _hover = h),
         hoverColor: Colors.transparent,
         splashColor: base.withValues(alpha: 0.2),
@@ -119,5 +123,6 @@ class _GlassIconTileState extends State<GlassIconTile> {
         ),
       ),
     );
+    return widget.enabled ? tile : Opacity(opacity: 0.38, child: tile);
   }
 }

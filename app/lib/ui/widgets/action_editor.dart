@@ -9,8 +9,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/action_urgency.dart';
+import '../../domain/chain_schedule.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/duration_rules.dart';
+import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
 import '../open_entity.dart';
@@ -21,6 +23,8 @@ import 'action_budget_section.dart';
 import 'action_picker_dialog.dart';
 import 'activity_picker_dialog.dart';
 import 'action_tile.dart' show formatUrgency;
+import 'app_toast.dart';
+import 'glass_icon_tile.dart' show GlassHue;
 import 'date_time_field.dart';
 import 'metric_picker.dart';
 import 'notes_document.dart';
@@ -29,6 +33,34 @@ import 'what_is_done_button.dart';
 import 'param_icons.dart';
 import 'quick_action_bar.dart';
 import 'section_block.dart';
+
+/// The unsaved edits of an action form, kept when the Back button closes the
+/// dialog so Undo can open it again exactly as it was.
+class ActionEditorDraft {
+  const ActionEditorDraft({
+    required this.name,
+    required this.startAt,
+    required this.endAt,
+    required this.isAllDay,
+    required this.done,
+    required this.metricIds,
+    required this.countableActivityId,
+    required this.notes,
+    required this.postponeFlex,
+    required this.depthLevel,
+  });
+
+  final String name;
+  final DateTime? startAt;
+  final DateTime? endAt;
+  final bool isAllDay;
+  final bool done;
+  final Set<String> metricIds;
+  final String? countableActivityId;
+  final String? notes;
+  final String postponeFlex;
+  final String? depthLevel;
+}
 
 /// Create/edit dialog for a single action: core fields, metric links, and
 /// (when editing) its previous/next action dependencies.
@@ -44,12 +76,16 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
   /// dialog's "New action" passes its own id).
   final Set<String> initialMetricIds;
 
+  /// Unsaved edits to restore (Undo after a Back-button close).
+  final ActionEditorDraft? draft;
+
   const ActionEditorDialog({
     super.key,
     this.existing,
     this.initialStart,
     this.initialEnd,
     this.initialMetricIds = const {},
+    this.draft,
   });
 
   static Future<void> show(
@@ -58,6 +94,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     DateTime? initialStart,
     DateTime? initialEnd,
     Set<String> initialMetricIds = const {},
+    ActionEditorDraft? draft,
   }) {
     return showStackedDialog<void>(
       context: context,
@@ -66,6 +103,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
         initialStart: initialStart,
         initialEnd: initialEnd,
         initialMetricIds: initialMetricIds,
+        draft: draft,
       ),
     );
   }
@@ -74,7 +112,8 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
   ConsumerState<ActionEditorDialog> createState() => _ActionEditorDialogState();
 }
 
-class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
+class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
+    implements DraftDialog {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
 
@@ -95,6 +134,28 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
   String? _openStamp; // sync clock stamp of the row when the form was opened
 
   bool get _isEditing => widget.existing != null;
+
+  /// Id of the action created by a Ctrl+S on a NEW form: later saves update it
+  /// instead of creating a duplicate.
+  String? _createdId;
+
+  /// The directions the form was opened with (once loaded): what "changed"
+  /// is measured against.
+  Set<String> _baselineMetricIds = {};
+  Timer? _notesTimer;
+
+  /// Five quiet seconds after the last Notes change the notes alone are written
+  /// (silently, the dialog stays as it is). A form that is not saved yet has
+  /// nothing to write to, so a new action keeps them in the form.
+  void _scheduleNotesAutosave() {
+    _notesTimer?.cancel();
+    final id = widget.existing?.id ?? _createdId;
+    if (id == null) return;
+    _notesTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      ref.read(actionServiceProvider).updateNotes(id, _notes);
+    });
+  }
 
   @override
   void initState() {
@@ -136,12 +197,88 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         db.actionMetricsTable,
       )..where((t) => t.actionId.equals(existing.id))).get().then((links) {
         if (mounted) {
-          setState(
-            () => _selectedMetricIds = links.map((l) => l.metricId).toSet(),
-          );
+          _baselineMetricIds = links.map((l) => l.metricId).toSet();
+          if (widget.draft == null) {
+            setState(() => _selectedMetricIds = {..._baselineMetricIds});
+          }
         }
       });
     }
+
+    final d = widget.draft;
+    if (d != null) {
+      _nameController.text = d.name;
+      _startAt = d.startAt;
+      _endAt = d.endAt;
+      _isAllDay = d.isAllDay;
+      _done = d.done;
+      _selectedMetricIds = {...d.metricIds};
+      _countableActivityId = d.countableActivityId;
+      _notes = d.notes;
+      _notesOpen =
+          _notes != null &&
+          !notesDocumentIsEmpty(notesDocumentFromJson(_notes));
+      _postponeFlex = d.postponeFlex;
+      _depthLevel = d.depthLevel;
+    }
+    if (existing == null) _baselineMetricIds = {...widget.initialMetricIds};
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    registerDraftDialog(ModalRoute.of(context), this);
+  }
+
+  /// True when the form differs from what was opened (or from the row as the
+  /// database holds it now: Start/Finish/Postpone and autosave write there).
+  bool get _isDirty {
+    final base = _seen ?? widget.existing;
+    if (_nameController.text != (base?.name ?? '')) return true;
+    final start = base == null
+        ? widget.initialStart
+        : dateTimeFromDb(base.startAt);
+    final end = base == null ? widget.initialEnd : dateTimeFromDb(base.endAt);
+    if (_startAt != start || _endAt != end) return true;
+    if (_isAllDay != (base?.isAllDay ?? false)) return true;
+    if (_notes != base?.notes) return true;
+    if (_countableActivityId != base?.countableActivityId) return true;
+    return !(_selectedMetricIds.length == _baselineMetricIds.length &&
+        _selectedMetricIds.containsAll(_baselineMetricIds));
+  }
+
+  @override
+  void closeByBack() {
+    final draft = _isDirty
+        ? ActionEditorDraft(
+            name: _nameController.text,
+            startAt: _startAt,
+            endAt: _endAt,
+            isAllDay: _isAllDay,
+            done: _done,
+            metricIds: {..._selectedMetricIds},
+            countableActivityId: _countableActivityId,
+            notes: _notes,
+            postponeFlex: _postponeFlex,
+            depthLevel: _depthLevel,
+          )
+        : null;
+    final existing = _seen ?? widget.existing;
+    final shown = _nameController.text.trim();
+    closeDraftDialog(
+      context: context,
+      ref: ref,
+      label: shown.isEmpty ? 'action' : '"$shown"',
+      draft: draft,
+      reopen: (root, d) => ActionEditorDialog.show(
+        root,
+        existing: existing,
+        initialStart: widget.initialStart,
+        initialEnd: widget.initialEnd,
+        initialMetricIds: widget.initialMetricIds,
+        draft: d as ActionEditorDraft,
+      ),
+    );
   }
 
   /// The button row (Start / Finish / Postpone / Continue) writes straight to
@@ -174,6 +311,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
 
   @override
   void dispose() {
+    unregisterDraftDialog(this);
+    _notesTimer?.cancel();
     _rowSub?.cancel();
     _nameController.dispose();
     super.dispose();
@@ -194,6 +333,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
     // own command, see NotesEditor.onSave, so it does not swallow the key).
     return CallbackShortcuts(
       bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): _saveStay,
         const SingleActivator(LogicalKeyboardKey.enter, control: true): _save,
         const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
             _save,
@@ -307,7 +447,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                         NotesEditor(
                           key: _notesKey,
                           initialJson: _notes,
-                          onChanged: (json) => _notes = json,
+                          onChanged: (json) {
+                            _notes = json;
+                            _scheduleNotesAutosave();
+                          },
                           onSave: _save,
                           toolbarExtra: widget.existing == null
                               ? null
@@ -355,6 +498,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         legacyEstimatedMinutes: widget.existing?.estimatedMinutes,
       ),
     );
+    final chain = _chainSpecs();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -386,6 +530,18 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                         hitExtra: 4,
                         wrap: true,
                       ),
+                      if (chain.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        QuickActionBar(
+                          actionId: widget.existing!.id,
+                          groups: const {3},
+                          extra: chain,
+                          tileSize: 36,
+                          iconSize: 22,
+                          hitExtra: 4,
+                          wrap: true,
+                        ),
+                      ],
                     ],
                   )
                 // Windows: one row in three parts - Start/Stop/Continue at the
@@ -394,6 +550,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
                     actionId: widget.existing!.id,
                     onDelete: _deleteAndClose,
                     spread: true,
+                    extra: chain,
                   ),
           ),
         const SizedBox(height: 4),
@@ -725,14 +882,17 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         false;
   }
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+  /// Writes the form. False = nothing was saved (validation failed or the
+  /// user declined to overwrite a change from another device).
+  Future<bool> _persist() async {
+    if (!_formKey.currentState!.validate()) return false;
+    _notesTimer?.cancel();
     final service = ref.read(actionServiceProvider);
     final name = _nameController.text.trim();
+    final id = widget.existing?.id ?? _createdId;
 
-    if (_isEditing) {
-      final id = widget.existing!.id;
-      if (!await _confirmOverwriteRemote(id)) return;
+    if (id != null) {
+      if (!await _confirmOverwriteRemote(id)) return false;
       await service.updateAction(
         actionId: id,
         name: name,
@@ -746,7 +906,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
       await service.setMetrics(id, _selectedMetricIds.toList());
       await service.setCountableActivity(id, _countableActivityId);
     } else {
-      await service.createAction(
+      _createdId = await service.createAction(
         name: name,
         postponeFlex: _postponeFlex,
         depthLevel: _depthLevel,
@@ -758,8 +918,73 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog> {
         notes: _notes,
       );
     }
+    return true;
+  }
 
+  Future<void> _save() async {
+    if (!await _persist()) return;
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Ctrl+S: the same write, but the dialog stays open and a toast confirms.
+  Future<void> _saveStay() async {
+    final overlay = rootOverlayOf(context);
+    if (!await _persist()) return;
+    showInfoToast(overlay, 'Saved');
+  }
+
+  /// "Set after previous actions" / "Set before next action": new times in the
+  /// FORM only (saved with Save / Ctrl+S), keeping the length. Greyed out when
+  /// no neighbour has a time; hidden for all-day actions.
+  List<QuickActionSpec> _chainSpecs() {
+    if (!_isEditing || _isAllDay) return const [];
+    final id = widget.existing!.id;
+    final prev = ref.watch(predecessorsOfProvider(id)).value ?? const [];
+    final next = ref.watch(successorsOfProvider(id)).value ?? const [];
+    ChainNeighbor nb(ActionRow r) => ChainNeighbor(
+      startAt: dateTimeFromDb(r.startAt),
+      endAt: dateTimeFromDb(r.endAt),
+      isAllDay: r.isAllDay,
+    );
+    final after = scheduleAfterPrevious(
+      prev.map(nb),
+      currentStart: _startAt,
+      currentEnd: _endAt,
+    );
+    final before = scheduleBeforeNext(
+      next.map(nb),
+      currentStart: _startAt,
+      currentEnd: _endAt,
+    );
+    Future<void> apply(({DateTime start, DateTime end}) r) async {
+      setState(() {
+        _startAt = r.start;
+        _endAt = r.end;
+      });
+    }
+
+    return [
+      QuickActionSpec(
+        Icons.keyboard_tab_rounded,
+        GlassHue.cyan,
+        after == null
+            ? 'Set after previous actions (no previous action has a time)'
+            : 'Set after previous actions',
+        3,
+        () async => apply(after!),
+        enabled: after != null,
+      ),
+      QuickActionSpec(
+        Icons.start_rounded,
+        GlassHue.cyan,
+        before == null
+            ? 'Set before next action (no next action has a time)'
+            : 'Set before next action',
+        3,
+        () async => apply(before!),
+        enabled: before != null,
+      ),
+    ];
   }
 }
 

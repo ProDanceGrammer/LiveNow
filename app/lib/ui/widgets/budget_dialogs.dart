@@ -14,6 +14,7 @@ import '../providers.dart';
 import 'account_icon.dart';
 import 'action_picker_dialog.dart';
 import 'budget_format.dart';
+import '../theme/glass_theme.dart';
 import 'glass_pill_selector.dart';
 
 const _dialogWidth = 440.0;
@@ -47,21 +48,37 @@ Future<void> openBudgetCategoryById(
 
 /// Searchable list of categories; returns the chosen id. [leavesOnly] hides
 /// groups (only leaves can hold transactions or be a percent source).
+///
+/// [excludeIds] are never offered; [allowNone] pins a "- top level -" row on
+/// top that returns [kPickedNoCategory] (an empty string, so null still means
+/// "cancelled").
+const String kPickedNoCategory = '';
+
 Future<String?> pickBudgetCategory(
   BuildContext context, {
   bool leavesOnly = true,
   String? excludeId,
+  Set<String> excludeIds = const {},
+  bool allowNone = false,
 }) => showStackedDialog<String>(
   context: context,
-  builder: (_) =>
-      _CategoryPickerDialog(leavesOnly: leavesOnly, excludeId: excludeId),
+  builder: (_) => _CategoryPickerDialog(
+    leavesOnly: leavesOnly,
+    excludeIds: {...excludeIds, ?excludeId},
+    allowNone: allowNone,
+  ),
 );
 
 class _CategoryPickerDialog extends ConsumerStatefulWidget {
-  const _CategoryPickerDialog({required this.leavesOnly, this.excludeId});
+  const _CategoryPickerDialog({
+    required this.leavesOnly,
+    required this.excludeIds,
+    required this.allowNone,
+  });
 
   final bool leavesOnly;
-  final String? excludeId;
+  final Set<String> excludeIds;
+  final bool allowNone;
 
   @override
   ConsumerState<_CategoryPickerDialog> createState() =>
@@ -81,7 +98,7 @@ class _CategoryPickerDialogState extends ConsumerState<_CategoryPickerDialog> {
     final byId = {for (final c in all) c.id: c};
     final rows = [
       for (final c in all)
-        if (c.id != widget.excludeId &&
+        if (!widget.excludeIds.contains(c.id) &&
             (!widget.leavesOnly || !parents.contains(c.id)) &&
             c.name.toLowerCase().contains(_query))
           c,
@@ -104,10 +121,19 @@ class _CategoryPickerDialogState extends ConsumerState<_CategoryPickerDialog> {
               onChanged: (v) => setState(() => _query = v.toLowerCase()),
             ),
             Expanded(
-              child: rows.isEmpty
+              child: rows.isEmpty && !(widget.allowNone && _query.isEmpty)
                   ? const Center(child: Text('No categories'))
                   : ListView(
                       children: [
+                        if (widget.allowNone && _query.isEmpty)
+                          ListTile(
+                            key: const ValueKey('pick-category-none'),
+                            dense: true,
+                            leading: const Icon(Icons.vertical_align_top),
+                            title: const Text('— top level —'),
+                            onTap: () =>
+                                Navigator.of(context).pop(kPickedNoCategory),
+                          ),
                         for (final c in rows)
                           ListTile(
                             key: ValueKey('pick-category-${c.id}'),
@@ -672,18 +698,54 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             ),
           ],
           _gap,
-          DropdownButtonFormField<String?>(
+          // Opens the searchable category list (a plain dropdown was unreadable
+          // and could not be searched). The category itself and everything
+          // below it are not offered, so a loop cannot be made.
+          InkWell(
             key: const ValueKey('category-parent'),
-            initialValue: byId.containsKey(_parentId) ? _parentId : null,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Part of'),
-            items: [
-              noneItem('— top level —'),
-              for (final c in cats)
-                if (c.id != id)
-                  DropdownMenuItem<String?>(value: c.id, child: Text(c.name)),
-            ],
-            onChanged: (v) => setState(() => _parentId = v),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () async {
+              final below = <String>{?id};
+              var grew = true;
+              while (grew) {
+                grew = false;
+                for (final c in cats) {
+                  if (c.parentId != null &&
+                      below.contains(c.parentId) &&
+                      below.add(c.id)) {
+                    grew = true;
+                  }
+                }
+              }
+              final picked = await pickBudgetCategory(
+                context,
+                leavesOnly: false,
+                excludeIds: below,
+                allowNone: true,
+              );
+              if (picked == null || !mounted) return;
+              setState(
+                () => _parentId = picked == kPickedNoCategory ? null : picked,
+              );
+            },
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'Part of',
+                suffixIcon: _parentId != null && byId.containsKey(_parentId)
+                    ? IconButton(
+                        tooltip: 'Top level',
+                        icon: const Icon(Icons.clear),
+                        onPressed: () => setState(() => _parentId = null),
+                      )
+                    : const Icon(Icons.arrow_drop_down),
+              ),
+              child: Text(
+                _parentId != null && byId.containsKey(_parentId)
+                    ? byId[_parentId]!.name
+                    : '— top level —',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ),
           _gap,
           DropdownButtonFormField<String?>(
@@ -692,6 +754,7 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                 ? _countAccount
                 : null,
             isExpanded: true,
+            dropdownColor: context.glass.fillDialog,
             decoration: const InputDecoration(
               labelText: 'Account to count',
               helperText: 'The currency this category is counted in',
@@ -724,6 +787,7 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                 ? _useAccount
                 : null,
             isExpanded: true,
+            dropdownColor: context.glass.fillDialog,
             decoration: const InputDecoration(
               labelText: 'Account to use',
               helperText: 'The account the money actually moves through',

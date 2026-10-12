@@ -352,7 +352,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
     });
 
-    testWidgets('all-day strip cells have no left border, chips no outline', (
+    testWidgets('all-day strip cells have no left border, chips a thin neutral outline', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1400, 900);
@@ -391,7 +391,9 @@ void main() {
             .first,
       );
       final shape = material.shape as RoundedRectangleBorder;
-      expect(shape.side, BorderSide.none);
+      // A 1 px neutral line (not the 2 px selection border) keeps chips apart.
+      expect(shape.side.width, 1);
+      expect(shape.side.color.a, lessThan(1));
 
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));

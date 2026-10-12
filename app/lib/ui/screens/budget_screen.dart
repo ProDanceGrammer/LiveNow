@@ -359,9 +359,19 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
       final over = <_BoardEntry>[],
           under = <_BoardEntry>[],
           within = <_BoardEntry>[];
+      // Categories that ended before the as-of day stay out of the boards (the
+      // totals above still count them); "Leaves only" folds same-name price
+      // variants into their parent.
+      final cats = [for (final c in view.categories) budgetCatFromRow(c)];
+      final ended = endedCategoryIds(cats, period.asOf);
+      final collapse = collapseSameNameLeaves(cats);
       for (final c in view.categories) {
         final isTop = c.parentId == null || !byId.containsKey(c.parentId);
-        final include = _leavesOnly ? !hasChild.contains(c.id) : isTop;
+        final include = _leavesOnly
+            ? collapse.show.contains(c.id) ||
+                  (!hasChild.contains(c.id) && !collapse.hide.contains(c.id))
+            : isTop;
+        if (ended.contains(c.id)) continue;
         final f = snap.byCategory[c.id];
         if (!include || f == null || (f.factBase == 0 && f.planBase == 0)) {
           continue;

@@ -167,7 +167,9 @@ void main() {
     // The menu: Now, 1-3 days upright, all-day, icons, leave full screen.
     await tester.tap(find.byKey(const ValueKey('calendar-menu')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('calendar-menu-now')), findsOneWidget);
+    // Now has its own icon next to the menu (not an item in it).
+    expect(find.byKey(const ValueKey('calendar-now-phone')), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-menu-now')), findsNothing);
     expect(find.byKey(const ValueKey('calendar-menu-days-3')), findsOneWidget);
     expect(find.byKey(const ValueKey('calendar-menu-days-4')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('calendar-menu-days-2')));

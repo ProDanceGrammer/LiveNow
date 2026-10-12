@@ -433,6 +433,7 @@ class _LinkFilterField extends ConsumerWidget {
             initialValue: value.mode,
             isDense: true,
             isExpanded: true,
+            dropdownColor: context.glass.fillDialog,
             borderRadius: BorderRadius.circular(14),
             decoration: InputDecoration(labelText: label, isDense: true),
             items: [

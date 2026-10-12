@@ -19,14 +19,16 @@ class QuickActionSpec {
   final String label;
   final int group;
   final Future<void> Function() onTap;
+  final bool enabled;
 
   const QuickActionSpec(
     this.icon,
     this.hue,
     this.label,
     this.group,
-    this.onTap,
-  );
+    this.onTap, {
+    this.enabled = true,
+  });
 }
 
 /// The quick actions for [actionId], shared by the icon bar (hover toolbar,
@@ -174,6 +176,10 @@ class QuickActionBar extends ConsumerWidget {
   /// editor). Scaled down, never wrapped, when the room is too small.
   final bool spread;
 
+  /// Extra tiles (group 3) shown between the postpone group and Delete; the
+  /// action editor adds "Set after previous / before next" here.
+  final List<QuickActionSpec> extra;
+
   const QuickActionBar({
     super.key,
     required this.actionId,
@@ -185,11 +191,19 @@ class QuickActionBar extends ConsumerWidget {
     this.wrap = false,
     this.groups,
     this.spread = false,
+    this.extra = const [],
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final all = quickActionSpecs(context, ref, actionId, onDelete: onDelete);
+    final base = quickActionSpecs(context, ref, actionId, onDelete: onDelete);
+    final all = [
+      for (final s in base)
+        if (s.group != 2) s,
+      ...extra,
+      for (final s in base)
+        if (s.group == 2) s,
+    ];
     final specs = groups == null
         ? all
         : [
@@ -202,6 +216,7 @@ class QuickActionBar extends ConsumerWidget {
       hue: s.hue,
       tooltip: s.label,
       onTap: s.onTap,
+      enabled: s.enabled,
       size: tileSize,
       iconSize: iconSize,
       hitExtra: hitExtra,

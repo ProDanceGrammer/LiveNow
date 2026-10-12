@@ -1,4 +1,5 @@
 import '../core/local_time.dart';
+import 'name_sort.dart' show sortKeyIgnoringEmoji;
 
 // Budget rules: the Notion "resource expenditure" formulas, rebuilt as pure
 // functions (no database) so they stay testable. Deliberate differences from
@@ -576,4 +577,66 @@ bool _reaches(Map<String, String?> next, String? from, String target) {
     cur = next[cur];
   }
   return false;
+}
+
+// ---- dashboard filters ------------------------------------------------------
+
+/// True when [c]'s own end date lies before the as-of day (the day itself still
+/// counts as active).
+bool categoryEnded(BudgetCat c, DateTime asOf) =>
+    c.endDate != null && localDayStart(c.endDate!).isBefore(localDayStart(asOf));
+
+/// Ids of the categories the Plan/Fact boards leave out: a leaf by its own end
+/// date, a group only when every leaf below it has ended.
+Set<String> endedCategoryIds(Iterable<BudgetCat> categories, DateTime asOf) {
+  final byId = {for (final c in categories) c.id: c};
+  final children = <String, List<BudgetCat>>{};
+  for (final c in categories) {
+    final p = c.parentId;
+    if (p != null && byId.containsKey(p)) (children[p] ??= []).add(c);
+  }
+  final memo = <String, bool>{};
+  bool ended(BudgetCat c, Set<String> path) {
+    final cached = memo[c.id];
+    if (cached != null) return cached;
+    final kids = children[c.id];
+    final result = kids == null
+        ? categoryEnded(c, asOf)
+        // A parent loop cannot happen (it is refused), but never recurse into one.
+        : kids.every((k) => !path.contains(k.id) && ended(k, {...path, c.id}));
+    return memo[c.id] = result;
+  }
+
+  return {
+    for (final c in categories)
+      if (ended(c, {c.id})) c.id,
+  };
+}
+
+/// "Leaves only" shows a category higher when the leaves under it differ only
+/// by price: a parent whose DIRECT children are all leaves carrying the
+/// parent's own name (emoji and case ignored) is shown as one line, and those
+/// leaves are hidden.
+({Set<String> hide, Set<String> show}) collapseSameNameLeaves(
+  Iterable<BudgetCat> categories,
+) {
+  final byId = {for (final c in categories) c.id: c};
+  final children = <String, List<BudgetCat>>{};
+  for (final c in categories) {
+    final p = c.parentId;
+    if (p != null && byId.containsKey(p)) (children[p] ??= []).add(c);
+  }
+  final hide = <String>{}, show = <String>{};
+  children.forEach((parentId, kids) {
+    final key = sortKeyIgnoringEmoji(byId[parentId]!.name);
+    final allLeavesSameName = kids.every(
+      (k) =>
+          !children.containsKey(k.id) && sortKeyIgnoringEmoji(k.name) == key,
+    );
+    if (allLeavesSameName) {
+      show.add(parentId);
+      hide.addAll(kids.map((k) => k.id));
+    }
+  });
+  return (hide: hide, show: show);
 }

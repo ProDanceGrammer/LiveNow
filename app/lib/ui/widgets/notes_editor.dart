@@ -4,6 +4,7 @@ import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart' hide Overlay, OverlayEntry;
 import 'package:flutter/services.dart';
 
+import '../layout.dart';
 import 'notes_blocks/notes_blocks.dart';
 import 'notes_document.dart';
 
@@ -165,19 +166,35 @@ class NotesEditorState extends State<NotesEditor> {
           return KeyEventResult.handled;
         },
       ),
-      if (widget.onSave != null)
-        CommandShortcutEvent(
-          key: 'save the dialog',
-          getDescription: () => 'Save',
-          command: 'ctrl+enter',
-          macOSCommand: 'cmd+enter',
-          handler: (_) {
-            // Hand the latest text over before the host saves.
-            _flush();
-            widget.onSave?.call();
-            return KeyEventResult.handled;
-          },
-        ),
+      // Ctrl+Enter: ticks a checkbox row, opens/closes a toggle row; on any
+      // other line it is the host dialog's Save.
+      CommandShortcutEvent(
+        key: 'checkbox, toggle or save',
+        getDescription: () => 'Tick / open, otherwise Save',
+        command: 'ctrl+enter',
+        macOSCommand: 'cmd+enter',
+        handler: (_) {
+          if (_toggleCurrentRow()) return KeyEventResult.handled;
+          if (widget.onSave == null) return KeyEventResult.ignored;
+          // Hand the latest text over before the host saves.
+          _flush();
+          widget.onSave?.call();
+          return KeyEventResult.handled;
+        },
+      ),
+      // Ctrl+C puts Markdown on the clipboard (text channel).
+      CommandShortcutEvent(
+        key: 'copy as markdown',
+        getDescription: () => 'Copy as Markdown',
+        command: 'ctrl+c',
+        macOSCommand: 'cmd+c',
+        handler: (_) {
+          final sel = _editorState.selection;
+          if (sel == null || sel.isCollapsed) return KeyEventResult.ignored;
+          copyAsMarkdown();
+          return KeyEventResult.handled;
+        },
+      ),
       // The custom blocks' Tab / Backspace commands must run BEFORE the
       // standard ones, or the standard Tab / Backspace handle the key first.
       ...customNotesCommandShortcuts(),
@@ -254,6 +271,47 @@ class NotesEditorState extends State<NotesEditor> {
 
   Future<void> _resetChecklist() => resetChecklist(_editorState);
 
+  /// Ctrl+Enter on a checkbox row flips it, on a toggle row opens/closes it.
+  /// False when the cursor is on any other line.
+  bool _toggleCurrentRow() {
+    final sel = _editorState.selection;
+    if (sel == null) return false;
+    final node = _editorState.getNodeAtPath(sel.end.path);
+    if (node == null) return false;
+    final Map<String, Object?> change;
+    if (node.type == 'todo_list') {
+      change = {'checked': node.attributes['checked'] != true};
+    } else if (node.type == toggleListBlockType) {
+      change = {
+        toggleListCollapsedKey: node.attributes[toggleListCollapsedKey] != true,
+      };
+    } else {
+      return false;
+    }
+    // The cursor stays where it was, so the next Ctrl+Enter flips it back.
+    final transaction = _editorState.transaction
+      ..updateNode(node, change)
+      ..afterSelection = sel;
+    _editorState.apply(transaction);
+    return true;
+  }
+
+  /// Puts the selection on the clipboard as Markdown text.
+  Future<void> copyAsMarkdown() async {
+    final selection = _editorState.selection?.normalized;
+    if (selection == null || selection.isCollapsed) return;
+    final nodes = _editorState.getSelectedNodes(selection: selection);
+    final document = Document.blank()..insert([0], nodes);
+    var markdown = documentToMarkdown(
+      document,
+      customParsers: const [_ToggleListParser()],
+    ).trimRight();
+    if (markdown.isEmpty) {
+      markdown = _editorState.getTextInSelection(selection).join('\n');
+    }
+    await AppFlowyClipboard.setData(text: markdown.isEmpty ? null : markdown);
+  }
+
   /// Appends a new section at the end: a heading, then one empty checkbox per
   /// group with its items nested below it. Returns false when [groups] is
   /// empty. The whole append is one editor transaction (editor Undo reverts it).
@@ -290,7 +348,7 @@ class NotesEditorState extends State<NotesEditor> {
     final scheme = theme.colorScheme;
     final textColor = scheme.onSurface;
     final base = (theme.textTheme.bodyMedium ?? const TextStyle()).copyWith(
-      fontSize: 14,
+      fontSize: usePhoneLayout(context) ? 17 : 16,
       color: textColor,
     );
     if (_blocks == null || _blocksScheme != scheme) {
@@ -314,7 +372,7 @@ class NotesEditorState extends State<NotesEditor> {
           fontFamily: 'Consolas',
           backgroundColor: scheme.surfaceContainerHighest,
         ),
-        lineHeight: 1.4,
+        lineHeight: 1.45,
       ),
     );
 
@@ -335,6 +393,12 @@ class NotesEditorState extends State<NotesEditor> {
         }.contains(i.id),
       ),
       linkItem,
+      // No keyboard shortcuts on a phone: Markdown copy/paste live in the
+      // selection toolbar next to the formatting items.
+      if (usePhoneLayout(context)) ...[
+        _markdownItem('notes.copy_md', 'Copy MD', copyAsMarkdown),
+        _markdownItem('notes.paste_md', 'Paste MD', pasteAsMarkdown),
+      ],
     ];
 
     return Column(
@@ -374,12 +438,37 @@ class NotesEditorState extends State<NotesEditor> {
     );
   }
 
+  ToolbarItem _markdownItem(String id, String label, VoidCallback onTap) =>
+      ToolbarItem(
+        id: id,
+        group: 9,
+        isActive: (_) => true,
+        builder: (context, editorState, highlightColor, iconColor, tooltip) =>
+            TextButton(
+              onPressed: onTap,
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 32),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              child: Text(label),
+            ),
+      );
+
   Widget _buildToolbarRow(ColorScheme scheme) {
+    // Buttons that look like buttons before any hover: a soft tinted fill and
+    // a thin border, bold labels.
     final buttonStyle = TextButton.styleFrom(
       visualDensity: VisualDensity.compact,
-      minimumSize: const Size(0, 28),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      textStyle: const TextStyle(fontSize: 12),
+      minimumSize: const Size(0, 30),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+      backgroundColor: scheme.primary.withValues(alpha: 0.12),
+      side: BorderSide(color: scheme.primary.withValues(alpha: 0.35)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     );
     return Row(
       children: [
@@ -388,11 +477,16 @@ class NotesEditorState extends State<NotesEditor> {
           onPressed: _resetChecklist,
           child: const Text('Reset checkboxes'),
         ),
-        TextButton(
-          style: buttonStyle,
-          onPressed: pasteAsMarkdown,
-          child: const Text('Paste as Markdown'),
-        ),
+        // Windows: Ctrl+Shift+V does it. A phone keeps the button as a
+        // fallback next to the selection toolbar's Paste MD.
+        if (usePhoneLayout(context)) ...[
+          const SizedBox(width: 6),
+          TextButton(
+            style: buttonStyle,
+            onPressed: pasteAsMarkdown,
+            child: const Text('Paste as Markdown'),
+          ),
+        ],
         const Spacer(),
         if (widget.onToggleExpand != null)
           TextButton(
@@ -472,5 +566,24 @@ class NotesEditorState extends State<NotesEditor> {
       ),
       ...notesExtraBlockBuilders(),
     };
+  }
+}
+
+
+/// Markdown for a toggle row (the package has no parser for it): a bullet with
+/// the children indented under it.
+class _ToggleListParser extends NodeParser {
+  const _ToggleListParser();
+
+  @override
+  String get id => toggleListBlockType;
+
+  @override
+  String transform(Node node, DocumentMarkdownEncoder? encoder) {
+    final delta = node.delta ?? (Delta()..insert(''));
+    final children = encoder?.convertNodes(node.children, withIndent: true);
+    var markdown = '* ${DeltaMarkdownEncoder().convert(delta)}\n';
+    if (children != null && children.isNotEmpty) markdown += children;
+    return markdown;
   }
 }

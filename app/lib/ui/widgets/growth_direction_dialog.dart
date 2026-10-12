@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database.dart' show ActionRow, Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
+import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
 import '../open_entity.dart';
@@ -48,6 +49,29 @@ List<ActionRow> sortLinkedActionsByDistance(
   return [for (final k in keyed) k.$1];
 }
 
+/// The unsaved fields of a growth direction form (kept for Undo after Back).
+class GrowthDirectionDraft {
+  const GrowthDirectionDraft({
+    required this.name,
+    required this.target,
+    required this.icon,
+    required this.kind,
+    required this.window,
+    required this.isMain,
+    required this.dependsOn,
+    required this.leadsTo,
+  });
+
+  final String name;
+  final String target;
+  final String icon;
+  final MetricKind kind;
+  final MetricWindow window;
+  final bool isMain;
+  final Set<String> dependsOn;
+  final Set<String> leadsTo;
+}
+
 /// Create or edit one growth direction: its type and target, whether it is a
 /// main direction, and the directions it depends on / leads to. Deleting is
 /// here too (with Undo, no confirmation).
@@ -55,18 +79,25 @@ class GrowthDirectionDialog extends ConsumerStatefulWidget {
   /// Null = create a new direction.
   final GrowthMetric? existing;
 
-  const GrowthDirectionDialog({super.key, this.existing});
+  /// Unsaved edits to restore (Undo after a Back-button close).
+  final GrowthDirectionDraft? draft;
+
+  const GrowthDirectionDialog({super.key, this.existing, this.draft});
 
   /// Opens the dialog; completes with the id of the direction that was saved
   /// (null when cancelled or deleted), so a caller can use a direction it just
   /// created (the action editor's "New direction").
-  static Future<String?> show(BuildContext context, {GrowthMetric? existing}) {
+  static Future<String?> show(
+    BuildContext context, {
+    GrowthMetric? existing,
+    GrowthDirectionDraft? draft,
+  }) {
     return showStackedDialog<String>(
       context: context,
       // Phone: a tap outside (e.g. to hide the keyboard) must not close the
       // item; only Cancel / Save / Delete / back do.
       barrierDismissible: !usePhoneLayout(context),
-      builder: (_) => GrowthDirectionDialog(existing: existing),
+      builder: (_) => GrowthDirectionDialog(existing: existing, draft: draft),
     );
   }
 
@@ -75,7 +106,8 @@ class GrowthDirectionDialog extends ConsumerStatefulWidget {
       _GrowthDirectionDialogState();
 }
 
-class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
+class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
+    implements DraftDialog {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _target;
@@ -89,6 +121,10 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
   bool _relationsLoaded = false;
   String? _error;
 
+  // What the relations were when the form was opened (for "changed").
+  Set<String> _baseDependsOn = {};
+  Set<String> _baseLeadsTo = {};
+
   bool get _isEditing => widget.existing != null;
 
   @override
@@ -101,6 +137,17 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
     _target = TextEditingController(text: _formatTarget(m?.target ?? 1));
     _icon = TextEditingController(text: m?.icon ?? '');
     _isMain = m?.isMain ?? false;
+    final d = widget.draft;
+    if (d != null) {
+      _name.text = d.name;
+      _target.text = d.target;
+      _icon.text = d.icon;
+      _kind = d.kind;
+      _window = d.window;
+      _isMain = d.isMain;
+      _dependsOn = {...d.dependsOn};
+      _leadsTo = {...d.leadsTo};
+    }
 
     if (m == null) {
       _relationsLoaded = true;
@@ -111,8 +158,12 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
       ref.read(metricServiceProvider).relationsOf(m.id).then((r) {
         if (!mounted) return;
         setState(() {
-          _dependsOn = r.dependsOn;
-          _leadsTo = r.leadsTo;
+          _baseDependsOn = {...r.dependsOn};
+          _baseLeadsTo = {...r.leadsTo};
+          if (widget.draft == null) {
+            _dependsOn = r.dependsOn;
+            _leadsTo = r.leadsTo;
+          }
           _relationsLoaded = true;
         });
       });
@@ -120,7 +171,57 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    registerDraftDialog(ModalRoute.of(context), this);
+  }
+
+  bool _same(Set<String> a, Set<String> b) =>
+      a.length == b.length && a.containsAll(b);
+
+  bool get _isDirty {
+    final m = widget.existing;
+    if (_name.text != (m?.name ?? '')) return true;
+    if (_target.text != _formatTarget(m?.target ?? 1)) return true;
+    if (_icon.text != (m?.icon ?? '')) return true;
+    if (_kind != (m?.kind ?? MetricKind.count)) return true;
+    if (_window != (m?.window ?? MetricWindow.week)) return true;
+    if (_isMain != (m?.isMain ?? false)) return true;
+    return !_same(_dependsOn, _baseDependsOn) || !_same(_leadsTo, _baseLeadsTo);
+  }
+
+  @override
+  void closeByBack() {
+    final draft = _isDirty
+        ? GrowthDirectionDraft(
+            name: _name.text,
+            target: _target.text,
+            icon: _icon.text,
+            kind: _kind,
+            window: _window,
+            isMain: _isMain,
+            dependsOn: {..._dependsOn},
+            leadsTo: {..._leadsTo},
+          )
+        : null;
+    final existing = widget.existing;
+    final shown = _name.text.trim();
+    closeDraftDialog(
+      context: context,
+      ref: ref,
+      label: shown.isEmpty ? 'direction' : '"$shown"',
+      draft: draft,
+      reopen: (root, d) => GrowthDirectionDialog.show(
+        root,
+        existing: existing,
+        draft: d as GrowthDirectionDraft,
+      ),
+    );
+  }
+
+  @override
   void dispose() {
+    unregisterDraftDialog(this);
     _name.dispose();
     _target.dispose();
     _icon.dispose();
