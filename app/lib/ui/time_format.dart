@@ -97,6 +97,26 @@ const _monthAbbr = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
 ];
 
+String _shortDate(DateTime wall, DateTime? nowUtc) {
+  final thisYear = wallFromUtc(nowUtc ?? DateTime.now().toUtc()).year;
+  final y = wall.year == thisYear ? '' : " ${twoDigits(wall.year % 100)}'";
+  return '${wall.day} ${_monthAbbr[wall.month - 1]}$y';
+}
+
+/// The days actions start in: `3 Oct - 12 Oct`, one date when both fall on the
+/// same day, null when there is no start at all (year only when not current).
+String? formatStartRange(
+  DateTime? firstUtc,
+  DateTime? lastUtc, {
+  DateTime? nowUtc,
+}) {
+  if (firstUtc == null) return null;
+  final a = wallFromUtc(firstUtc);
+  final b = wallFromUtc(lastUtc ?? firstUtc);
+  if (sameWallDay(a, b)) return _shortDate(a, nowUtc);
+  return '${_shortDate(a, nowUtc)} - ${_shortDate(b, nowUtc)}';
+}
+
 /// Compact schedule for list rows: `3 Oct 13:00-14:40`; the year follows the
 /// month as `'YY` only when it is not the current year (`3 Oct 27' 13:00-14:40`).
 /// All-day = the date only; no end = the start time only; an end on another
@@ -108,11 +128,7 @@ String? formatShortSchedule(
   DateTime? nowUtc,
 }) {
   if (startUtc == null) return null;
-  final thisYear = wallFromUtc(nowUtc ?? DateTime.now().toUtc()).year;
-  String date(DateTime w) {
-    final y = w.year == thisYear ? '' : " ${twoDigits(w.year % 100)}'";
-    return '${w.day} ${_monthAbbr[w.month - 1]}$y';
-  }
+  String date(DateTime w) => _shortDate(w, nowUtc);
 
   final s = wallFromUtc(startUtc);
   if (isAllDay) return date(s);

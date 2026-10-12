@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/queries.dart';
+import '../../domain/all_actions_summary.dart';
 import '../../domain/all_actions_view_rules.dart';
 import '../providers.dart';
+import '../time_format.dart';
 import '../widgets/action_list_view.dart';
 import '../widgets/all_actions_options_panel.dart';
 
@@ -222,6 +224,8 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
           ),
         ),
         if (_panelOpen) const AllActionsOptionsPanel(),
+        // Only while a search / filter narrows the list: what was found.
+        if (narrowed || filtering) const _ResultSummary(),
         const SizedBox(height: 12),
         Expanded(
           child: ActionListView(
@@ -232,6 +236,43 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// One line above the rows: how many actions were found, the total length of
+/// the timed ones and the days they start in (`12 actions · 31 h 20 min ·
+/// 3 Oct - 12 Oct (+2 without time)`).
+class _ResultSummary extends ConsumerWidget {
+  const _ResultSummary();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final items = ref.watch(filteredAllActionsProvider).value;
+    if (items == null || items.isEmpty) return const SizedBox.shrink();
+    final s = summarizeActions(items);
+    final dates = formatStartRange(s.firstStart, s.lastStart);
+    final text = [
+      '${s.count} ${s.count == 1 ? 'action' : 'actions'}',
+      formatTotalDuration(s.total),
+      ?dates,
+    ].join(' · ');
+    return Padding(
+      key: const ValueKey('all-summary'),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            s.withoutTime > 0 ? '$text (+${s.withoutTime} without time)' : text,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
     );
   }
 }
