@@ -128,12 +128,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                       title: Text(t.name),
-                      subtitle: _subtitle(
-                        context,
-                        t,
-                        averages[t.id],
-                        stats,
-                      ),
+                      subtitle: _subtitle(context, t, averages[t.id], stats),
                       onTap: () => _showEditor(context, existing: t),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -185,6 +180,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
       floatingActionButton: widget.embedded
           ? null
           : FloatingActionButton(
+              heroTag: null,
               onPressed: () => _showEditor(context),
               tooltip: 'New template',
               child: const Icon(Icons.add),
@@ -208,7 +204,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     final payload = jsonDecode(t.payload) as Map<String, dynamic>;
     final m = payload['estimatedMinutes'];
     final manual = (m is int && m > 0) ? m : null;
-    final useAverage = payload['useAverage'] == true;
+    final useAverage = payload['useAverage'] != false;
     final avgMin = average == null
         ? null
         : (average.inSeconds / 60).round().clamp(1, 1 << 30);
@@ -375,7 +371,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
   bool _isAllDay = false;
   Set<String> _selectedMetricIds = {};
   String? _notes;
-  bool _useAverage = false;
+  bool _useAverage = true;
   Duration? _average;
 
   @override
@@ -398,14 +394,11 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
     );
     _isAllDay = payload?['isAllDay'] as bool? ?? false;
     _notes = payload?['notes'] as String?;
-    _useAverage = payload?['useAverage'] as bool? ?? false;
+    _useAverage = payload?['useAverage'] as bool? ?? true;
     if (existing != null) {
-      ref
-          .read(actionServiceProvider)
-          .templateAverage(existing.name)
-          .then((d) {
-            if (mounted) setState(() => _average = d);
-          });
+      ref.read(actionServiceProvider).templateAverage(existing.name).then((d) {
+        if (mounted) setState(() => _average = d);
+      });
     }
     _selectedMetricIds =
         ((payload?['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
@@ -443,7 +436,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
       return true;
     }
     if (_isAllDay != (b['isAllDay'] as bool? ?? false)) return true;
-    if (_useAverage != (b['useAverage'] as bool? ?? false)) return true;
+    if (_useAverage != (b['useAverage'] as bool? ?? true)) return true;
     if (_notes != (b['notes'] as String?)) return true;
     final ids = ((b['metricIds'] as List<dynamic>?)?.cast<String>() ?? const [])
         .toSet();
@@ -632,7 +625,8 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
       'name': name,
       'estimatedMinutes': ?int.tryParse(_minutesController.text.trim()),
       'isAllDay': _isAllDay,
-      'useAverage': ?(_useAverage ? true : null),
+      // Absent = on (the default); only an explicit "off" is stored.
+      'useAverage': ?(_useAverage ? null : false),
       'diaryBlocks': ?(_blocksController.text.trim().isEmpty
           ? null
           : _blocksController.text.trim()),

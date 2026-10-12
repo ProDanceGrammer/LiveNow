@@ -131,6 +131,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   Widget _newFab(BuildContext context) {
     final templates = _actionsSub == ActionsSub.templates;
     return FloatingActionButton(
+      heroTag: null,
       onPressed: () => templates
           ? TemplatesScreen.showNewTemplate(context)
           : ActionEditorDialog.show(context),

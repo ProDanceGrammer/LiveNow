@@ -1264,7 +1264,9 @@ class ActionService {
         final average = await templateAverage(a.name, nowUtc: nowUtc);
         // The template's switch picks which one wins; the other is the
         // fallback.
-        final useAverage = payload['useAverage'] == true;
+        // On unless the template says `useAverage: false` (the default, also
+        // for templates saved before the switch existed).
+        final useAverage = payload['useAverage'] != false;
         final duration = useAverage
             ? (average ?? manual ?? defaultActionDuration)
             : (manual ?? average ?? defaultActionDuration);

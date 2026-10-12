@@ -85,30 +85,28 @@ void main() {
     expect(await service.templateAverage('read'), const Duration(minutes: 30));
   });
 
-  test('flag off: manual time wins, average is the fallback', () async {
+  test('default (no flag) = on: the average wins, manual is the fallback',
+      () async {
     await run('Walk', 20);
-    final manual = await template({'name': 'Walk', 'estimatedMinutes': 45});
-    expect(await createdLength(manual), const Duration(minutes: 45));
-
-    final noManual = await template({'name': 'Walk'});
-    expect(await createdLength(noManual), const Duration(minutes: 20));
-  });
-
-  test('flag on: average wins, manual is the fallback', () async {
-    await run('Walk', 20);
-    final t = await template({
-      'name': 'Walk',
-      'estimatedMinutes': 45,
-      'useAverage': true,
-    });
+    final t = await template({'name': 'Walk', 'estimatedMinutes': 45});
     expect(await createdLength(t), const Duration(minutes: 20));
 
-    final noRuns = await template({
-      'name': 'Swim',
-      'estimatedMinutes': 45,
-      'useAverage': true,
-    });
+    final noRuns = await template({'name': 'Swim', 'estimatedMinutes': 45});
     expect(await createdLength(noRuns), const Duration(minutes: 45));
+  });
+
+  test('flag explicitly off: manual time wins, average is the fallback',
+      () async {
+    await run('Walk', 20);
+    final manual = await template({
+      'name': 'Walk',
+      'estimatedMinutes': 45,
+      'useAverage': false,
+    });
+    expect(await createdLength(manual), const Duration(minutes: 45));
+
+    final noManual = await template({'name': 'Walk', 'useAverage': false});
+    expect(await createdLength(noManual), const Duration(minutes: 20));
   });
 
   test('diaryBlocks of a template land on the created action', () async {

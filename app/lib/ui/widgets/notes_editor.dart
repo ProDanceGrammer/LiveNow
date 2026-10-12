@@ -471,23 +471,30 @@ class NotesEditorState extends State<NotesEditor> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     );
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextButton(
-          style: buttonStyle,
-          onPressed: _resetChecklist,
-          child: const Text('Reset checkboxes'),
-        ),
-        // Windows: Ctrl+Shift+V does it. A phone keeps the button as a
-        // fallback next to the selection toolbar's Paste MD.
-        if (usePhoneLayout(context)) ...[
-          const SizedBox(width: 6),
-          TextButton(
-            style: buttonStyle,
-            onPressed: pasteAsMarkdown,
-            child: const Text('Paste as Markdown'),
+        // The left buttons wrap onto a second line on a narrow phone.
+        Expanded(
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              TextButton(
+                style: buttonStyle,
+                onPressed: _resetChecklist,
+                child: const Text('Reset checkboxes'),
+              ),
+              // Windows: Ctrl+Shift+V does it. A phone keeps the button as a
+              // fallback next to the selection toolbar's Paste MD.
+              if (usePhoneLayout(context))
+                TextButton(
+                  style: buttonStyle,
+                  onPressed: pasteAsMarkdown,
+                  child: const Text('Paste as Markdown'),
+                ),
+            ],
           ),
-        ],
-        const Spacer(),
+        ),
         if (widget.onToggleExpand != null)
           TextButton(
             style: buttonStyle,
@@ -568,7 +575,6 @@ class NotesEditorState extends State<NotesEditor> {
     };
   }
 }
-
 
 /// Markdown for a toggle row (the package has no parser for it): a bullet with
 /// the children indented under it.

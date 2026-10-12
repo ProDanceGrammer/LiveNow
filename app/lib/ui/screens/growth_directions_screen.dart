@@ -130,6 +130,7 @@ class GrowthDirectionsScreen extends ConsumerWidget {
         floatingActionButton: full
             ? null
             : FloatingActionButton(
+                heroTag: null,
                 onPressed: () => GrowthDirectionDialog.show(context),
                 tooltip: 'New growth direction',
                 child: const Icon(Icons.add),

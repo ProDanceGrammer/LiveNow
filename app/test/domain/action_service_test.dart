@@ -756,9 +756,20 @@ void main() {
     expect(a.countableActivityId, activityId);
     expect(await db.select(db.countableActivitiesTable).get(), hasLength(1));
 
-    // An explicit estimate wins over the average.
+    // By default the average wins over the manual estimate ...
     final est = await seedTemplate({'name': 'Read', 'estimatedMinutes': 10});
     a = await actionRow(await service.createFromTemplateFinished(est));
+    expect(
+      dateTimeFromDb(a.endAt)!.difference(dateTimeFromDb(a.startAt)!),
+      const Duration(minutes: 20),
+    );
+    // ... and the manual estimate wins when the template switches it off.
+    final manual = await seedTemplate({
+      'name': 'Read',
+      'estimatedMinutes': 10,
+      'useAverage': false,
+    });
+    a = await actionRow(await service.createFromTemplateFinished(manual));
     expect(
       dateTimeFromDb(a.endAt)!.difference(dateTimeFromDb(a.startAt)!),
       const Duration(minutes: 10),

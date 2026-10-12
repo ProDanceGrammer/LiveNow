@@ -218,6 +218,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: null,
         key: const ValueKey('budget-fab'),
         onPressed: _onFab,
         tooltip: switch (tab) {

@@ -15,21 +15,8 @@ import 'package:win32/win32.dart';
 /// second running copy of the app is never raised by mistake.
 bool bringWindowToFront({int? pid}) {
   if (!Platform.isWindows) return false;
-  final className = 'FLUTTER_RUNNER_WIN32_WINDOW'.toNativeUtf16();
-  final owner = calloc<Uint32>();
   try {
-    final wanted = pid ?? GetCurrentProcessId();
-    var hwnd = 0;
-    var previous = 0;
-    while (true) {
-      previous = FindWindowEx(0, previous, className, nullptr);
-      if (previous == 0) break;
-      GetWindowThreadProcessId(previous, owner);
-      if (owner.value == wanted) {
-        hwnd = previous;
-        break;
-      }
-    }
+    final hwnd = findOwnWindow(pid: pid);
     if (hwnd == 0) return false;
 
     if (IsIconic(hwnd) != 0) ShowWindow(hwnd, SW_RESTORE);
@@ -60,8 +47,57 @@ bool bringWindowToFront({int? pid}) {
     return true;
   } catch (_) {
     return false;
+  }
+}
+
+/// The HWND of this app's own window ([pid] default: this process), or 0.
+int findOwnWindow({int? pid}) {
+  if (!Platform.isWindows) return 0;
+  final className = 'FLUTTER_RUNNER_WIN32_WINDOW'.toNativeUtf16();
+  final owner = calloc<Uint32>();
+  try {
+    final wanted = pid ?? GetCurrentProcessId();
+    var previous = 0;
+    while (true) {
+      previous = FindWindowEx(0, previous, className, nullptr);
+      if (previous == 0) return 0;
+      GetWindowThreadProcessId(previous, owner);
+      if (owner.value == wanted) return previous;
+    }
   } finally {
     calloc.free(className);
     calloc.free(owner);
+  }
+}
+
+/// Moves/resizes this app's window (outer size, including the title bar).
+bool resizeOwnWindow(int x, int y, int width, int height) {
+  final hwnd = findOwnWindow();
+  if (hwnd == 0) return false;
+  if (IsIconic(hwnd) != 0) ShowWindow(hwnd, SW_RESTORE);
+  return SetWindowPos(hwnd, 0, x, y, width, height, SWP_NOZORDER | SWP_SHOWWINDOW) != 0;
+}
+
+/// Title bar + borders of this app's window in physical pixels (outer size
+/// minus the client area), or null when the window cannot be found.
+({int width, int height})? ownWindowChrome() {
+  final hwnd = findOwnWindow();
+  if (hwnd == 0) return null;
+  final outer = calloc<RECT>();
+  final inner = calloc<RECT>();
+  try {
+    GetWindowRect(hwnd, outer);
+    GetClientRect(hwnd, inner);
+    return (
+      width:
+          (outer.ref.right - outer.ref.left) -
+          (inner.ref.right - inner.ref.left),
+      height:
+          (outer.ref.bottom - outer.ref.top) -
+          (inner.ref.bottom - inner.ref.top),
+    );
+  } finally {
+    calloc.free(outer);
+    calloc.free(inner);
   }
 }
