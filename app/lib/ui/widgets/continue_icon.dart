@@ -6,9 +6,8 @@ import 'package:flutter/material.dart';
 /// [GlassIconTile]): the tile paints [ContinueIcon] instead of a font glyph.
 const IconData continueIconData = IconData(0xE0FF, fontFamily: 'ContinueIcon');
 
-/// "Continue with same action": an arc with a dashed start and one arrowhead
-/// at its end pointing down-right (one arrow, unlike the old two-arrow
-/// refresh glyph).
+/// "Continue with same action": the circular refresh icon, but with ONE arrow
+/// (the top one, filled head) instead of two; the lower arc is plain.
 class ContinueIcon extends StatelessWidget {
   const ContinueIcon({super.key, required this.color, this.size = 20});
 
@@ -25,40 +24,63 @@ class _ContinuePainter extends CustomPainter {
 
   final Color color;
 
+  static double _rad(double deg) => deg * math.pi / 180;
+
   @override
   void paint(Canvas canvas, Size box) {
     canvas.scale(box.width / 24);
-    final line = Paint()
+    final stroke = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
+      ..strokeWidth = 2.6
       ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
       ..isAntiAlias = true;
-    const c = Offset(11, 15);
-    const r = 8.5;
+    final fill = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+    const c = Offset(12, 12);
+    const r = 7.2;
     final rect = Rect.fromCircle(center: c, radius: r);
-    // Dashed start (a short stub), a gap, then the solid arc.
-    canvas.drawArc(rect, math.pi + 0.1, 0.24, false, line);
-    const solidStart = math.pi + 0.62;
-    const solidEnd = 2 * math.pi - 0.45;
-    canvas.drawArc(rect, solidStart, solidEnd - solidStart, false, line);
-    // Arrowhead at the end, pointing along the (clockwise) tangent.
-    final tip = c + Offset(math.cos(solidEnd), math.sin(solidEnd)) * r;
-    final tangent = Offset(-math.sin(solidEnd), math.cos(solidEnd));
-    final back = -tangent;
-    Offset rot(Offset v, double a) => Offset(
-      v.dx * math.cos(a) - v.dy * math.sin(a),
-      v.dx * math.sin(a) + v.dy * math.cos(a),
+
+    // Top arc (canvas degrees, 0 = 3 o'clock, clockwise positive): from the
+    // left, over the top, to the right - ending in the arrowhead.
+    const topStart = -165.0, topEnd = -40.0;
+    canvas.drawArc(
+      rect,
+      _rad(topStart),
+      _rad(topEnd - topStart),
+      false,
+      stroke,
     );
+
+    // Plain lower arc (no head).
+    const lowStart = 15.0, lowEnd = 140.0;
+    canvas.drawArc(
+      rect,
+      _rad(lowStart),
+      _rad(lowEnd - lowStart),
+      false,
+      stroke,
+    );
+
+    // Filled arrowhead at the end of the top arc, pointing along the circle.
+    final a = _rad(topEnd);
+    final tip = c + Offset(math.cos(a), math.sin(a)) * r;
+    final tangent = Offset(-math.sin(a), math.cos(a)); // clockwise
+    final normal = Offset(math.cos(a), math.sin(a));
     final head = Path()
-      ..moveTo(tip.dx + rot(back, 0.7).dx * 6.5, tip.dy + rot(back, 0.7).dy * 6.5)
-      ..lineTo(tip.dx, tip.dy)
+      ..moveTo(tip.dx + tangent.dx * 4.6, tip.dy + tangent.dy * 4.6)
       ..lineTo(
-        tip.dx + rot(back, -0.7).dx * 6.5,
-        tip.dy + rot(back, -0.7).dy * 6.5,
-      );
-    canvas.drawPath(head, line);
+        tip.dx + normal.dx * 4.4 - tangent.dx * 0.6,
+        tip.dy + normal.dy * 4.4 - tangent.dy * 0.6,
+      )
+      ..lineTo(
+        tip.dx - normal.dx * 4.4 - tangent.dx * 0.6,
+        tip.dy - normal.dy * 4.4 - tangent.dy * 0.6,
+      )
+      ..close();
+    canvas.drawPath(head, fill);
   }
 
   @override
