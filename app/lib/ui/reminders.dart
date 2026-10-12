@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart' show OverlayState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../core/window_focus.dart';
 import '../data/database.dart';
 import '../data/reminders/local_notifications_sink.dart';
 import '../data/reminders/reminder_scheduler.dart';
@@ -67,11 +68,18 @@ ReminderScheduler? startReminders(WidgetRef ref) {
   if (!LocalNotificationsSink.supported) return null;
   final db = ref.read(databaseProvider);
   final sink = LocalNotificationsSink(
-    onOpenAction: (id) => openActionFromNotification(db, id),
+    onOpenAction: (id) {
+      // The app may be minimized or behind other windows (Windows): raise it.
+      bringWindowToFront();
+      openActionFromNotification(db, id);
+    },
   );
   // The notification that started the app (tapped while it was closed).
   sink.launchActionId().then((id) {
-    if (id != null) openActionFromNotification(db, id);
+    if (id != null) {
+      bringWindowToFront();
+      openActionFromNotification(db, id);
+    }
   });
   final scheduler = ReminderScheduler(
     source: ref.read(viewQueriesProvider).watchUpcoming(),
