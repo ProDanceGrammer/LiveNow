@@ -7,6 +7,7 @@ import '../layout.dart';
 import '../undo.dart';
 import '../views/all_actions_view.dart' show filteredAllActionsProvider;
 import 'bulk_dialogs.dart';
+import 'continue_icon.dart';
 
 /// The row above the All list: a tri-state "select all" checkbox (it covers the
 /// WHOLE filtered list, also the rows not on screen), how many are selected and,
@@ -27,7 +28,7 @@ class AllBulkBar extends ConsumerWidget {
 
     Widget action(
       String key,
-      IconData icon,
+      Widget icon,
       String label,
       VoidCallback onPressed, {
       Color? color,
@@ -35,13 +36,20 @@ class AllBulkBar extends ConsumerWidget {
         ? IconButton(
             key: ValueKey(key),
             tooltip: label,
-            icon: Icon(icon, color: color),
+            icon: icon,
+            color: color,
             onPressed: onPressed,
           )
         : TextButton.icon(
             key: ValueKey(key),
-            icon: Icon(icon, size: 18, color: color),
+            icon: IconTheme.merge(
+              data: const IconThemeData(size: 18),
+              child: icon,
+            ),
             label: Text(label, style: TextStyle(color: color)),
+            style: color == null
+                ? null
+                : TextButton.styleFrom(foregroundColor: color),
             onPressed: onPressed,
           );
 
@@ -71,25 +79,27 @@ class AllBulkBar extends ConsumerWidget {
                   children: [
                     action(
                       'bulk-directions',
-                      Icons.insights,
+                      const Icon(Icons.insights),
                       'Directions',
                       () => runBulkDirections(context, ref, ids()),
                     ),
                     action(
                       'bulk-previous',
-                      Icons.skip_previous_rounded,
+                      // The Continue arrow mirrored: the action BEFORE.
+                      const ContinueGlyph(mirrored: true),
                       'Previous',
                       () => runBulkLinks(context, ref, ids(), LinkSide.previous),
                     ),
                     action(
                       'bulk-next',
-                      Icons.skip_next_rounded,
+                      // The Continue arrow: the action AFTER.
+                      const ContinueGlyph(),
                       'Next',
                       () => runBulkLinks(context, ref, ids(), LinkSide.next),
                     ),
                     action(
                       'bulk-date',
-                      Icons.event,
+                      const Icon(Icons.event),
                       'Date',
                       () => runBulkDate(context, ref, [
                         for (final a in items)
@@ -98,7 +108,7 @@ class AllBulkBar extends ConsumerWidget {
                     ),
                     action(
                       'bulk-delete',
-                      Icons.delete_outline,
+                      const Icon(Icons.delete_outline),
                       'Delete',
                       () {
                         final list = ids();

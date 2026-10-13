@@ -122,7 +122,7 @@ BudgetAcct budgetAcctFromRow(BudgetAccount a) => BudgetAcct(
 
 /// Everything the Budget screens show, computed live (and once a minute).
 class BudgetView {
-  const BudgetView({
+  BudgetView({
     required this.settings,
     required this.period,
     required this.categories,
@@ -144,10 +144,11 @@ class BudgetView {
   /// category id -> action of its nearest future transaction.
   final Map<String, String> upcomingAction;
 
-  Map<String, BudgetCategory> get categoryById => {
+  // Built once per snapshot (they used to be rebuilt on every access).
+  late final Map<String, BudgetCategory> categoryById = {
     for (final c in categories) c.id: c,
   };
-  Map<String, BudgetAccount> get accountById => {
+  late final Map<String, BudgetAccount> accountById = {
     for (final a in accounts) a.id: a,
   };
 }

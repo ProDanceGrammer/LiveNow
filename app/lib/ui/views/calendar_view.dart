@@ -1009,11 +1009,18 @@ class _CalendarBulkBar extends ConsumerWidget {
             onPressed: onPressed,
           );
 
-    return GlassSurface(
+    final g = context.glass;
+    // OPAQUE: the glass fill is translucent, and the event text behind the bar
+    // showed through it.
+    return Material(
       key: const ValueKey('calendar-bulk-bar'),
-      radius: 20,
-      shadow: false,
-      blurWindow: false,
+      color: g.fillDialog,
+      elevation: 6,
+      shadowColor: Colors.black54,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: g.border),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         child: Row(

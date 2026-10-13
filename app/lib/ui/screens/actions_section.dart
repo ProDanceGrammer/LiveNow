@@ -45,7 +45,7 @@ final actionImportServiceProvider = Provider<ActionImportService>(
 /// The views inside the Actions section, in switch order.
 enum ActionsSub {
   current('Current Actions', 'Current Actions', Icons.bolt_rounded),
-  calendar('Calendar', 'Calendar', Icons.calendar_view_week_rounded),
+  calendar('Calendar', 'Calendar', Icons.event),
   all('All', 'All Actions', Icons.list_alt_rounded),
   templates('Templates', 'Templates', Icons.dashboard_customize);
 

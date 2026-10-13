@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../domain/all_actions_view_rules.dart' show SortField;
+import '../../domain/budget_category_view.dart' show CategorySortField;
 import '../../domain/budget_tx_view_rules.dart' show TxSortField;
 import '../../domain/template_sort.dart' show TemplateSortField;
 import 'param_icons.dart';
@@ -28,6 +29,14 @@ Widget sortFieldIcon(Object field, {double size = 16}) {
     TemplateSortField.urgency => ParamIcon.urgency(size: size, tooltip: false),
     TemplateSortField.average => material(Icons.timelapse),
     TemplateSortField.manual => material(Icons.edit_note),
+    CategorySortField.name => material(Icons.sort_by_alpha),
+    CategorySortField.plan => ParamIcon(Param.plan, size: size, tooltip: false),
+    CategorySortField.fact => ParamIcon(
+      Param.actual,
+      size: size,
+      tooltip: false,
+    ),
+    CategorySortField.urgency => ParamIcon.urgency(size: size, tooltip: false),
     _ => material(Icons.sort),
   };
 }

@@ -7,22 +7,50 @@ import 'package:flutter/material.dart';
 const IconData continueIconData = IconData(0xE0FF, fontFamily: 'ContinueIcon');
 
 /// "Continue with same action": a single circular arrow (one arc, one filled
-/// head), centred in the icon box.
+/// head), centred in the icon box. [mirrored] flips it left-right (the
+/// "previous" counterpart of the forward arrow).
 class ContinueIcon extends StatelessWidget {
-  const ContinueIcon({super.key, required this.color, this.size = 20});
+  const ContinueIcon({
+    super.key,
+    required this.color,
+    this.size = 20,
+    this.mirrored = false,
+  });
 
   final Color color;
   final double size;
+  final bool mirrored;
 
   @override
-  Widget build(BuildContext context) =>
-      CustomPaint(size: Size.square(size), painter: _ContinuePainter(color));
+  Widget build(BuildContext context) => CustomPaint(
+    size: Size.square(size),
+    painter: _ContinuePainter(color, mirrored),
+  );
+}
+
+/// [ContinueIcon] in the colour and size of the surrounding [IconTheme], for
+/// places that take an icon widget (`IconButton`, `TextButton.icon`).
+class ContinueGlyph extends StatelessWidget {
+  const ContinueGlyph({super.key, this.mirrored = false});
+
+  final bool mirrored;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = IconTheme.of(context);
+    return ContinueIcon(
+      color: theme.color ?? Theme.of(context).colorScheme.primary,
+      size: theme.size ?? 24,
+      mirrored: mirrored,
+    );
+  }
 }
 
 class _ContinuePainter extends CustomPainter {
-  _ContinuePainter(this.color);
+  _ContinuePainter(this.color, this.mirrored);
 
   final Color color;
+  final bool mirrored;
 
   /// The phone's icon size in logical px: the look every smaller size copies.
   static const double _referenceSize = 22;
@@ -32,6 +60,11 @@ class _ContinuePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size box) {
     canvas.scale(box.width / 24);
+    if (mirrored) {
+      // Flip about the box's vertical centre line.
+      canvas.translate(24, 0);
+      canvas.scale(-1, 1);
+    }
     final stroke = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -85,5 +118,6 @@ class _ContinuePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ContinuePainter old) => old.color != color;
+  bool shouldRepaint(_ContinuePainter old) =>
+      old.color != color || old.mirrored != mirrored;
 }

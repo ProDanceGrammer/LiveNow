@@ -250,6 +250,11 @@ void main() {
     await tester.pump();
     expect(find.byKey(const ValueKey('calendar-bulk-bar')), findsOneWidget);
     expect(find.text('2 selected'), findsOneWidget);
+    // Opaque: the events behind it must not show through.
+    final bar = tester.widget<Material>(
+      find.byKey(const ValueKey('calendar-bulk-bar')),
+    );
+    expect(bar.color!.a, 1.0);
 
     await tester.tap(find.byKey(const ValueKey('cal-bulk-shift')));
     await tester.pump(const Duration(milliseconds: 400));
