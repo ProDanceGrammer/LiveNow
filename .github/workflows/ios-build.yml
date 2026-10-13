@@ -54,6 +54,18 @@ jobs:
           $B -c "Add :NSAppTransportSecurity dict" $PLIST
           $B -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" $PLIST
 
+      # flutter_local_notifications does NOT set itself as the notification
+      # centre's delegate on iOS: without this line a tap on a reminder never
+      # reaches the app (and foreground notifications stay hidden).
+      - name: Notification delegate (AppDelegate)
+        run: |
+          F=ios/Runner/AppDelegate.swift
+          sed -i '' '/return super.application(application, didFinishLaunchingWithOptions: launchOptions)/i\
+          UNUserNotificationCenter.current().delegate = self as? UNUserNotificationCenterDelegate
+          ' $F
+          grep -q "UNUserNotificationCenter.current().delegate" $F || { echo "AppDelegate not patched"; cat $F; exit 1; }
+          cat $F
+
       # mobile_scanner needs iOS 15.5+.
       - name: Raise the deployment target
         run: |
