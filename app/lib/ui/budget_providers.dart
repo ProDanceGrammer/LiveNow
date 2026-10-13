@@ -40,6 +40,14 @@ final budgetSettingsProvider = StreamProvider.autoDispose<BudgetSettings>((
       );
 });
 
+/// Whether urgency colours/numbers are shown on categories and transactions
+/// (Budget settings; off by default).
+final budgetShowUrgencyProvider = Provider.autoDispose<bool>(
+  (ref) => ref.watch(
+    budgetSettingsProvider.select((s) => s.value?.showUrgency ?? false),
+  ),
+);
+
 /// A transaction row plus what the lists need from its action. [date] is the
 /// EFFECTIVE date: the action's start while linked, else the row's own date.
 class BudgetTxItem {
@@ -251,6 +259,16 @@ final budgetTxSortProvider = StateProvider.autoDispose<List<TxSortKey>>(
 /// Which fields the Transactions search text is matched against.
 final budgetTxSearchFlagsProvider = StateProvider.autoDispose<TxSearchFlags>(
   (ref) => const TxSearchFlags(),
+);
+
+/// How the Transactions list is grouped (default: by action).
+final budgetTxGroupProvider = StateProvider.autoDispose<TxGroupBy>(
+  (ref) => TxGroupBy.action,
+);
+
+/// Folded groups of the Transactions list (group keys, this session only).
+final budgetTxCollapsedProvider = StateProvider.autoDispose<Set<String>>(
+  (ref) => const {},
 );
 
 /// The Transactions list's filters (categories, accounts, action link, dates).

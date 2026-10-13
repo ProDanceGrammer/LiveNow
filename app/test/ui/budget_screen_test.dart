@@ -322,7 +322,9 @@ void main() {
       tester,
       () => db.select(db.budgetTransactionsTable).get(),
     )).single.id;
-    await tester.tap(find.byKey(ValueKey('budget-delete-tx-$txId')));
+    await tester.tap(find.byKey(ValueKey('budget-tx-$txId')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('tx-delete')));
     await settle(tester);
     expect(
       await rows(tester, () => db.select(db.budgetTransactionsTable).get()),

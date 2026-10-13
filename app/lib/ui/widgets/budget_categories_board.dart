@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database.dart';
 import '../../domain/budget_category_view.dart';
 import '../budget_category_rows.dart';
+import '../budget_providers.dart';
 import '../layout.dart';
 import '../theme/glass_theme.dart';
 import '../urgency_colors.dart';
+import 'account_icon.dart';
 import 'glass.dart';
 import 'param_icons.dart';
 import 'sort_chips.dart';
@@ -33,16 +35,9 @@ const double _kUrgencyW = 70;
 /// comes ready-made from [budgetCategoryRowsProvider] and a row skips its
 /// rebuild when its own numbers did not change.
 class BudgetCategoriesBoard extends ConsumerStatefulWidget {
-  const BudgetCategoriesBoard({
-    super.key,
-    required this.onOpen,
-    required this.onAddSub,
-    required this.onDelete,
-  });
+  const BudgetCategoriesBoard({super.key, required this.onOpen});
 
   final void Function(BudgetCategory category) onOpen;
-  final void Function(String parentId) onAddSub;
-  final void Function(BudgetCategory category) onDelete;
 
   @override
   ConsumerState<BudgetCategoriesBoard> createState() =>
@@ -57,16 +52,20 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
   /// handed back as the identical instance.
   final _rowCache = <String, _CategoryBoardRow>{};
 
-  _CategoryBoardRow _rowFor(CategoryRowView vm, bool phone) {
+  _CategoryBoardRow _rowFor(CategoryRowView vm, bool phone, bool showUrgency) {
     final old = _rowCache[vm.id];
-    if (old != null && old.phone == phone && old.vm == vm) return old;
+    if (old != null &&
+        old.phone == phone &&
+        old.showUrgency == showUrgency &&
+        old.vm == vm) {
+      return old;
+    }
     return _rowCache[vm.id] = _CategoryBoardRow(
       key: ValueKey(vm.id),
       vm: vm,
       phone: phone,
+      showUrgency: showUrgency,
       onOpen: widget.onOpen,
-      onAddSub: widget.onAddSub,
-      onDelete: widget.onDelete,
       onToggle: _toggle,
     );
   }
@@ -117,7 +116,10 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
             ],
             addOptions: [
               for (final f in CategorySortField.values)
-                if (!used.contains(f)) (f.name, f.label, sortFieldIcon(f)),
+                if (!used.contains(f) &&
+                    (f != CategorySortField.urgency ||
+                        ref.watch(budgetShowUrgencyProvider)))
+                  (f.name, f.label, sortFieldIcon(f)),
             ],
             onToggle: (i) => set([
               for (var j = 0; j < sort.length; j++)
@@ -154,20 +156,36 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
     );
   }
 
-  Widget _header(BuildContext context) {
+  Widget _header(BuildContext context, bool showUrgency) {
     final s = Theme.of(context).textTheme.labelMedium;
+    final base = ref.watch(
+      budgetSettingsProvider.select((v) => v.value?.baseCurrency ?? 'EUR'),
+    );
     Widget cell(double w, Widget child) =>
         SizedBox(width: w, child: Center(child: child));
+    // Hover (Windows) or tap (touch) explains the currency of the sums.
+    Widget money(Param p, String name) => Tooltip(
+      message: '$name: all sums are counted in $base (the main currency from '
+          'Budget settings), whatever currency an account is in',
+      triggerMode: TooltipTriggerMode.tap,
+      child: ParamIcon(p, size: 18, tooltip: false),
+    );
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
       child: Row(
         children: [
-          Expanded(child: Padding(padding: const EdgeInsets.only(left: 8), child: Text('Category', style: s))),
-          cell(_kPlanW, const ParamIcon(Param.plan, size: 18)),
-          cell(_kFactW, const ParamIcon(Param.actual, size: 18)),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text('Category', style: s),
+            ),
+          ),
+          cell(_kPlanW, money(Param.plan, 'Plan')),
+          cell(_kFactW, money(Param.actual, 'Fact')),
           cell(_kBarW, Text('Used', style: s)),
-          cell(_kUrgencyW, const ParamIcon(Param.urgency, size: 18)),
-          const SizedBox(width: 40),
+          if (showUrgency)
+            cell(_kUrgencyW, const ParamIcon(Param.urgency, size: 18)),
+          const SizedBox(width: 12),
         ],
       ),
     );
@@ -178,6 +196,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
     final rows = ref.watch(budgetCategoryRowsProvider)?.rows;
     final phone = usePhoneLayout(context);
     final query = ref.watch(budgetCategoryQueryProvider);
+    final showUrgency = ref.watch(budgetShowUrgencyProvider);
 
     final Widget list;
     if (rows == null) {
@@ -195,7 +214,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
         itemCount: rows.length,
         findChildIndexCallback: (key) =>
             key is ValueKey<String> ? indexById[key.value] : null,
-        itemBuilder: (context, i) => _rowFor(rows[i], phone),
+        itemBuilder: (context, i) => _rowFor(rows[i], phone, showUrgency),
       );
       // Rows that left the list are forgotten.
       if (_rowCache.length > rows.length * 2 + 16) {
@@ -228,8 +247,15 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
               child: _sortRow(),
             ),
-            if (!phone) _header(context),
-            Expanded(child: list),
+            if (!phone) _header(context, showUrgency),
+            // A row's tint is an `Ink`, which paints on the nearest Material:
+            // a local one, clipped to the list, keeps tinted rows from bleeding
+            // over the header above or the screen edge below.
+            Expanded(
+              child: ClipRect(
+                child: Material(type: MaterialType.transparency, child: list),
+              ),
+            ),
           ],
         ),
       ),
@@ -245,17 +271,15 @@ class _CategoryBoardRow extends StatelessWidget {
     super.key,
     required this.vm,
     required this.phone,
+    required this.showUrgency,
     required this.onOpen,
-    required this.onAddSub,
-    required this.onDelete,
     required this.onToggle,
   });
 
   final CategoryRowView vm;
   final bool phone;
+  final bool showUrgency;
   final void Function(BudgetCategory) onOpen;
-  final void Function(String) onAddSub;
-  final void Function(BudgetCategory) onDelete;
   final void Function(String) onToggle;
 
   @override
@@ -321,27 +345,27 @@ class _CategoryBoardRow extends StatelessWidget {
                 ),
             ],
           ),
-          if (vm.subline != null)
-            Text(
-              vm.subline!,
+          if (vm.subline != null || vm.accountName != null)
+            Text.rich(
+              TextSpan(
+                children: [
+                  if (vm.subline != null) TextSpan(text: vm.subline),
+                  if (vm.accountName != null) ...[
+                    TextSpan(text: vm.subline == null ? 'in ' : ' in '),
+                    WidgetSpan(
+                      alignment: PlaceholderAlignment.middle,
+                      child: AccountIcon(icon: vm.accountIcon, size: 12),
+                    ),
+                    TextSpan(text: ' ${vm.accountName}'),
+                  ],
+                ],
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: small,
             ),
         ],
       ),
-    );
-
-    final menu = PopupMenuButton<String>(
-      key: ValueKey('budget-category-menu-${vm.id}'),
-      padding: EdgeInsets.zero,
-      iconSize: 18,
-      iconColor: fg,
-      onSelected: (v) => v == 'sub' ? onAddSub(vm.id) : onDelete(c),
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'sub', child: Text('Add sub-category')),
-        PopupMenuItem(value: 'delete', child: Text('Delete')),
-      ],
     );
 
     Widget figures;
@@ -397,7 +421,9 @@ class _CategoryBoardRow extends StatelessWidget {
       );
     }
 
-    final urgency = vm.urgency == null
+    final urgency = !showUrgency
+        ? const SizedBox.shrink()
+        : vm.urgency == null
         ? SizedBox(width: phone ? 0 : _kUrgencyW)
         : SizedBox(
             width: phone ? 52 : _kUrgencyW,
@@ -416,7 +442,7 @@ class _CategoryBoardRow extends StatelessWidget {
         name,
         figures,
         urgency,
-        SizedBox(width: 40, child: Center(child: menu)),
+        const SizedBox(width: 12),
       ],
     );
 

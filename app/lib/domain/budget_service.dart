@@ -29,11 +29,16 @@ class BudgetSettings {
     this.baseCurrency = 'EUR',
     this.periodMonths = kDefaultPeriodMonths,
     this.tolerance = kDefaultTolerance,
+    this.showUrgency = false,
   });
 
   final String baseCurrency;
   final int periodMonths;
   final double tolerance;
+
+  /// Urgency colours and numbers on categories and transactions (off by
+  /// default).
+  final bool showUrgency;
 }
 
 /// Everything [BudgetService.deleteCategory] changed, for undo.
@@ -128,6 +133,7 @@ class BudgetService {
           ? months
           : kDefaultPeriodMonths,
       tolerance: tol != null && tol >= 0 ? tol : kDefaultTolerance,
+      showUrgency: map['show_urgency'] == '1',
     );
   }
 
@@ -141,6 +147,7 @@ class BudgetService {
       await put('base_currency', s.baseCurrency.trim().toUpperCase());
       await put('period_months', '${s.periodMonths < 1 ? 1 : s.periodMonths}');
       await put('tolerance', '${s.tolerance < 0 ? 0 : s.tolerance}');
+      await put('show_urgency', s.showUrgency ? '1' : '0');
     });
   }
 
@@ -392,6 +399,32 @@ class BudgetService {
       }
       return id;
     });
+  }
+
+  /// Puts category [id] under [parentId] (null = top level) leaving everything
+  /// else as it is. Same checks and exceptions as [saveCategory].
+  Future<void> moveCategory(String id, String? parentId) async {
+    final c = await (db.select(
+      db.budgetCategoriesTable,
+    )..where((t) => t.id.equals(id))).getSingle();
+    await saveCategory(
+      CategoryInput(
+        id: c.id,
+        name: c.name,
+        isIncome: c.isIncome,
+        oneTime: c.oneTime,
+        unit: BudgetUnit.fromDb(c.unit),
+        endDate: dateTimeFromDb(c.endDate),
+        price: c.price,
+        percent: c.percent,
+        frequencyMonths: c.frequencyMonths,
+        unitsPerMonth: c.unitsPerMonth,
+        parentId: parentId,
+        countPercentOfId: c.countPercentOfId,
+        accountCountId: c.accountCountId,
+        accountUseId: c.accountUseId,
+      ),
+    );
   }
 
   /// Moves every transaction of [fromCategoryId] into [toCategoryId] (used

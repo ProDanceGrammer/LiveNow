@@ -38,6 +38,8 @@ class CategoryRowView {
     required this.hasChildren,
     required this.collapsed,
     required this.subline,
+    this.accountName,
+    this.accountIcon,
     required this.planText,
     required this.factText,
     required this.plan,
@@ -52,9 +54,13 @@ class CategoryRowView {
   final bool hasChildren;
   final bool collapsed;
 
-  /// The entered fields in one grey line (`12.5/kg · × 4/mo · every 2 mo`),
-  /// null for a group or when nothing is entered.
+  /// The entered fields in one grey line ([categoryLine]), null when nothing
+  /// is entered.
   final String? subline;
+
+  /// The account to count in: its icon (base64) and name follow the line.
+  final String? accountName;
+  final String? accountIcon;
   final String planText;
   final String factText;
 
@@ -85,6 +91,8 @@ class CategoryRowView {
       other.hasChildren == hasChildren &&
       other.collapsed == collapsed &&
       other.subline == subline &&
+      other.accountName == accountName &&
+      other.accountIcon == accountIcon &&
       other.planText == planText &&
       other.factText == factText &&
       other.plan == plan &&
@@ -122,30 +130,52 @@ class CategoryRows {
   int get hashCode => rows.length;
 }
 
-String? _subline(BudgetCategory c) {
+/// The entered fields of a category as one line, without the account (the
+/// caller draws the account icon + name after it):
+/// `12.5 × 4 per kilogram each 2 months` (`× units` only when units per month
+/// is above 0; `each 1 month` in the singular), then `· until 27-07-2026`.
+/// Null when the category has none of these data.
+String? categoryLine(BudgetCategory c) {
   final unit = BudgetUnit.fromDb(c.unit);
-  final parts = <String>[
-    if (unit == BudgetUnit.percentPerMonth)
-      if (c.percent != null) '${budgetNumber(c.percent!)}%'
-    else if (c.price != null)
-      '${budgetNumber(c.price!)}/${switch (unit) {
-        BudgetUnit.piece => 'pc',
-        BudgetUnit.kilogram => 'kg',
-        _ => 'mo',
-      }}',
-    if (c.unitsPerMonth != null) '× ${budgetNumber(c.unitsPerMonth!)}/mo',
-    if (c.frequencyMonths != null) 'every ${budgetNumber(c.frequencyMonths!)} mo',
-    if (dateTimeFromDb(c.endDate) case final end?) 'until ${budgetDate(end)}',
-  ];
-  return parts.isEmpty ? null : parts.join(' · ');
+  final units = c.unitsPerMonth;
+  final String? amount = unit == BudgetUnit.percentPerMonth
+      ? (c.percent == null ? null : '${budgetNumber(c.percent!)}%')
+      : c.price == null
+      ? null
+      : units != null && units > 0
+      ? '${budgetNumber(c.price!)} × ${budgetNumber(units)}'
+      : budgetNumber(c.price!);
+  final unitName = switch (unit) {
+    BudgetUnit.piece => 'piece',
+    BudgetUnit.kilogram => 'kilogram',
+    BudgetUnit.month || BudgetUnit.percentPerMonth => 'month',
+  };
+  final f = c.frequencyMonths;
+  final end = dateTimeFromDb(c.endDate);
+  final text = [
+    if (amount != null) '$amount per $unitName',
+    if (f != null) 'each ${f == 1 ? 'month' : '${budgetNumber(f)} months'}',
+  ].join(' ');
+  final withEnd = [
+    if (text.isNotEmpty) text,
+    if (end != null) 'until ${budgetDate(end)}',
+  ].join(' · ');
+  return withEnd.isEmpty ? null : withEnd;
 }
 
 /// The rows of the Categories board, or null while the budget loads.
 final budgetCategoryRowsProvider = Provider.autoDispose<CategoryRows?>((ref) {
   final view = ref.watch(budgetViewProvider).value;
   if (view == null) return null;
-  final urgency = ref.watch(budgetCategoryUrgencyProvider);
-  final unlinked = ref.watch(budgetCategoryUnlinkedProvider);
+  // Urgency is hidden by default (Budget settings): then nothing here depends
+  // on the per-minute urgency stream.
+  final showUrgency = ref.watch(budgetShowUrgencyProvider);
+  final urgency = showUrgency
+      ? ref.watch(budgetCategoryUrgencyProvider)
+      : const <String, double>{};
+  final unlinked = showUrgency
+      ? ref.watch(budgetCategoryUnlinkedProvider)
+      : const <String>{};
   final arranged = arrangeCategoryRows(
     categories: [
       for (final c in view.categories) CategoryInfo(c.id, c.name, c.parentId),
@@ -168,12 +198,17 @@ final budgetCategoryRowsProvider = Provider.autoDispose<CategoryRows?>((ref) {
       () {
         final c = byId[r.id]!;
         final f = view.snapshot.byCategory[r.id];
+        final account = c.accountCountId == null
+            ? null
+            : view.accountById[c.accountCountId];
         return CategoryRowView(
           category: c,
           depth: r.depth,
           hasChildren: r.hasChildren,
           collapsed: r.collapsed,
-          subline: r.hasChildren ? null : _subline(c),
+          subline: categoryLine(c),
+          accountName: account?.name,
+          accountIcon: account?.icon,
           planText: f == null ? '—' : budgetMoney(f.planBase),
           factText: f == null ? '—' : budgetMoney(f.factBase),
           plan: f?.planBase ?? 0,

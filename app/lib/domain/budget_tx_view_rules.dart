@@ -1,3 +1,4 @@
+import 'budget_rules.dart' show TxAmounts;
 import 'date_range_filter.dart';
 import 'name_sort.dart' show compareIgnoringEmoji;
 
@@ -120,6 +121,9 @@ class TxRowView {
   final String actionName;
   final bool linked;
 
+  /// The linked action's id (grouping key), null when unlinked.
+  final String? actionId;
+
   /// The live effective date (UTC).
   final DateTime date;
 
@@ -136,7 +140,96 @@ class TxRowView {
     required this.linked,
     required this.date,
     required this.amount,
+    this.actionId,
   });
+}
+
+/// How the Transactions list is grouped.
+enum TxGroupBy {
+  action('Action'),
+  category('Category'),
+  account('Account'),
+  none('None');
+
+  final String label;
+  const TxGroupBy(this.label);
+}
+
+/// One group of the list: its [key] (stable, for folding), a [title] and the
+/// transaction ids in the order they came in.
+class TxGroup {
+  final String key;
+  final String title;
+  final List<String> ids;
+
+  TxGroup(this.key, this.title) : ids = [];
+}
+
+/// Splits [rows] (already filtered and sorted) into groups by [by]. A group
+/// appears where its first transaction does, so the sort decides the group
+/// order too; the group of transactions without an action / category / account
+/// always goes last. [TxGroupBy.none] gives one untitled group.
+List<TxGroup> groupTransactionRows(
+  List<TxRowView> rows,
+  TxGroupBy by, {
+  String Function(String accountId)? accountName,
+}) {
+  if (by == TxGroupBy.none) {
+    return rows.isEmpty
+        ? const []
+        : [
+            TxGroup('all', '')..ids.addAll([for (final r in rows) r.id]),
+          ];
+  }
+  final groups = <String, TxGroup>{};
+  for (final r in rows) {
+    final (String key, String title) = switch (by) {
+      TxGroupBy.action => r.actionId == null
+          ? ('', 'No action')
+          : (r.actionId!, r.actionName.isEmpty ? 'Action' : r.actionName),
+      TxGroupBy.category => r.categoryId == null
+          ? ('', 'No category')
+          : (r.categoryId!, r.categoryName),
+      TxGroupBy.account => r.accountId == null
+          ? ('', 'No account')
+          : (r.accountId!, accountName?.call(r.accountId!) ?? 'Account'),
+      TxGroupBy.none => ('all', ''),
+    };
+    groups.putIfAbsent(key, () => TxGroup(key, title)).ids.add(r.id);
+  }
+  final list = groups.values.toList();
+  final none = list.where((g) => g.key.isEmpty).toList();
+  return [...list.where((g) => g.key.isNotEmpty), ...none];
+}
+
+/// Sums of transactions in the three currencies: counting and interactional
+/// per currency code (accounts differ), the main currency as one number.
+class TxTotals {
+  final Map<String, double> counting = {};
+  final Map<String, double> interact = {};
+  double base = 0;
+
+  /// Transactions that could not be converted to the main currency.
+  int noBase = 0;
+  int count = 0;
+
+  void add(
+    TxAmounts a, {
+    required String countCurrency,
+    String? interactCurrency,
+  }) {
+    count++;
+    counting[countCurrency] = (counting[countCurrency] ?? 0) + a.count;
+    if (a.interact != null && interactCurrency != null) {
+      interact[interactCurrency] =
+          (interact[interactCurrency] ?? 0) + a.interact!;
+    }
+    if (a.base == null) {
+      noBase++;
+    } else {
+      base += a.base!;
+    }
+  }
 }
 
 /// For every category: itself and every category below it. [parentOf] maps a

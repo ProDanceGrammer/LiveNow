@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,14 +8,20 @@ import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/budget_rules.dart';
 import '../../domain/budget_service.dart';
+import '../../domain/name_sort.dart';
 import '../account_icon_codec.dart';
+import '../budget_category_rows.dart' show categoryLine;
 import '../budget_providers.dart';
 import '../dialog_stack.dart';
 import '../open_entity.dart';
 import '../providers.dart';
+import '../undo.dart' show offerUndo, undoHistoryProvider;
 import 'account_icon.dart';
 import 'action_picker_dialog.dart';
+import 'app_toast.dart';
 import 'budget_format.dart';
+import 'category_transactions_panel.dart';
+import 'param_icons.dart';
 import '../theme/glass_theme.dart';
 import 'glass_pill_selector.dart';
 
@@ -60,12 +68,14 @@ Future<String?> pickBudgetCategory(
   String? excludeId,
   Set<String> excludeIds = const {},
   bool allowNone = false,
+  bool allowCreate = false,
 }) => showStackedDialog<String>(
   context: context,
   builder: (_) => _CategoryPickerDialog(
     leavesOnly: leavesOnly,
     excludeIds: {...excludeIds, ?excludeId},
     allowNone: allowNone,
+    allowCreate: allowCreate,
   ),
 );
 
@@ -74,11 +84,16 @@ class _CategoryPickerDialog extends ConsumerStatefulWidget {
     required this.leavesOnly,
     required this.excludeIds,
     required this.allowNone,
+    required this.allowCreate,
   });
 
   final bool leavesOnly;
   final Set<String> excludeIds;
   final bool allowNone;
+
+  /// A pinned "Create new category" row (opens the category dialog and returns
+  /// the new id), like "Create new transaction" in the action editor's picker.
+  final bool allowCreate;
 
   @override
   ConsumerState<_CategoryPickerDialog> createState() =>
@@ -121,10 +136,26 @@ class _CategoryPickerDialogState extends ConsumerState<_CategoryPickerDialog> {
               onChanged: (v) => setState(() => _query = v.toLowerCase()),
             ),
             Expanded(
-              child: rows.isEmpty && !(widget.allowNone && _query.isEmpty)
+              child: rows.isEmpty &&
+                      !(widget.allowNone && _query.isEmpty) &&
+                      !widget.allowCreate
                   ? const Center(child: Text('No categories'))
                   : ListView(
                       children: [
+                        if (widget.allowCreate)
+                          ListTile(
+                            key: const ValueKey('pick-category-new'),
+                            dense: true,
+                            leading: const Icon(Icons.add),
+                            title: const Text('Create new category'),
+                            onTap: () async {
+                              final navigator = Navigator.of(context);
+                              final id = await BudgetCategoryDialog.show(
+                                context,
+                              );
+                              if (id != null) navigator.pop(id);
+                            },
+                          ),
                         if (widget.allowNone && _query.isEmpty)
                           ListTile(
                             key: const ValueKey('pick-category-none'),
@@ -139,9 +170,15 @@ class _CategoryPickerDialogState extends ConsumerState<_CategoryPickerDialog> {
                             key: ValueKey('pick-category-${c.id}'),
                             dense: true,
                             title: Text(c.name),
-                            subtitle: c.parentId == null
-                                ? null
-                                : Text(byId[c.parentId]?.name ?? ''),
+                            // Where it sits, and "price × units per unit each
+                            // N months" so similar names can be told apart.
+                            subtitle: switch ([
+                              if (c.parentId != null) byId[c.parentId]?.name,
+                              categoryLine(c),
+                            ].whereType<String>().where((s) => s.isNotEmpty)) {
+                              final parts when parts.isEmpty => null,
+                              final parts => Text(parts.join(' · ')),
+                            },
                             onTap: () => Navigator.of(context).pop(c.id),
                           ),
                       ],
@@ -207,7 +244,38 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
   }
 
   Future<void> _pickIcon() async {
-    final pick = ref.read(accountIconPickerProvider);
+    // On a phone the icon may come from the Photo library or from Files; on
+    // the desktop there is only the file dialog.
+    var pick = ref.read(accountIconPickerProvider);
+    if (Platform.isIOS || Platform.isAndroid) {
+      final photos = ref.read(accountIconPhotoPickerProvider);
+      final fromPhotos = await showStackedDialog<bool>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: const Text('Account icon'),
+          children: [
+            SimpleDialogOption(
+              key: const ValueKey('icon-from-photos'),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const ListTile(
+                leading: Icon(Icons.photo_library_outlined),
+                title: Text('Photo library'),
+              ),
+            ),
+            SimpleDialogOption(
+              key: const ValueKey('icon-from-files'),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const ListTile(
+                leading: Icon(Icons.folder_outlined),
+                title: Text('Files'),
+              ),
+            ),
+          ],
+        ),
+      );
+      if (fromPhotos == null || !mounted) return;
+      if (fromPhotos) pick = photos;
+    }
     final bytes = await pick();
     if (bytes == null || !mounted) return;
     try {
@@ -385,11 +453,12 @@ class BudgetCategoryDialog extends ConsumerStatefulWidget {
   /// Preselected parent for "add sub-category".
   final String? parentId;
 
-  static Future<void> show(
+  /// Resolves to the saved category's id (null = cancelled or deleted).
+  static Future<String?> show(
     BuildContext context, {
     BudgetCategory? existing,
     String? parentId,
-  }) => showStackedDialog<void>(
+  }) => showStackedDialog<String>(
     context: context,
     builder: (_) =>
         BudgetCategoryDialog(existing: existing, parentId: parentId),
@@ -459,8 +528,8 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
     final navigator = Navigator.of(context);
     final service = ref.read(budgetServiceProvider);
     try {
-      await service.saveCategory(_input(_parentId));
-      navigator.pop();
+      final saved = await service.saveCategory(_input(_parentId));
+      navigator.pop(saved);
     } on BudgetCycleException catch (e) {
       setState(() => _error = e.message);
     } on BudgetGroupException catch (e) {
@@ -527,7 +596,84 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
         accountUseId: _useAccount,
       ),
     );
+    navigator.pop(id);
+  }
+
+  /// Deletes this category (sub-categories become top level, its transactions
+  /// stay without a category) and offers Undo.
+  Future<void> _delete() async {
+    final c = widget.existing!;
+    final overlay = rootOverlayOf(context);
+    final navigator = Navigator.of(context);
+    final service = ref.read(budgetServiceProvider);
+    final history = ref.read(undoHistoryProvider.notifier);
+    final undo = await service.deleteCategory(c.id);
+    if (undo == null) return;
     navigator.pop();
+    offerUndo(
+      overlay,
+      history,
+      'Deleted "${c.name}"',
+      () => service.undoDeleteCategory(undo),
+    );
+  }
+
+  /// Adds a sub-category: the picker lists every category that is not above
+  /// this one (a pick is moved under it) and can create a new one.
+  Future<void> _addSub(List<BudgetCategory> cats) async {
+    final id = widget.existing!.id;
+    // Never offer this category or anything above it (that would be a loop).
+    final above = <String>{id};
+    var p = widget.existing!.parentId;
+    final byId = {for (final c in cats) c.id: c};
+    while (p != null && above.add(p)) {
+      p = byId[p]?.parentId;
+    }
+    final picked = await pickBudgetCategory(
+      context,
+      leavesOnly: false,
+      excludeIds: above,
+      allowCreate: true,
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await ref.read(budgetServiceProvider).moveCategory(picked, id);
+      if (mounted) setState(() => _error = null);
+    } on BudgetCycleException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } on BudgetGroupException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    }
+  }
+
+  /// The settings column, and for an existing category its transactions: to the
+  /// right of it on a wide window (same height, each scrolling on its own), below
+  /// it on a narrow one.
+  Widget _layout(BuildContext context, List<Widget> fields) {
+    final id = widget.existing?.id;
+    if (id == null) return _dialogBody(fields);
+    final size = MediaQuery.sizeOf(context);
+    if (size.width < 1100) {
+      return _dialogBody([
+        ...fields,
+        _gap,
+        CategoryTransactionsPanel(categoryId: id, scrollable: false),
+      ]);
+    }
+    return SizedBox(
+      height: (size.height - 220).clamp(420.0, 760.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _dialogBody(fields),
+          const SizedBox(width: 16),
+          SizedBox(
+            width: 420,
+            child: CategoryTransactionsPanel(categoryId: id),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _pickEnd() async {
@@ -558,11 +704,29 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
     DropdownMenuItem<String?> noneItem(String text) =>
         DropdownMenuItem<String?>(value: null, child: Text(text));
 
+    final children = [for (final c in cats) if (c.parentId == id) c]
+      ..sort((a, b) => compareIgnoringEmoji(a.name, b.name));
     return AlertDialog(
-      title: Text(widget.existing == null ? 'New category' : 'Edit category'),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              widget.existing == null ? 'New category' : 'Edit category',
+            ),
+          ),
+          if (widget.existing != null)
+            IconButton(
+              key: const ValueKey('category-delete'),
+              tooltip: 'Delete',
+              color: Theme.of(context).colorScheme.error,
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: _delete,
+            ),
+        ],
+      ),
       content: Form(
         key: _form,
-        child: _dialogBody([
+        child: _layout(context, [
           TextFormField(
             key: const ValueKey('category-name'),
             controller: _name,
@@ -722,6 +886,7 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                 leavesOnly: false,
                 excludeIds: below,
                 allowNone: true,
+                allowCreate: true,
               );
               if (picked == null || !mounted) return;
               setState(
@@ -747,6 +912,34 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               ),
             ),
           ),
+          if (id != null) ...[
+            _gap,
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Sub-categories',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                IconButton(
+                  key: const ValueKey('category-add-sub'),
+                  tooltip: 'Add a sub-category',
+                  icon: const Icon(Icons.add),
+                  onPressed: () => _addSub(cats),
+                ),
+              ],
+            ),
+            for (final c in children)
+              ListTile(
+                key: ValueKey('category-sub-${c.id}'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(c.name),
+                subtitle: categoryLine(c) == null ? null : Text(categoryLine(c)!),
+                onTap: () => BudgetCategoryDialog.show(context, existing: c),
+              ),
+          ],
           _gap,
           DropdownButtonFormField<String?>(
             key: const ValueKey('category-account-count'),
@@ -975,6 +1168,23 @@ class _BudgetTransactionDialogState
     });
   }
 
+  /// Deletes this transaction (Undo is offered) and closes the dialog.
+  Future<void> _delete() async {
+    final overlay = rootOverlayOf(context);
+    final navigator = Navigator.of(context);
+    final service = ref.read(budgetServiceProvider);
+    final history = ref.read(undoHistoryProvider.notifier);
+    final row = await service.deleteTransaction(widget.existing!.row.id);
+    if (row == null) return;
+    navigator.pop();
+    offerUndo(
+      overlay,
+      history,
+      'Deleted transaction',
+      () => service.undoDeleteTransaction(row),
+    );
+  }
+
   Future<void> _pickDate() async {
     final now = DateTime.now().toUtc();
     final picked = await showDatePicker(
@@ -1048,27 +1258,86 @@ class _BudgetTransactionDialogState
         .firstOrNull;
     final qty = parseBudgetNumber(_quantity.text) ?? 0;
     final price = parseBudgetNumber(_price.text) ?? 0;
-    final total = isAmount ? qty : qty * price;
 
     String? number(String? v) =>
         parseBudgetNumber(v ?? '') == null ? 'Enter a number' : null;
     String? optionalNumber(String? v) =>
         (v ?? '').trim().isEmpty ? null : number(v);
 
+    // The same transaction in the three currencies it can be read in, with the
+    // rates as typed in the form (else the stored snapshot, else the accounts').
+    final base = ref.watch(budgetSettingsProvider).value?.baseCurrency ?? 'EUR';
+    TxAmounts? amounts;
+    if (cat != null) {
+      double? rate(TextEditingController c, double? stored, double? current) {
+        final typed = parseBudgetNumber(c.text);
+        return typed != null && typed > 0 ? typed : (stored ?? current);
+      }
+
+      amounts = transactionAmounts(
+        BudgetTx(
+          id: 'form',
+          date: DateTime.now().toUtc(),
+          quantity: qty,
+          unitPrice: price,
+          isIncome: cat.isIncome,
+          isAmount: isAmount,
+          accountCountId: countAccount?.id,
+          accountUseId: useAccount?.id,
+          rateCount: rate(
+            _rateCount,
+            widget.existing?.row.rateCount,
+            countAccount?.rateToBase,
+          ),
+          rateInteract: rate(
+            _rateInteract,
+            widget.existing?.row.rateInteract,
+            useAccount?.rateToBase,
+          ),
+        ),
+        {for (final a in accounts) a.id: budgetAcctFromRow(a)},
+      );
+    }
+    Widget amountLine(Widget? icon, String label, double? v, String cur) => Row(
+      children: [
+        if (icon != null) ...[icon, const SizedBox(width: 6)],
+        Flexible(
+          child: Text(
+            '$label: ${v == null ? '—' : budgetMoney(v, sign: true)} $cur'
+                .trim(),
+          ),
+        ),
+      ],
+    );
+
     return AlertDialog(
-      title: Text(
-        widget.existing != null
-            ? 'Edit transaction'
-            : widget.quick
-            ? 'Add transaction'
-            : 'New transaction',
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              widget.existing != null
+                  ? 'Edit transaction'
+                  : widget.quick
+                  ? 'Add transaction'
+                  : 'New transaction',
+            ),
+          ),
+          if (widget.existing != null)
+            IconButton(
+              key: const ValueKey('tx-delete'),
+              tooltip: 'Delete',
+              color: Theme.of(context).colorScheme.error,
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: _delete,
+            ),
+        ],
       ),
       content: Form(
         key: _form,
         child: _dialogBody([
           OutlinedButton.icon(
             key: const ValueKey('tx-category'),
-            icon: const Icon(Icons.category_outlined),
+            icon: const ParamIcon(Param.categories, size: 18, tooltip: false),
             label: Text(cat?.name ?? 'Pick a category'),
             onPressed: _pickCategory,
           ),
@@ -1125,7 +1394,19 @@ class _BudgetTransactionDialogState
             key: const ValueKey('tx-name'),
             controller: _name,
             decoration: const InputDecoration(labelText: 'Name (optional)'),
+            onChanged: (_) => setState(() {}),
           ),
+          // An empty name can take the category's name in one tap.
+          if (_name.text.trim().isEmpty && cat != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('tx-name-from-category'),
+                icon: const Icon(Icons.subdirectory_arrow_left, size: 16),
+                label: Text('Use "${cat.name}" as the name'),
+                onPressed: () => setState(() => _name.text = cat.name),
+              ),
+            ),
           _gap,
           Row(
             children: [
@@ -1159,23 +1440,25 @@ class _BudgetTransactionDialogState
               ],
             ],
           ),
-          if (cat != null) ...[
+          if (cat != null && amounts != null) ...[
             _gap,
-            Row(
-              children: [
-                if (countAccount != null) ...[
-                  AccountIcon(icon: countAccount.icon, size: 20),
-                  const SizedBox(width: 6),
-                ],
-                Flexible(
-                  child: Text(
-                    'Total: ${budgetMoney(total)} '
-                    '${countAccount?.currency ?? ''} '
-                    '(${cat.isIncome ? 'income' : 'expense'})',
-                  ),
-                ),
-              ],
+            Text(cat.isIncome ? 'Income' : 'Expense'),
+            amountLine(
+              countAccount == null
+                  ? null
+                  : AccountIcon(icon: countAccount.icon, size: 20),
+              'Counting',
+              amounts.count,
+              countAccount?.currency ?? '',
             ),
+            if (useAccount != null)
+              amountLine(
+                AccountIcon(icon: useAccount.icon, size: 20),
+                'Interactional',
+                amounts.interact,
+                useAccount.currency,
+              ),
+            amountLine(null, 'Main', amounts.base, base),
           ],
           if (countAccount != null || useAccount != null) ...[
             _gap,
@@ -1262,6 +1545,7 @@ class _BudgetSettingsDialogState extends ConsumerState<BudgetSettingsDialog> {
   late final _tolerance = TextEditingController(
     text: budgetNumber(widget.initial.tolerance),
   );
+  late bool _showUrgency = widget.initial.showUrgency;
 
   @override
   void dispose() {
@@ -1281,6 +1565,7 @@ class _BudgetSettingsDialogState extends ConsumerState<BudgetSettingsDialog> {
             baseCurrency: _base.text,
             periodMonths: int.parse(_months.text.trim()),
             tolerance: parseBudgetNumber(_tolerance.text)!,
+            showUrgency: _showUrgency,
           ),
         );
     navigator.pop();
@@ -1330,6 +1615,15 @@ class _BudgetSettingsDialogState extends ConsumerState<BudgetSettingsDialog> {
               return n == null || n < 0 ? 'A number, 0 or more' : null;
             },
             onFieldSubmitted: (_) => _save(),
+          ),
+          _gap,
+          SwitchListTile(
+            key: const ValueKey('settings-show-urgency'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Show urgency colours and values'),
+            subtitle: const Text('On categories and transactions'),
+            value: _showUrgency,
+            onChanged: (v) => setState(() => _showUrgency = v),
           ),
         ]),
       ),

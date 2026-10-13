@@ -384,8 +384,13 @@ void main() {
       },
     );
     await openTab(tester, 'Transactions');
-    await tester.tap(find.byKey(ValueKey('budget-delete-tx-$txId')));
+    // Delete lives in the transaction's edit dialog now (no icon on the row).
+    expect(find.byKey(ValueKey('budget-delete-tx-$txId')), findsNothing);
+    await tester.tap(find.byKey(ValueKey('budget-tx-$txId')));
     await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('tx-delete')));
+    await settle(tester);
+    await tester.pump(const Duration(milliseconds: 400)); // the dialog closes
     expect(find.text('Bread'), findsNothing);
     expect(find.text('Deleted transaction'), findsOneWidget);
     await tester.tap(find.text('Undo'));

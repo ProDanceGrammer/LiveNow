@@ -24,6 +24,9 @@ enum Param {
   notes,
   connected,
   manual,
+
+  /// Two gears: the Budget settings.
+  settings,
 }
 
 /// Full tooltip / accessibility names.
@@ -42,6 +45,7 @@ const Map<Param, String> kParamNames = {
   Param.notes: 'Notes',
   Param.connected: 'Connected actions',
   Param.manual: 'Manual parameters',
+  Param.settings: 'Budget settings',
 };
 
 /// A small monochrome icon for a [Param], painted from cached static paths in
@@ -249,6 +253,7 @@ class ParamIconPainter extends CustomPainter {
       case Param.notes:
       case Param.connected:
       case Param.manual:
+      case Param.settings:
         paintLineIcon(canvas, param, color);
     }
     canvas.restore();

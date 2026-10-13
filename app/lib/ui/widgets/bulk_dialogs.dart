@@ -310,7 +310,7 @@ Future<void> runBulkShift(
   List<ActionListItem> items,
 ) async {
   if (items.isEmpty) return;
-  final shift = await showStackedDialog<Duration>(
+  final shift = await showStackedDialog<ShiftAmount>(
     context: context,
     builder: (_) => const _ShiftDialog(),
   );
@@ -351,23 +351,29 @@ class _ShiftDialog extends StatefulWidget {
 }
 
 class _ShiftDialogState extends State<_ShiftDialog> {
+  final _months = TextEditingController(text: '0');
+  final _weeks = TextEditingController(text: '0');
   final _days = TextEditingController(text: '1');
   final _hours = TextEditingController(text: '0');
-  final _minutes = TextEditingController(text: '0');
   bool _later = true;
 
   @override
   void dispose() {
+    _months.dispose();
+    _weeks.dispose();
     _days.dispose();
     _hours.dispose();
-    _minutes.dispose();
     super.dispose();
   }
 
-  Duration get _value {
+  ShiftAmount get _value {
     int n(TextEditingController c) => int.tryParse(c.text) ?? 0;
-    final d = Duration(days: n(_days), hours: n(_hours), minutes: n(_minutes));
-    return _later ? d : -d;
+    final d = ShiftAmount(
+      months: n(_months),
+      days: n(_weeks) * 7 + n(_days),
+      hours: n(_hours),
+    );
+    return _later ? d : d.negated;
   }
 
   Widget _field(String key, String label, TextEditingController c) => Expanded(
@@ -406,9 +412,10 @@ class _ShiftDialogState extends State<_ShiftDialog> {
             const SizedBox(height: 12),
             Row(
               children: [
+                _field('shift-months', 'Months', _months),
+                _field('shift-weeks', 'Weeks', _weeks),
                 _field('shift-days', 'Days', _days),
                 _field('shift-hours', 'Hours', _hours),
-                _field('shift-minutes', 'Minutes', _minutes),
               ],
             ),
           ],
@@ -421,7 +428,7 @@ class _ShiftDialogState extends State<_ShiftDialog> {
         ),
         FilledButton(
           key: const ValueKey('shift-apply'),
-          onPressed: _value == Duration.zero
+          onPressed: _value.isZero
               ? null
               : () => Navigator.of(context).pop(_value),
           child: const Text('Apply'),

@@ -17,7 +17,8 @@ bool isLineParam(Param p) => switch (p) {
   Param.transactions ||
   Param.notes ||
   Param.connected ||
-  Param.manual => true,
+  Param.manual ||
+  Param.settings => true,
   _ => false,
 };
 
@@ -51,6 +52,9 @@ void paintLineIcon(ui.Canvas canvas, Param param, Color color) {
       canvas.drawPath(_P.connected, line);
     case Param.manual:
       _paintSliders(canvas, line);
+    case Param.settings:
+      canvas.drawPath(_P.gearBig, line);
+      canvas.drawPath(_P.gearSmall, line);
     default:
       break;
   }
@@ -162,6 +166,38 @@ void _paintSliders(ui.Canvas canvas, Paint line) {
 
 /// Static geometry, built once.
 class _P {
+  /// A gear: [teeth] trapezoid teeth between radii [inner] and [outer] around
+  /// [c], with a round hole of radius [hole].
+  static Path _gear(Offset c, double outer, double inner, int teeth, double hole) {
+    final p = Path();
+    final step = 2 * math.pi / teeth;
+    for (var i = 0; i < teeth; i++) {
+      final a = i * step;
+      // tooth: rise at a+0.18, flat top until a+0.42, fall by a+0.60 (of a step)
+      final pts = [
+        (a + step * 0.04, inner),
+        (a + step * 0.20, outer),
+        (a + step * 0.46, outer),
+        (a + step * 0.62, inner),
+      ];
+      for (final (ang, r) in pts) {
+        final o = c + Offset(r * math.cos(ang), r * math.sin(ang));
+        if (i == 0 && ang == pts.first.$1) {
+          p.moveTo(o.dx, o.dy);
+        } else {
+          p.lineTo(o.dx, o.dy);
+        }
+      }
+    }
+    p.close();
+    p.addOval(Rect.fromCircle(center: c, radius: hole));
+    return p;
+  }
+
+  /// Two gears, the big one at the lower left and a small one top right.
+  static final Path gearBig = _gear(const Offset(9.2, 14.4), 7.6, 5.8, 8, 2.4);
+  static final Path gearSmall = _gear(const Offset(18.0, 6.0), 4.6, 3.4, 6, 1.4);
+
   // A pin: head circle (centre C, radius r) joined by two tangents to the tip.
   static Path _pin(Offset c, double r, double tipY) {
     final d = tipY - c.dy;

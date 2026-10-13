@@ -185,9 +185,18 @@ void main() {
     expect(find.byKey(const ValueKey('pick-category-none')), findsOneWidget);
     expect(find.text('Beta'), findsOneWidget);
     expect(find.text('Gamma'), findsOneWidget);
-    // (The dialog's own name field also says "Alpha": look at list rows only.)
-    expect(find.widgetWithText(ListTile, 'Alpha child'), findsNothing);
-    expect(find.widgetWithText(ListTile, 'Alpha'), findsNothing);
+    // (The dialog's own name field and its Sub-categories block also say
+    // "Alpha child": look at the picker's rows only.)
+    Finder pickRow(String name) => find.descendant(
+      of: find.byWidgetPredicate(
+        (w) =>
+            w.key is ValueKey<String> &&
+            (w.key as ValueKey<String>).value.startsWith('pick-category-'),
+      ),
+      matching: find.text(name),
+    );
+    expect(pickRow('Alpha child'), findsNothing);
+    expect(pickRow('Alpha'), findsNothing);
 
     await tester.enterText(
       find.byKey(const ValueKey('budget-category-search')),

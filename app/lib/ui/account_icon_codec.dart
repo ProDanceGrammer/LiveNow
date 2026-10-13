@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 /// The picture of an account is stored as a small square PNG in base64 text
 /// (column `budget_accounts.icon`), so it syncs and backs up like any other
@@ -112,6 +113,20 @@ Uint8List? decodeAccountIcon(String? icon) {
   if (_decoded.length > _decodedLimit) _decoded.remove(_decoded.keys.first);
   return bytes;
 }
+
+/// Asks for a picture from the phone's PHOTO LIBRARY (the Files picker below
+/// cannot browse Photos) and returns its bytes (null = cancelled). Phones only.
+final accountIconPhotoPickerProvider =
+    Provider<Future<Uint8List?> Function()>(
+      (ref) => () async {
+        final picked = await ImagePicker().pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 512,
+          maxHeight: 512,
+        );
+        return picked?.readAsBytes();
+      },
+    );
 
 /// Asks for an image file and returns its bytes (null = cancelled). A provider
 /// so tests can replace the native file dialog. iOS ignores extensions: it

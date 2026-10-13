@@ -123,7 +123,9 @@ void main() {
       greaterThan(tester.getTopLeft(find.text('Food')).dx),
     );
     // The entered fields became one grey line under the name.
-    expect(find.textContaining('× 3/mo'), findsOneWidget);
+    expect(find.textContaining('10 × 3 per month'), findsOneWidget);
+    // ... followed by the account to count in.
+    expect(find.textContaining('Euro'), findsWidgets);
     await unmount(tester);
   });
 
@@ -207,15 +209,60 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('the menu offers Add sub-category and Delete', (tester) async {
+  testWidgets('no three-dots menu; the dialog deletes with an Undo', (
+    tester,
+  ) async {
     await pump(tester);
-    await tester.tap(find.byKey(ValueKey('budget-category-menu-$rent')));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Add sub-category'), findsOneWidget);
-    expect(find.text('Delete'), findsOneWidget);
-    await tester.tapAt(const Offset(5, 5)); // close the menu
-    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(ValueKey('budget-category-menu-$rent')), findsNothing);
+    await tester.tap(row(rent));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('category-delete')), findsOneWidget);
+    // The transactions panel sits beside the settings on a wide window.
+    expect(find.textContaining('Transactions ('), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('category-delete')));
+    await settle(tester);
+    expect(row(rent), findsNothing);
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(row(rent), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await unmount(tester);
+  });
+
+  testWidgets('the list is clipped so tinted rows cannot bleed over the header', (
+    tester,
+  ) async {
+    await pump(tester);
+    expect(
+      find.ancestor(of: find.byType(ListView), matching: find.byType(ClipRect)),
+      findsWidgets,
+    );
+    await unmount(tester);
+  });
+
+  testWidgets('a category dialog lists its transactions with the sums', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.tap(row(milk));
+    await settle(tester);
+    expect(find.textContaining('Transactions (1)'), findsOneWidget);
+    // 4 x 10 EUR expense, counted in the main currency too.
+    expect(find.textContaining('40.00'), findsWidgets);
+    await unmount(tester);
+  });
+
+  testWidgets('the parent picker shows price x units and can create a category', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.tap(row(rent));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('category-parent')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('pick-category-new')), findsOneWidget);
+    expect(find.textContaining('10 × 3 per month'), findsWidgets);
     await unmount(tester);
   });
 

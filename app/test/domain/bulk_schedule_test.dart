@@ -33,7 +33,7 @@ void main() {
   ScheduleChangeLookup lookup(BulkSchedule r) => ScheduleChangeLookup(r);
 
   test('Shift by moves everything, each keeping its length', () {
-    final r = bulkShift(items, const Duration(days: 1, hours: 2));
+    final r = bulkShift(items, const ShiftAmount(days: 1, hours: 2));
     final c = lookup(r);
     expect(c('a').startAt, mon.add(const Duration(days: 1, hours: 2)));
     expect(c('a').endAt, mon.add(const Duration(days: 1, hours: 3)));
@@ -44,7 +44,31 @@ void main() {
   });
 
   test('Shift by with a zero amount changes nothing', () {
-    expect(bulkShift(items, Duration.zero).changes, isEmpty);
+    expect(bulkShift(items, const ShiftAmount()).changes, isEmpty);
+  });
+
+  test('Shift by weeks (7 days each) and months (calendar)', () {
+    final c = lookup(bulkShift(items, const ShiftAmount(days: 14)));
+    expect(c('a').startAt, mon.add(const Duration(days: 14)));
+    final m = lookup(bulkShift(items, const ShiftAmount(months: 1)));
+    expect(m('a').startAt, DateTime.utc(2026, 11, 5, 6)); // same wall time
+    expect(m('b').endAt, DateTime.utc(2026, 11, 7, 13));
+    expect(m('day').startAt, DateTime.utc(2026, 11, 5, 21)); // 6 Nov midnight
+  });
+
+  test('A month shift clamps the day and keeps the length; earlier works', () {
+    final jan31 = DateTime.utc(2026, 1, 31, 6);
+    final r = lookup(
+      bulkShift([
+        _a('x', start: jan31, end: jan31.add(const Duration(hours: 3))),
+      ], const ShiftAmount(months: 1)),
+    );
+    expect(r('x').startAt, DateTime.utc(2026, 2, 28, 6));
+    expect(r('x').endAt, DateTime.utc(2026, 2, 28, 9));
+    final back = lookup(
+      bulkShift([_a('y', start: mon)], const ShiftAmount(months: 1).negated),
+    );
+    expect(back('y').startAt, DateTime.utc(2026, 9, 5, 6));
   });
 
   test('Set date: the earliest action starts at the chosen moment', () {

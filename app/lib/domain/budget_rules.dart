@@ -532,6 +532,33 @@ double? transactionInteractAmount(
 
 double? _posRate(double? v) => v != null && v > 0 ? v : null;
 
+/// A transaction's signed amount in the BASE (main) currency: the counted
+/// amount divided by the transaction's own rate (falling back to its counting
+/// account's current one) - the same conversion the category Fact uses. Null
+/// when the rate is missing.
+double? transactionBaseAmount(
+  BudgetTx t,
+  Map<String, BudgetAcct> accountsById,
+) {
+  final r =
+      _posRate(t.rateCount) ??
+      _posRate(accountsById[t.accountCountId]?.rateToBase);
+  if (r == null) return null;
+  return round2((t.isIncome ? 1 : -1) * t.countAmount / r);
+}
+
+/// One transaction in the three currencies it can be read in: [count] (signed,
+/// in the counting account's currency), [interact] (the account the money moves
+/// through) and [base] (the main currency). Null = not convertible.
+typedef TxAmounts = ({double count, double? interact, double? base});
+
+TxAmounts transactionAmounts(BudgetTx t, Map<String, BudgetAcct> accountsById) =>
+    (
+      count: (t.isIncome ? 1 : -1) * t.countAmount,
+      interact: transactionInteractAmount(t, accountsById),
+      base: transactionBaseAmount(t, accountsById),
+    );
+
 /// For each category, the action of its nearest FUTURE transaction (groups:
 /// the nearest among their descendants). Categories with none are absent.
 Map<String, String> upcomingActionByCategory({

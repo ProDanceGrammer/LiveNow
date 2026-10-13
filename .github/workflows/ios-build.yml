@@ -48,6 +48,7 @@ jobs:
           B=/usr/libexec/PlistBuddy
           $B -c "Add :NSLocalNetworkUsageDescription string 'LiveNow syncs with your PC over your home network.'" $PLIST
           $B -c "Add :NSCameraUsageDescription string 'LiveNow scans the pairing code shown on your PC.'" $PLIST
+          $B -c "Add :NSPhotoLibraryUsageDescription string 'LiveNow uses a picture from your photos as an account icon.'" $PLIST
           # The sync traffic is plain HTTP but encrypted by the app itself; it
           # goes to the paired PC (a LAN address, or a Tailscale 100.x one,
           # which iOS does not count as local).

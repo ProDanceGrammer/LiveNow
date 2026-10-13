@@ -31,7 +31,11 @@ void main() {
     }
   }
 
-  Future<void> pump(WidgetTester tester, {Size size = const Size(1400, 1000)}) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    Size size = const Size(1400, 1000),
+    bool showUrgency = true,
+  }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -43,6 +47,8 @@ void main() {
     addTearDown(db.close);
     await tester.runAsync(() async {
       final b = BudgetService(db);
+      // Urgency colours and numbers are off by default (Budget settings).
+      await b.saveSettings(BudgetSettings(showUrgency: showUrgency));
       final acc = await b.saveAccount(
         name: 'Euro',
         currency: 'EUR',
@@ -161,6 +167,18 @@ void main() {
     expect(tinted(tester, 'budget-category-$catUnlinked', white), isTrue);
     expect(tinted(tester, 'budget-category-$catPlain', scale), isFalse);
     expect(tinted(tester, 'budget-category-$catPlain', white), isFalse);
+    await unmount(tester);
+  });
+
+  testWidgets('hidden by default: no colour, no urgency number', (tester) async {
+    await pump(tester, showUrgency: false);
+    await openTab(tester, 'Transactions');
+    expect(tinted(tester, 'budget-tx-$txLinked', scale), isFalse);
+    expect(tinted(tester, 'budget-tx-$txUnlinked', white), isFalse);
+    expect(find.byKey(ValueKey('budget-tx-urgency-$txLinked')), findsNothing);
+    await openTab(tester, 'Categories');
+    expect(tinted(tester, 'budget-category-$catLinked', scale), isFalse);
+    expect(tinted(tester, 'budget-category-$catUnlinked', white), isFalse);
     await unmount(tester);
   });
 

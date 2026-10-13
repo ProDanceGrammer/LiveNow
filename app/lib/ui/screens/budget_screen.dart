@@ -152,7 +152,7 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
               ),
               IconButton(
                 key: const ValueKey('budget-settings'),
-                icon: const Icon(Icons.tune),
+                icon: const ParamIcon(Param.settings, size: 22, tooltip: false),
                 tooltip: 'Budget settings',
                 onPressed: settings == null
                     ? null
@@ -229,24 +229,6 @@ Widget _loading(AsyncValue<BudgetView> v, Widget Function(BudgetView) data) =>
       error: (e, _) => Center(child: Text('Error: $e')),
     );
 
-Future<void> _deleteCategory(
-  BuildContext context,
-  WidgetRef ref,
-  BudgetCategory c,
-) async {
-  final overlay = rootOverlayOf(context);
-  final service = ref.read(budgetServiceProvider);
-  final history = ref.read(undoHistoryProvider.notifier);
-  final undo = await service.deleteCategory(c.id);
-  if (undo == null) return;
-  offerUndo(
-    overlay,
-    history,
-    'Deleted "${c.name}"',
-    () => service.undoDeleteCategory(undo),
-  );
-}
-
 Future<void> _deleteAccount(
   BuildContext context,
   WidgetRef ref,
@@ -262,24 +244,6 @@ Future<void> _deleteAccount(
     history,
     'Deleted "${a.name}"',
     () => service.undoDeleteAccount(undo),
-  );
-}
-
-Future<void> _deleteTransaction(
-  BuildContext context,
-  WidgetRef ref,
-  BudgetTransaction t,
-) async {
-  final overlay = rootOverlayOf(context);
-  final service = ref.read(budgetServiceProvider);
-  final history = ref.read(undoHistoryProvider.notifier);
-  final row = await service.deleteTransaction(t.id);
-  if (row == null) return;
-  offerUndo(
-    overlay,
-    history,
-    'Deleted transaction',
-    () => service.undoDeleteTransaction(row),
   );
 }
 
@@ -304,6 +268,7 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
             baseCurrency: s.baseCurrency,
             periodMonths: months,
             tolerance: s.tolerance,
+            showUrgency: s.showUrgency,
           ),
         );
   }
@@ -741,8 +706,6 @@ class _CategoriesView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) => BudgetCategoriesBoard(
     onOpen: (c) => BudgetCategoryDialog.show(context, existing: c),
-    onAddSub: (id) => BudgetCategoryDialog.show(context, parentId: id),
-    onDelete: (c) => _deleteCategory(context, ref, c),
   );
 }
 
@@ -768,6 +731,8 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
     final sort = ref.watch(budgetTxSortProvider);
     final flags = ref.watch(budgetTxSearchFlagsProvider);
     final filters = ref.watch(budgetTxFiltersProvider);
+    final grouping = ref.watch(budgetTxGroupProvider);
+    final collapsed = ref.watch(budgetTxCollapsedProvider);
     final optionsActive =
         filters.active ||
         flags != const TxSearchFlags() ||
@@ -778,21 +743,24 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
       final now = DateTime.now().toUtc();
 
       final byId = {for (final t in view.transactions) t.row.id: t};
+      final rowViews = [
+        for (final t in view.transactions)
+          TxRowView(
+            id: t.row.id,
+            name: t.row.name,
+            categoryId: t.row.categoryId,
+            categoryName: cats[t.row.categoryId]?.name ?? '',
+            accountId: t.row.accountCountId,
+            actionName: t.actionName ?? '',
+            linked: t.row.actionId != null,
+            actionId: t.row.actionId,
+            date: t.date,
+            amount: _amount(t.row),
+          ),
+      ];
+      final rowById = {for (final r in rowViews) r.id: r};
       final ids = arrangeTransactionIds(
-        rows: [
-          for (final t in view.transactions)
-            TxRowView(
-              id: t.row.id,
-              name: t.row.name,
-              categoryId: t.row.categoryId,
-              categoryName: cats[t.row.categoryId]?.name ?? '',
-              accountId: t.row.accountCountId,
-              actionName: t.actionName ?? '',
-              linked: t.row.actionId != null,
-              date: t.date,
-              amount: _amount(t.row),
-            ),
-        ],
+        rows: rowViews,
         sort: sort,
         filters: filters,
         query: _query,
@@ -804,6 +772,53 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
       final items = [for (final id in ids) byId[id]!];
       // Day headings only make sense while the list is in date order.
       final byDate = sort.isNotEmpty && sort.first.field == TxSortField.date;
+
+      // Each transaction in the three currencies, and the totals of the whole
+      // filtered list and of every group.
+      final base = view.settings.baseCurrency;
+      final acctRules = {
+        for (final a in view.accounts) a.id: budgetAcctFromRow(a),
+      };
+      final amounts = {
+        for (final t in items) t.row.id: transactionAmounts(t.toRules(), acctRules),
+      };
+      void addTo(TxTotals totals, BudgetTxItem t) => totals.add(
+        amounts[t.row.id]!,
+        countCurrency: accounts[t.row.accountCountId]?.currency ?? '',
+        interactCurrency: accounts[t.row.accountUseId]?.currency,
+      );
+      final overall = TxTotals();
+      for (final t in items) {
+        addTo(overall, t);
+      }
+      final groups = groupTransactionRows(
+        [for (final id in ids) rowById[id]!],
+        grouping,
+        accountName: (id) => accounts[id]?.name ?? 'Account',
+      );
+      final grouped = grouping != TxGroupBy.none;
+      // The flat list: group headers (folded groups hide their rows), day
+      // headings and tiles.
+      final entries = <Object>[];
+      for (final g in groups) {
+        final totals = TxTotals();
+        for (final id in g.ids) {
+          addTo(totals, byId[id]!);
+        }
+        final folded = grouped && collapsed.contains(g.key);
+        if (grouped) entries.add(_GroupEntry(g, totals, folded));
+        if (folded) continue;
+        BudgetTxItem? prev;
+        for (final id in g.ids) {
+          final t = byId[id]!;
+          if (byDate &&
+              (prev == null || budgetDate(prev.date) != budgetDate(t.date))) {
+            entries.add(t.date);
+          }
+          entries.add(t);
+          prev = t;
+        }
+      }
       return Column(
         children: [
           Padding(
@@ -835,6 +850,17 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
             ),
           ),
           if (_showOptions) const BudgetTxOptionsPanel(),
+          // The total of everything the search and filters leave in the list.
+          if (items.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: _TotalsBlock(
+                key: const ValueKey('tx-totals'),
+                title: 'Total (${items.length})',
+                totals: overall,
+                base: base,
+              ),
+            ),
           Expanded(
             child: items.isEmpty
                 ? Center(
@@ -846,36 +872,38 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.only(bottom: 88),
-                    itemCount: items.length,
+                    itemCount: entries.length,
                     itemBuilder: (context, i) {
-                      final t = items[i];
-                      final prev = i == 0 ? null : items[i - 1];
-                      final newDay =
-                          byDate &&
-                          (prev == null ||
-                              budgetDate(prev.date) != budgetDate(t.date));
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (newDay)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
-                              child: Text(
-                                budgetDate(t.date) +
-                                    (t.date.isAfter(now) ? '  · planned' : ''),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          _TransactionTile(
-                            item: t,
-                            category: cats[t.row.categoryId],
-                            currency: accounts[t.row.accountCountId]?.currency,
-                            accountIcon: accounts[t.row.accountCountId]?.icon,
-                            hasAccount: accounts[t.row.accountCountId] != null,
+                      final e = entries[i];
+                      if (e is _GroupEntry) {
+                        return _GroupHeader(
+                          entry: e,
+                          base: base,
+                          onToggle: () {
+                            final n = ref.read(budgetTxCollapsedProvider.notifier);
+                            final next = {...n.state};
+                            if (!next.remove(e.group.key)) next.add(e.group.key);
+                            n.state = next;
+                          },
+                        );
+                      }
+                      if (e is DateTime) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+                          child: Text(
+                            budgetDate(e) +
+                                (e.isAfter(now) ? '  · planned' : ''),
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
-                        ],
+                        );
+                      }
+                      final t = e as BudgetTxItem;
+                      return _TransactionTile(
+                        item: t,
+                        category: cats[t.row.categoryId],
+                        currency: accounts[t.row.accountCountId]?.currency,
+                        accountIcon: accounts[t.row.accountCountId]?.icon,
+                        hasAccount: accounts[t.row.accountCountId] != null,
                       );
                     },
                   ),
@@ -883,6 +911,112 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
         ],
       );
     });
+  }
+}
+
+/// A group header row of the Transactions list.
+class _GroupEntry {
+  const _GroupEntry(this.group, this.totals, this.folded);
+
+  final TxGroup group;
+  final TxTotals totals;
+  final bool folded;
+}
+
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({
+    required this.entry,
+    required this.base,
+    required this.onToggle,
+  });
+
+  final _GroupEntry entry;
+  final String base;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+      child: InkWell(
+        key: ValueKey('tx-group-header-${entry.group.key}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                entry.folded ? Icons.chevron_right : Icons.expand_more,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: _TotalsBlock(
+                  title: '${entry.group.title} (${entry.group.ids.length})',
+                  totals: entry.totals,
+                  base: base,
+                  bold: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A title and the three totals: counting and interactional per currency, then
+/// the main currency (with a note when some amounts have no rate).
+class _TotalsBlock extends StatelessWidget {
+  const _TotalsBlock({
+    super.key,
+    required this.title,
+    required this.totals,
+    required this.base,
+    this.bold = false,
+  });
+
+  final String title;
+  final TxTotals totals;
+  final String base;
+  final bool bold;
+
+  static String _sums(Map<String, double> m) => [
+    for (final e in m.entries) '${budgetMoney(e.value, sign: true)} ${e.key}'.trim(),
+  ].join(', ');
+
+  @override
+  Widget build(BuildContext context) {
+    final small = TextStyle(
+      fontSize: 12,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w600),
+        ),
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: 'Counting: ${_sums(totals.counting)}'),
+              if (totals.interact.isNotEmpty)
+                TextSpan(text: '   Interactional: ${_sums(totals.interact)}'),
+              TextSpan(
+                text: '   Main: ${budgetMoney(totals.base, sign: true)} $base'
+                    '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
+              ),
+            ],
+          ),
+          style: small,
+        ),
+      ],
+    );
   }
 }
 
@@ -917,7 +1051,9 @@ class _TransactionTile extends ConsumerWidget {
     // Urgency of the related action: the tile takes its colour from the scale
     // (white when that action has no direction; plain without an action), and
     // the number + icon sit on the action line.
-    final actionId = t.actionId;
+    // Hidden unless switched on in Budget settings.
+    final showUrgency = ref.watch(budgetShowUrgencyProvider);
+    final actionId = showUrgency ? t.actionId : null;
     final urgency = ref.watch(
       actionUrgencyProvider.select((m) => actionId == null ? null : m[actionId]),
     );
@@ -1025,13 +1161,6 @@ class _TransactionTile extends ConsumerWidget {
                   fontWeight: FontWeight.w600,
                   color: fg ?? (amount < 0 ? scheme.error : Colors.green),
                 ),
-              ),
-              IconButton(
-                key: ValueKey('budget-delete-tx-${t.id}'),
-                tooltip: 'Delete',
-                color: fg,
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _deleteTransaction(context, ref, t),
               ),
             ],
           ),

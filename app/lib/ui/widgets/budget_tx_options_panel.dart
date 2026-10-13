@@ -26,6 +26,7 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
     final sort = ref.watch(budgetTxSortProvider);
     final flags = ref.watch(budgetTxSearchFlagsProvider);
     final filters = ref.watch(budgetTxFiltersProvider);
+    final group = ref.watch(budgetTxGroupProvider);
     final accounts = ref.watch(budgetAccountsProvider).value ?? const [];
     final categories = ref.watch(budgetCategoriesProvider).value ?? const [];
     final theme = Theme.of(context);
@@ -84,6 +85,23 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
                     ...sort,
                     TxSortKey(TxSortField.values.byName(id)),
                   ]),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text('Group by', style: theme.textTheme.titleSmall),
+                    for (final g in TxGroupBy.values)
+                      ChoiceChip(
+                        key: ValueKey('tx-group-${g.name}'),
+                        label: Text(g.label),
+                        selected: group == g,
+                        onSelected: (_) =>
+                            ref.read(budgetTxGroupProvider.notifier).state = g,
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 Wrap(
