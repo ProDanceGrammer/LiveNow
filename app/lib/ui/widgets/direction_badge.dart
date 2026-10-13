@@ -2,25 +2,60 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers.dart';
 
-const _kEmojiFonts = [
+// TwemojiFlags first on desktop: Segoe UI Emoji draws a flag as its two
+// letters ("UA"); the font only has flag glyphs, so every other emoji falls
+// through to the system's colour font.
+final _kEmojiFonts = [
+  if (defaultTargetPlatform != TargetPlatform.iOS &&
+      defaultTargetPlatform != TargetPlatform.android)
+    'TwemojiFlags',
   'Segoe UI Emoji',
   'Apple Color Emoji',
   'Noto Color Emoji',
 ];
 
-/// Right edge (x) of each space-separated chunk of [icons] when painted in
-/// the badge style, cached per (string, font size): measuring is the only
-/// expensive part of resolving "which emoji is under the pointer".
+TextStyle _badgeStyle(double fontSize) => TextStyle(
+  fontSize: fontSize,
+  height: 1.25,
+  fontFamilyFallback: _kEmojiFonts,
+);
+
+/// The chunks side by side with a thin gap (a real space is as wide as half an
+/// emoji, which spread the icons far apart).
+TextSpan _badgeSpan(List<String> chunks, double fontSize) => TextSpan(
+  style: _badgeStyle(fontSize),
+  children: [
+    for (var i = 0; i < chunks.length; i++) ...[
+      if (i > 0) TextSpan(text: ' ', style: TextStyle(fontSize: fontSize * 0.4)),
+      TextSpan(text: chunks[i]),
+    ],
+  ],
+);
+
+double _badgeTextWidth(List<String> chunks, double fontSize) {
+  final painter = TextPainter(
+    textDirection: TextDirection.ltr,
+    text: _badgeSpan(chunks, fontSize),
+  )..layout();
+  final w = painter.width;
+  painter.dispose();
+  return w;
+}
+
+/// Right edge (x) of each chunk of [chunks] in the badge style, cached per
+/// (string, font size): measuring is the only expensive part of resolving
+/// "which emoji is under the pointer".
 final LinkedHashMap<String, List<double>> _edgeCache = LinkedHashMap();
 const _kEdgeCacheSize = 256;
 
-List<double> _chunkEdges(String icons, double fontSize, TextStyle style) {
+List<double> _chunkEdges(String icons, double fontSize) {
   final key = '$fontSize|$icons';
   final hit = _edgeCache.remove(key);
   if (hit != null) {
@@ -28,22 +63,57 @@ List<double> _chunkEdges(String icons, double fontSize, TextStyle style) {
     return hit;
   }
   final chunks = icons.split(' ');
-  final edges = <double>[];
-  final painter = TextPainter(textDirection: TextDirection.ltr);
-  var prefix = '';
-  for (var i = 0; i < chunks.length; i++) {
-    prefix = i == 0 ? chunks[0] : '$prefix ${chunks[i]}';
-    painter.text = TextSpan(text: prefix, style: style);
-    painter.layout();
-    edges.add(painter.width);
-  }
-  painter.dispose();
+  final edges = <double>[
+    for (var i = 0; i < chunks.length; i++)
+      _badgeTextWidth(chunks.sublist(0, i + 1), fontSize),
+  ];
   _edgeCache[key] = edges;
   if (_edgeCache.length > _kEdgeCacheSize) {
     _edgeCache.remove(_edgeCache.keys.first);
   }
   return edges;
 }
+
+final LinkedHashMap<String, String> _fitCache = LinkedHashMap();
+
+/// [icons] ('A B C D +2') cut to what fits in [maxWidth]: the first emojis
+/// that fit, then '+N' for ALL the others (hidden ones and the old '+n').
+/// Returns [icons] unchanged when everything fits (or [maxWidth] is null).
+String fitDirectionIcons(String icons, double? maxWidth, double fontSize) {
+  if (maxWidth == null) return icons;
+  final key = '$fontSize|${maxWidth.floor()}|$icons';
+  final hit = _fitCache[key];
+  if (hit != null) return hit;
+  final chunks = icons.split(' ');
+  var result = icons;
+  if (_badgeTextWidth(chunks, fontSize) > maxWidth) {
+    final emoji = [for (final c in chunks) if (!c.startsWith('+')) c];
+    var total = emoji.length;
+    for (final c in chunks) {
+      if (c.startsWith('+')) total += int.tryParse(c.substring(1)) ?? 0;
+    }
+    result = '+$total';
+    for (var k = emoji.length - 1; k >= 0; k--) {
+      final cand = [...emoji.take(k), '+${total - k}'];
+      if (_badgeTextWidth(cand, fontSize) <= maxWidth) {
+        result = cand.join(' ');
+        break;
+      }
+    }
+  }
+  _fitCache[key] = result;
+  if (_fitCache.length > _kEdgeCacheSize) {
+    _fitCache.remove(_fitCache.keys.first);
+  }
+  return result;
+}
+
+/// Width the badge for [icons] takes when it may use up to [maxWidth].
+double directionBadgeWidth(String icons, double? maxWidth, double fontSize) =>
+    _badgeTextWidth(
+      fitDirectionIcons(icons, maxWidth, fontSize).split(' '),
+      fontSize,
+    );
 
 class _Tip {
   final String text;
@@ -66,11 +136,16 @@ class DirectionBadge extends ConsumerStatefulWidget {
   final String icons;
   final double fontSize;
 
+  /// The badge shows only the emojis that fit in this width, then '+N' for the
+  /// rest (null = show them all).
+  final double? maxWidth;
+
   const DirectionBadge({
     super.key,
     required this.actionId,
     required this.icons,
     this.fontSize = 11,
+    this.maxWidth,
   });
 
   @override
@@ -92,20 +167,20 @@ class _DirectionBadgeState extends ConsumerState<DirectionBadge> {
     forceStrutHeight: true,
   );
 
-  TextStyle get _style => TextStyle(
-    fontSize: widget.fontSize,
-    height: 1.25,
-    fontFamilyFallback: _kEmojiFonts,
-  );
+  String get _shown =>
+      fitDirectionIcons(widget.icons, widget.maxWidth, widget.fontSize);
 
   _Tip? _resolve() {
     final names = ref.read(actionDirectionNamesProvider)[widget.actionId];
-    final chunks = widget.icons.split(' ');
-    if (names == null || names.length != chunks.length) return null;
-    final edges = _chunkEdges(widget.icons, widget.fontSize, _style);
+    final original = widget.icons.split(' ');
+    if (names == null || names.length != original.length) return null;
+    final shown = _shown.split(' ');
+    final edges = _chunkEdges(_shown, widget.fontSize);
     var i = edges.indexWhere((e) => _local.dx < e);
     if (i < 0) i = edges.length - 1;
-    return _Tip(names[i], _global);
+    final isMore = shown[i].startsWith('+');
+    // '+N' lists every name that is not drawn.
+    return _Tip(isMore ? names.sublist(i).join(', ') : names[i], _global);
   }
 
   void _refresh() {
@@ -176,13 +251,13 @@ class _DirectionBadgeState extends ConsumerState<DirectionBadge> {
       onEnter: _enter,
       onHover: _hover,
       onExit: (_) => _hide(),
-      child: Text(
-        widget.icons,
+      child: Text.rich(
+        _badgeSpan(_shown.split(' '), widget.fontSize),
         maxLines: 1,
         softWrap: false,
         overflow: TextOverflow.clip,
         strutStyle: _strut,
-        style: _style,
+        style: _badgeStyle(widget.fontSize),
       ),
     );
   }

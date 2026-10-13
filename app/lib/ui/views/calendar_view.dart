@@ -124,12 +124,22 @@ class _HideWhileScrolling extends StatelessWidget {
 class _CountedBadge extends StatelessWidget {
   final String actionId;
   final String icons;
-  const _CountedBadge({super.key, required this.actionId, required this.icons});
+  final double? maxWidth;
+  const _CountedBadge({
+    super.key,
+    required this.actionId,
+    required this.icons,
+    this.maxWidth,
+  });
 
   @override
   Widget build(BuildContext context) {
     CalendarPerfCounters.badgeBuilds++;
-    return DirectionBadge(actionId: actionId, icons: icons);
+    return DirectionBadge(
+      actionId: actionId,
+      icons: icons,
+      maxWidth: maxWidth,
+    );
   }
 }
 
@@ -1243,16 +1253,14 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
   }
 }
 
-/// Rough width of the badge chip for [icons] ('A B +2'): ~15 px per emoji, 3 px
-/// gaps, 2 px chip padding each side. Only used to reserve room on one-line
-/// labels, so it errs on the generous side.
-double _badgeWidth(String icons) {
-  final chunks = icons.split(' ');
-  var w = 4.0 + 3.0 * (chunks.length - 1);
-  for (final c in chunks) {
-    w += c.startsWith('+') ? 14 : 15;
-  }
-  return w + 2;
+/// Chip padding (2 px each side) and the badge's 2 px right offset.
+const _kBadgeChrome = 6.0;
+
+/// The most a block's badge may take: its width minus the label padding, and
+/// for a one-line label only half of it (the name needs the rest).
+double _badgeMaxWidth(double blockWidth, double blockHeight) {
+  final room = math.max(0.0, blockWidth - 12 - _kBadgeChrome);
+  return blockHeight < 26 ? room * 0.5 : room;
 }
 
 /// The small translucent chip behind a badge so it stays readable over text.
@@ -3400,7 +3408,10 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     }
     // A one-line label gives the badge its width as right padding so the name
     // ellipsizes instead of running under it.
-    final reserve = showBadge && height < 26 ? _badgeWidth(icons) : 0.0;
+    final badgeMax = _badgeMaxWidth(widget.width, height);
+    final reserve = showBadge && height < 26
+        ? directionBadgeWidth(icons, badgeMax, 11) + _kBadgeChrome
+        : 0.0;
     Widget content = Padding(
       padding: EdgeInsets.fromLTRB(6, padTop, 6 + reserve, 0),
       child: label,
@@ -3423,6 +3434,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
                   key: ValueKey('block-icons-${item.id}'),
                   actionId: item.id,
                   icons: icons,
+                  maxWidth: badgeMax,
                 ),
               ),
             ),
