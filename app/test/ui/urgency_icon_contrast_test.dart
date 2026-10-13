@@ -15,27 +15,6 @@ void main() {
     final name = dark ? 'dark' : 'light';
     final page = dark ? const Color(0xFF0F172A) : const Color(0xFFFFFFFF);
 
-    test('urgency icon violet has >= 3:1 on every band ($name)', () {
-      for (final band in UrgencyBand.values) {
-        final bg = urgencyBackground(band, dark: dark);
-        expect(_contrast(g.urgencyIcon, bg), greaterThanOrEqualTo(3.0),
-            reason: '${band.name} full');
-        final muted = urgencyColorsMuted(
-          {
-            UrgencyBand.negative: -1.0,
-            UrgencyBand.low: 5.0,
-            UrgencyBand.medium: 50.0,
-            UrgencyBand.high: 200.0,
-            UrgencyBand.veryHigh: 400.0,
-            UrgencyBand.critical: 900.0,
-          }[band]!,
-          dark: dark,
-        ).bg;
-        expect(_contrast(g.urgencyIcon, muted), greaterThanOrEqualTo(3.0),
-            reason: '${band.name} muted');
-      }
-    });
-
     test('urgency icon violet has >= 3:1 on neutral surfaces ($name)', () {
       // Glass fill over the page background, the opaque dialog tones, the page.
       final surfaces = [
@@ -48,6 +27,24 @@ void main() {
       for (final s in surfaces) {
         expect(_contrast(g.urgencyIcon, s), greaterThanOrEqualTo(3.0),
             reason: '$s');
+      }
+    });
+
+    test('on a tinted block the icon takes the block text colour ($name)', () {
+      // The violet token is for neutral surfaces only: every tinted surface
+      // (full, muted, white) passes its own foreground, which must read >= 4.5.
+      for (var u = -400.0; u <= 700; u += 5) {
+        for (final c in [
+          urgencyColors(u, dark: dark),
+          urgencyColorsMuted(u, dark: dark),
+        ]) {
+          expect(_contrast(c.fg, c.bg), greaterThanOrEqualTo(4.5),
+              reason: 'u=$u');
+        }
+      }
+      for (final done in [false, true]) {
+        final e = emptyColors(dark: dark, done: done);
+        expect(_contrast(e.fg, e.bg), greaterThanOrEqualTo(4.5));
       }
     });
   }

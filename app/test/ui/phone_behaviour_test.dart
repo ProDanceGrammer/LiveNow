@@ -98,7 +98,7 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('swipe right starts the action, with an Undo toast', (
+  testWidgets('swipe right always finishes the action, with an Undo toast', (
     tester,
   ) async {
     await pumpPhone(tester);
@@ -109,6 +109,12 @@ void main() {
     ))!;
     expect(occurrences, hasLength(1));
     expect(occurrences.single.actionId, openId);
+    expect(occurrences.single.outcome, 'done'); // Finish, not Start
+    final row = (await tester.runAsync(
+      () => (db.select(db.actionsTable)..where((t) => t.id.equals(openId)))
+          .getSingle(),
+    ))!;
+    expect(row.done, isTrue);
     expect(find.text('Undo'), findsOneWidget);
     await settle(tester, 6000); // let the toast go
     await unmount(tester);

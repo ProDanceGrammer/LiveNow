@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/queries.dart';
 import '../../domain/duration_rules.dart';
+import '../all_selection.dart';
 import '../providers.dart';
 import '../time_format.dart';
 import '../urgency_colors.dart';
-import 'action_menu_button.dart';
 import 'action_time_label.dart';
 import 'glass.dart';
 import 'param_icons.dart';
@@ -14,8 +15,9 @@ import 'param_icons.dart';
 // Re-exported for the widgets/views that imported these from here.
 export '../time_format.dart' show twoDigits, formatClockTime;
 
-/// One row in a view list: name, a short "when/how long" subtitle, and the
-/// Start/Finish/Postpone menu.
+/// One row in the All list: a checkbox (selection for bulk edits), the status
+/// icon, name and a short "when/how long" subtitle. No menu: an action is
+/// edited by opening it, several at once through the bulk bar.
 class ActionTile extends ConsumerWidget {
   final ActionListItem action;
   final VoidCallback? onTap;
@@ -52,6 +54,10 @@ class ActionTile extends ConsumerWidget {
               : urgencyColors(urgency, dark: dark))
         : null;
     final fg = tint?.fg;
+    final scheme = Theme.of(context).colorScheme;
+    final selected = ref.watch(
+      allSelectionProvider.select((s) => s.contains(action.id)),
+    );
 
     // Parts are either plain strings or the clickable time label.
     final subtitleParts = <Object>[
@@ -60,6 +66,9 @@ class ActionTile extends ConsumerWidget {
           key: const ValueKey('tileTimeLabel'),
           action: action,
           text: formatScheduledWhen(action),
+          // The link colour (teal) is unreadable on a tinted tile: use the
+          // tile's text colour (black on light fills, white on dark ones).
+          style: fg == null ? null : TextStyle(color: fg),
         ),
       if (!action.isAllDay) formatActionDuration(action),
       if (isRunning && action.startAt != null)
@@ -71,6 +80,7 @@ class ActionTile extends ConsumerWidget {
           size: 19,
           style: Theme.of(context).textTheme.bodyMedium,
           color: fg ?? Theme.of(context).colorScheme.onSurface,
+          iconColor: fg,
         ),
     ];
 
@@ -78,15 +88,33 @@ class ActionTile extends ConsumerWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       textColor: fg,
       iconColor: fg,
-      leading: Icon(
-        iconForAction(action, isRunning),
-        color: isRunning ? Theme.of(context).colorScheme.primary : null,
+      key: ValueKey('all-tile-${action.id}'),
+      leading: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Checkbox(
+            key: ValueKey('all-check-${action.id}'),
+            value: selected,
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            activeColor: fg ?? scheme.primary,
+            checkColor: tint?.bg ?? scheme.surface,
+            side: BorderSide(color: fg ?? scheme.onSurfaceVariant, width: 1.5),
+            onChanged: (_) =>
+                ref.read(allSelectionProvider.notifier).toggle(action.id),
+          ),
+          Icon(
+            iconForAction(action, isRunning),
+            color: isRunning ? scheme.primary : null,
+          ),
+        ],
       ),
       title: Text(action.name),
       subtitle: subtitleParts.isEmpty
           ? null
           : Text.rich(
               TextSpan(
+                style: fg == null ? null : TextStyle(color: fg),
                 children: [
                   for (var i = 0; i < subtitleParts.length; i++) ...[
                     if (i > 0) const TextSpan(text: ' · '),
@@ -102,8 +130,19 @@ class ActionTile extends ConsumerWidget {
                 ],
               ),
             ),
-      onTap: onTap,
-      trailing: ActionMenuButton(actionId: action.id),
+      // With something selected (or Ctrl/Shift held) a tap toggles the row;
+      // otherwise it opens the action.
+      onTap: () {
+        final selection = ref.read(allSelectionProvider.notifier);
+        final kb = HardwareKeyboard.instance;
+        if (selection.state.isNotEmpty ||
+            kb.isControlPressed ||
+            kb.isShiftPressed) {
+          selection.toggle(action.id);
+        } else {
+          onTap?.call();
+        }
+      },
     );
 
     return Padding(
@@ -115,8 +154,15 @@ class ActionTile extends ConsumerWidget {
         blurWindow: false,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: tint?.bg,
+            // A selected row: the tint with a faint primary wash + a 2 px ring.
+            color: selected
+                ? Color.alphaBlend(
+                    scheme.primary.withValues(alpha: 0.14),
+                    tint?.bg ?? const Color(0x00000000),
+                  )
+                : tint?.bg,
             borderRadius: BorderRadius.circular(16),
+            border: selected ? Border.all(color: scheme.primary, width: 2) : null,
           ),
           child: Material(type: MaterialType.transparency, child: tile),
         ),

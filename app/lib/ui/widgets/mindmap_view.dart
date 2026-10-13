@@ -1558,9 +1558,11 @@ class _MindNode extends StatelessWidget {
                   color: colors.bg,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
+                    // The node's own colour, darker (lighter on dark): a
+                    // neutral line could be read as data.
                     color: selected
                         ? theme.colorScheme.onSurface
-                        : glass.border,
+                        : urgencyOutline(colors.bg, dark: glass.dark),
                     width: selected ? 2 : 1,
                   ),
                 ),
@@ -1588,8 +1590,10 @@ class _MindNode extends StatelessWidget {
                       right: 0,
                       bottom: 0,
                       height: 4,
+                      // The strip uses the node's text colour, so it reads on
+                      // every fill (a green fill vanished on green/yellow).
                       child: ColoredBox(
-                        color: Colors.white.withValues(alpha: 0.5),
+                        color: colors.fg.withValues(alpha: 0.18),
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: FractionallySizedBox(
@@ -1597,10 +1601,7 @@ class _MindNode extends StatelessWidget {
                             widthFactor: fraction,
                             heightFactor: 1,
                             child: ColoredBox(
-                              color: _shade(
-                                glass.green,
-                                glass.dark ? 0.5 : 0.4,
-                              ),
+                              color: colors.fg.withValues(alpha: 0.7),
                             ),
                           ),
                         ),
@@ -1651,7 +1652,9 @@ class _MindNode extends StatelessWidget {
         decoration: BoxDecoration(
           color: colors.bg,
           border: Border.all(
-            color: selected ? theme.colorScheme.onSurface : glass.border,
+            color: selected
+                ? theme.colorScheme.onSurface
+                : urgencyOutline(colors.bg, dark: glass.dark),
             width: selected ? 2 : 1,
           ),
         ),

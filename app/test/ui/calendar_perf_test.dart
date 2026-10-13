@@ -402,7 +402,7 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('a minute tick that keeps every urgency band rebuilds nothing', (
+  testWidgets('a minute tick that keeps every colour step rebuilds nothing', (
     tester,
   ) async {
     await pumpCalendar(tester, hours: 12);
@@ -412,20 +412,21 @@ void main() {
     };
     await tester.pump();
     CalendarPerfCounters.reset();
-    // The provider re-emits a new map every minute; numbers move, bands not.
+    // The provider re-emits a new map every minute; numbers move, but they
+    // stay inside one 5-point colour step (50..52 = key 10, 20..22 = key 4).
     container.read(urgencySource.notifier).state = {
-      'perf-3': 55,
+      'perf-3': 51,
       'perf-10': 21,
     };
     await tester.pump();
     container.read(urgencySource.notifier).state = {
-      'perf-3': 60,
+      'perf-3': 52,
       'perf-10': 22,
     };
     await tester.pump();
     expect(CalendarPerfCounters.blockBuilds, 0);
 
-    // perf-3 crosses 100 (medium -> high): only its block rebuilds.
+    // perf-3 crosses into another colour step: only its block rebuilds.
     container.read(urgencySource.notifier).state = {
       'perf-3': 150,
       'perf-10': 22,

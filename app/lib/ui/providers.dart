@@ -10,6 +10,7 @@ import '../data/queries.dart';
 import '../domain/action_service.dart';
 import 'work_hours.dart';
 import '../domain/action_urgency.dart';
+import '../domain/bulk_edit_service.dart';
 import '../domain/all_actions_view_rules.dart';
 import '../domain/dependency_service.dart';
 import '../domain/growth_rules.dart';
@@ -22,6 +23,11 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   ref.onDispose(db.close);
   return db;
 });
+
+/// Bulk edits of several actions at once (directions, previous/next links).
+final bulkEditServiceProvider = Provider<BulkEditService>(
+  (ref) => BulkEditService(ref.watch(databaseProvider)),
+);
 
 final actionServiceProvider = Provider<ActionService>(
   (ref) => ActionService(
@@ -304,9 +310,12 @@ final emptyDirectionIdsProvider = Provider.autoDispose<IdSet?>((ref) {
   ref.watch(minuteTickProvider);
   final metrics = ref.watch(metricsProvider).value;
   final linked = ref.watch(metricLinkedActionsProvider).value;
-  if (metrics == null || linked == null) return null;
+  final dependencies = ref.watch(metricDependenciesProvider).value;
+  if (metrics == null || linked == null || dependencies == null) return null;
   return IdSet(
     directionsNeedingData(
+      // A direction that depends on others takes its progress from them.
+      dependentIds: {for (final e in dependencies) e.metricId},
       metrics: [for (final m in metrics) GrowthMetric.fromRow(m)],
       links: [
         for (final (metricId, a) in linked) (metricId, dateTimeFromDb(a.startAt)),

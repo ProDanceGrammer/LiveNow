@@ -11,6 +11,7 @@ import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/calendar_icons.dart';
 import 'package:livenow/ui/providers.dart';
+import 'package:livenow/ui/urgency_colors.dart';
 import 'package:livenow/ui/views/calendar_layout.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
 
@@ -360,7 +361,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
     });
 
-    testWidgets('all-day strip cells have no left border, chips a thin neutral outline', (
+    testWidgets('all-day strip cells have no left border, chips a thin outline in their own colour', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1400, 900);
@@ -399,9 +400,14 @@ void main() {
             .first,
       );
       final shape = material.shape as RoundedRectangleBorder;
-      // A 1 px neutral line (not the 2 px selection border) keeps chips apart.
+      // A 1 px line (not the 2 px selection border) keeps chips apart: the
+      // chip's OWN colour, darker, so it is never read as data.
       expect(shape.side.width, 1);
-      expect(shape.side.color.a, lessThan(1));
+      expect(
+        shape.side.color,
+        urgencyOutline(material.color!, dark: false),
+      );
+      expect(shape.side.color, isNot(material.color));
 
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));

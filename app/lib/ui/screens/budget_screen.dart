@@ -9,6 +9,10 @@ import '../../domain/budget_tx_view_rules.dart';
 import '../../domain/budget_service.dart';
 import '../../domain/name_sort.dart';
 import '../budget_providers.dart';
+import '../providers.dart'
+    show actionUrgencyProvider, actionsWithDirectionsProvider;
+import '../urgency_colors.dart';
+import '../widgets/action_tile.dart' show formatUrgency;
 import '../layout.dart';
 import '../undo.dart' show offerUndo, undoHistoryProvider;
 import '../open_entity.dart';
@@ -193,6 +197,20 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
 }
 
 // ---- shared bits ------------------------------------------------------------
+
+/// The tint of a budget row/card from the urgency of its related action: WHITE
+/// when that action has no growth direction ("fill me in"), the urgency scale
+/// when it has one, null (plain glass) when there is no action at all.
+({Color bg, Color fg})? _urgencyTint(
+  BuildContext context, {
+  double? urgency,
+  bool unlinked = false,
+}) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  if (unlinked) return emptyColors(dark: dark);
+  if (urgency != null) return urgencyColors(urgency, dark: dark);
+  return null;
+}
 
 Widget _card({required Widget child, EdgeInsets? padding}) => Padding(
   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -814,6 +832,7 @@ class _CategoriesViewState extends ConsumerState<_CategoriesView> {
   @override
   Widget build(BuildContext context) {
     final urgency = ref.watch(budgetCategoryUrgencyProvider);
+    final unlinked = ref.watch(budgetCategoryUnlinkedProvider);
     return _loading(ref.watch(budgetViewProvider), (view) {
       final rows = [
         for (final r in _flatten(view.categories))
@@ -866,6 +885,7 @@ class _CategoriesViewState extends ConsumerState<_CategoriesView> {
                       depth: rows[i].$2,
                       figures: view.snapshot.byCategory[rows[i].$1.id],
                       urgency: urgency[rows[i].$1.id],
+                      unlinked: unlinked.contains(rows[i].$1.id),
                       currency: accounts[rows[i].$1.accountCountId]?.currency,
                     ),
                   )
@@ -887,6 +907,7 @@ class _CategoriesViewState extends ConsumerState<_CategoriesView> {
                                   figures:
                                       view.snapshot.byCategory[rows[i].$1.id],
                                   urgency: urgency[rows[i].$1.id],
+                                  unlinked: unlinked.contains(rows[i].$1.id),
                                   currency: accounts[rows[i].$1.accountCountId]
                                       ?.currency,
                                 ),
@@ -972,6 +993,7 @@ class _CategoryRow extends ConsumerWidget {
     required this.figures,
     required this.urgency,
     required this.currency,
+    this.unlinked = false,
   });
 
   final BudgetCategory category;
@@ -979,6 +1001,9 @@ class _CategoryRow extends ConsumerWidget {
   final CategoryFigures? figures;
   final double? urgency;
   final String? currency;
+
+  /// Its nearest upcoming action has no growth direction (white).
+  final bool unlinked;
 
   static String _unit(String unit) => switch (BudgetUnit.fromDb(unit)) {
     BudgetUnit.piece => 'pc',
@@ -993,12 +1018,14 @@ class _CategoryRow extends ConsumerWidget {
     final f = figures;
     final group = f?.isGroup ?? false;
     final scheme = Theme.of(context).colorScheme;
+    final tint = _urgencyTint(context, urgency: urgency, unlinked: unlinked);
+    final fg = tint?.fg;
     final muted = TextStyle(
       fontStyle: FontStyle.italic,
-      color: scheme.onSurface.withValues(alpha: 0.85),
+      color: (fg ?? scheme.onSurface).withValues(alpha: 0.85),
       fontSize: 13,
     );
-    final entered = const TextStyle(fontSize: 13);
+    final entered = TextStyle(fontSize: 13, color: fg);
     final percent = BudgetUnit.fromDb(c.unit) == BudgetUnit.percentPerMonth;
 
     Widget cell(double w, String text, TextStyle style, {Alignment? align}) =>
@@ -1018,7 +1045,13 @@ class _CategoryRow extends ConsumerWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: InkWell(
+      // The tint sits on the Material under the ink, so the splash still shows.
+      child: Ink(
+        decoration: BoxDecoration(
+          color: tint?.bg,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: InkWell(
         key: ValueKey('budget-category-${c.id}'),
         borderRadius: BorderRadius.circular(12),
         onTap: () => BudgetCategoryDialog.show(context, existing: c),
@@ -1033,7 +1066,7 @@ class _CategoryRow extends ConsumerWidget {
                     Icon(
                       c.isIncome ? Icons.south_west : Icons.north_east,
                       size: 13,
-                      color: c.isIncome ? Colors.green : scheme.error,
+                      color: fg ?? (c.isIncome ? Colors.green : scheme.error),
                     ),
                     const SizedBox(width: 4),
                     Expanded(
@@ -1042,6 +1075,7 @@ class _CategoryRow extends ConsumerWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontWeight: group ? FontWeight.w700 : null,
+                          color: fg,
                         ),
                       ),
                     ),
@@ -1090,7 +1124,11 @@ class _CategoryRow extends ConsumerWidget {
                   ? null
                   : Align(
                       alignment: Alignment.centerRight,
-                      child: ParamValue.urgency(urgency!.toStringAsFixed(0)),
+                      child: ParamValue.urgency(
+                        urgency!.toStringAsFixed(0),
+                        color: fg,
+                        iconColor: fg,
+                      ),
                     ),
             ),
             SizedBox(
@@ -1101,6 +1139,7 @@ class _CategoryRow extends ConsumerWidget {
                   IconButton(
                     key: ValueKey('budget-add-sub-${c.id}'),
                     visualDensity: VisualDensity.compact,
+                    color: fg,
                     iconSize: 18,
                     tooltip: 'Add sub-category',
                     icon: const Icon(Icons.subdirectory_arrow_right),
@@ -1110,6 +1149,7 @@ class _CategoryRow extends ConsumerWidget {
                   IconButton(
                     key: ValueKey('budget-delete-category-${c.id}'),
                     visualDensity: VisualDensity.compact,
+                    color: fg,
                     iconSize: 18,
                     tooltip: 'Delete',
                     icon: const Icon(Icons.delete_outline),
@@ -1119,6 +1159,7 @@ class _CategoryRow extends ConsumerWidget {
               ),
             ),
           ],
+        ),
         ),
       ),
     );
@@ -1134,6 +1175,7 @@ class _CategoryCard extends ConsumerWidget {
     required this.figures,
     required this.urgency,
     required this.currency,
+    this.unlinked = false,
   });
 
   final BudgetCategory category;
@@ -1142,29 +1184,41 @@ class _CategoryCard extends ConsumerWidget {
   final double? urgency;
   final String? currency;
 
+  /// Its nearest upcoming action has no growth direction (white).
+  final bool unlinked;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = category;
     final f = figures;
     final group = f?.isGroup ?? false;
     final scheme = Theme.of(context).colorScheme;
+    final tint = _urgencyTint(context, urgency: urgency, unlinked: unlinked);
+    final fg = tint?.fg;
     String money(double? v) => v == null ? '—' : budgetMoney(v);
     return Padding(
       padding: EdgeInsets.only(left: depth * 14.0),
       child: _card(
         padding: EdgeInsets.zero,
-        child: Material(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tint?.bg,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Material(
           type: MaterialType.transparency,
           child: ListTile(
             key: ValueKey('budget-category-${c.id}'),
             dense: true,
+            textColor: fg,
+            iconColor: fg,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
             leading: Icon(
               c.isIncome ? Icons.south_west : Icons.north_east,
               size: 16,
-              color: c.isIncome ? Colors.green : scheme.error,
+              color: fg ?? (c.isIncome ? Colors.green : scheme.error),
             ),
             title: Text(
               c.name,
@@ -1177,8 +1231,12 @@ class _CategoryCard extends ConsumerWidget {
                     spacing: 12,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      ParamValue.plan(money(f?.planBase), iconAfter: true),
-                      ParamValue.actual(money(f?.factBase)),
+                      ParamValue.plan(
+                        money(f?.planBase),
+                        iconAfter: true,
+                        color: fg,
+                      ),
+                      ParamValue.actual(money(f?.factBase), color: fg),
                     ],
                   ),
             onTap: () => BudgetCategoryDialog.show(context, existing: c),
@@ -1186,7 +1244,11 @@ class _CategoryCard extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (urgency != null)
-                  ParamValue.urgency(urgency!.toStringAsFixed(0)),
+                  ParamValue.urgency(
+                    urgency!.toStringAsFixed(0),
+                    color: fg,
+                    iconColor: fg,
+                  ),
                 PopupMenuButton<String>(
                   key: ValueKey('budget-category-menu-${c.id}'),
                   onSelected: (v) => v == 'sub'
@@ -1203,6 +1265,7 @@ class _CategoryCard extends ConsumerWidget {
               ],
             ),
           ),
+        ),
         ),
       ),
     );
@@ -1377,15 +1440,36 @@ class _TransactionTile extends ConsumerWidget {
     final detail = t.isAmount
         ? null
         : '${budgetNumber(t.quantity)} × ${budgetNumber(t.unitPrice)}';
+    // Urgency of the related action: the tile takes its colour from the scale
+    // (white when that action has no direction; plain without an action), and
+    // the number + icon sit on the action line.
+    final actionId = t.actionId;
+    final urgency = ref.watch(
+      actionUrgencyProvider.select((m) => actionId == null ? null : m[actionId]),
+    );
+    final unlinked = ref.watch(
+      actionsWithDirectionsProvider.select(
+        (s) => actionId != null && s != null && !s.contains(actionId),
+      ),
+    );
+    final tint = _urgencyTint(context, urgency: urgency, unlinked: unlinked);
+    final fg = tint?.fg;
     return _card(
       padding: EdgeInsets.zero,
-      child: Material(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: tint?.bg,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Material(
         type: MaterialType.transparency,
         child: ListTile(
           key: ValueKey('budget-tx-${t.id}'),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
+          textColor: fg,
+          iconColor: fg,
           dense: true,
           // Line 1: the transaction's own name.
           title: t.name.isEmpty
@@ -1403,7 +1487,12 @@ class _TransactionTile extends ConsumerWidget {
                 key: ValueKey('budget-tx-category-${t.id}'),
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const ParamIcon(Param.categories, size: 14, tooltip: false),
+                  ParamIcon(
+                    Param.categories,
+                    size: 14,
+                    tooltip: false,
+                    color: fg,
+                  ),
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
@@ -1423,13 +1512,24 @@ class _TransactionTile extends ConsumerWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.bolt_outlined, size: 14),
+                      Icon(Icons.bolt_outlined, size: 14, color: fg),
                       Flexible(
                         child: Text(
                           item.actionName ?? 'Action',
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // Urgency of the action, coloured like its tile.
+                      if (urgency != null) ...[
+                        const SizedBox(width: 8),
+                        ParamValue.urgency(
+                          formatUrgency(urgency),
+                          key: ValueKey('budget-tx-urgency-${t.id}'),
+                          size: 16,
+                          color: fg ?? scheme.onSurface,
+                          iconColor: fg,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1445,19 +1545,23 @@ class _TransactionTile extends ConsumerWidget {
               ],
               Text(
                 '${budgetMoney(amount, sign: true)} ${currency ?? ''}'.trim(),
+                // The amount carries its sign; on a tinted tile it uses the text
+                // colour (red/green would clash with the scale).
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
-                  color: amount < 0 ? scheme.error : Colors.green,
+                  color: fg ?? (amount < 0 ? scheme.error : Colors.green),
                 ),
               ),
               IconButton(
                 key: ValueKey('budget-delete-tx-${t.id}'),
                 tooltip: 'Delete',
+                color: fg,
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () => _deleteTransaction(context, ref, t),
               ),
             ],
           ),
+        ),
         ),
       ),
     );

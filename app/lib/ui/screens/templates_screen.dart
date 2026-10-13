@@ -22,6 +22,7 @@ import '../providers.dart';
 import '../widgets/glass.dart';
 import '../widgets/glass_icon_tile.dart';
 import '../widgets/sort_chips.dart';
+import '../widgets/sort_icons.dart';
 import '../widgets/metric_picker.dart';
 import '../widgets/notes_document.dart';
 import '../widgets/notes_editor.dart';
@@ -286,6 +287,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
             key: ValueKey('template-urgency-${t.id}'),
             style: base,
             color: base.color,
+            iconColor: fg,
           ),
       ],
     );
@@ -322,11 +324,16 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
       keyPrefix: 'tpl-sort',
       chips: [
         for (final k in _sort)
-          SortChipData(k.field.name, k.field.label, ascending: k.ascending),
+          SortChipData(
+            k.field.name,
+            k.field.label,
+            ascending: k.ascending,
+            icon: sortFieldIcon(k.field),
+          ),
       ],
       addOptions: [
         for (final f in TemplateSortField.values)
-          if (!used.contains(f)) (f.name, f.label),
+          if (!used.contains(f)) (f.name, f.label, sortFieldIcon(f)),
       ],
       onToggle: (i) => set([
         for (var j = 0; j < _sort.length; j++)

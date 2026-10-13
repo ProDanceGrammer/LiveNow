@@ -185,6 +185,10 @@ class ActionCard extends ConsumerWidget {
                                 color:
                                     fg ??
                                     Theme.of(context).colorScheme.onSurface,
+                                // On a tinted card the icon follows the text
+                                // colour (the violet token is for neutral
+                                // surfaces).
+                                iconColor: fg,
                               ),
                             ),
                         ],
@@ -236,7 +240,7 @@ class ActionCard extends ConsumerWidget {
       ),
     );
     if (!usePhoneLayout(context)) return card;
-    return _swipeable(context, ref, card, isRunning);
+    return _swipeable(context, ref, card);
   }
 
   /// Phone: swipe right = Start (Finish while it runs), swipe left = Delete.
@@ -246,7 +250,6 @@ class ActionCard extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     Widget card,
-    bool isRunning,
   ) {
     Widget bg(Color color, IconData icon, String label, Alignment align) =>
         Container(
@@ -269,19 +272,14 @@ class ActionCard extends ConsumerWidget {
     return Dismissible(
       key: ValueKey('swipe-${action.id}'),
       direction: DismissDirection.horizontal,
-      background: isRunning
-          ? bg(
-              Colors.green.shade700,
-              Icons.check_rounded,
-              'Finish',
-              Alignment.centerLeft,
-            )
-          : bg(
-              Colors.blue.shade700,
-              Icons.play_arrow_rounded,
-              'Start',
-              Alignment.centerLeft,
-            ),
+      // Swiping right is always Finish (also on an action that is not running
+      // or is already finished), never Start.
+      background: bg(
+        Colors.green.shade700,
+        Icons.check_rounded,
+        'Finish',
+        Alignment.centerLeft,
+      ),
       secondaryBackground: bg(
         Colors.red.shade700,
         Icons.delete_outline,
@@ -297,10 +295,8 @@ class ActionCard extends ConsumerWidget {
             context,
             ref,
             action.id,
-            isRunning ? 'Finished' : 'Started',
-            () => isRunning
-                ? service.finish(action.id)
-                : service.start(action.id),
+            'Finished',
+            () => service.finish(action.id),
           );
         }
         return false;

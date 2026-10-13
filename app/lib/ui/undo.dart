@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/legacy.dart'
     show StateController, StateProvider;
 
 import '../domain/action_service.dart' show ScheduleChange;
+import '../domain/bulk_edit_service.dart';
 import '../domain/growth_rules.dart' show metricLabel;
 import 'providers.dart';
 import 'widgets/app_toast.dart';
@@ -154,6 +155,83 @@ Future<void> runUndoableMoveMany(
             ? 'Moved'
             : 'Moved ${undo.before.length} events'),
     () => service.undoMoveActions(undo),
+  );
+}
+
+/// The same growth directions for SEVERAL actions ([mode]: add / remove /
+/// replace), one transaction and ONE Undo that restores every action's own
+/// directions. Nothing needing `ref`/`context` is touched after the first
+/// await (the list re-sorts and tiles unmount).
+Future<void> runUndoableSetMetricsMany(
+  BuildContext context,
+  WidgetRef ref,
+  Iterable<String> actionIds,
+  List<String> metricIds,
+  BulkMode mode,
+) async {
+  final ids = actionIds.toList();
+  if (ids.isEmpty) return;
+  final service = ref.read(bulkEditServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final lastUndo = ref.read(undoHistoryProvider.notifier);
+
+  final undo = await service.setMetricsMany(ids, metricIds, mode);
+  if (undo.before.isEmpty) {
+    showInfoToast(overlay, 'Nothing to change');
+    return;
+  }
+  _offerUndo(
+    overlay,
+    lastUndo,
+    undo.before.length == 1
+        ? 'Directions changed'
+        : 'Directions changed for ${undo.before.length} actions',
+    () => service.undoSetMetricsMany(undo),
+  );
+}
+
+/// The same previous / next action for SEVERAL actions ([mode]: add / remove /
+/// replace), one transaction and ONE Undo. Pairs that would close a loop are
+/// skipped and mentioned in the toast.
+Future<void> runUndoableLinkMany(
+  BuildContext context,
+  WidgetRef ref,
+  Iterable<String> actionIds, {
+  required String? targetId,
+  required LinkSide side,
+  required BulkMode mode,
+}) async {
+  final ids = actionIds.toList();
+  if (ids.isEmpty) return;
+  final service = ref.read(bulkEditServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final lastUndo = ref.read(undoHistoryProvider.notifier);
+
+  final r = await service.linkMany(
+    ids,
+    targetId: targetId,
+    side: side,
+    mode: mode,
+  );
+  final loops = r.skippedLoop == 0
+      ? ''
+      : ' (${r.skippedLoop} skipped: would loop)';
+  if (r.linked == 0 && r.removed == 0) {
+    showInfoToast(
+      overlay,
+      r.skippedLoop == 0 ? 'Nothing to change' : 'Nothing linked$loops',
+    );
+    return;
+  }
+  final what = [
+    if (r.linked > 0) 'linked ${r.linked}',
+    if (r.removed > 0) 'unlinked ${r.removed}',
+  ].join(', ');
+  _offerUndo(
+    overlay,
+    lastUndo,
+    '${side == LinkSide.previous ? 'Previous' : 'Next'}: $what$loops',
+    () => service.undoLinkMany(r.undo),
   );
 }
 

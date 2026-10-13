@@ -279,6 +279,10 @@ class _DirectionBadgeState extends ConsumerState<DirectionBadge> {
         maxLines: 1,
         softWrap: false,
         overflow: TextOverflow.clip,
+        // Painted at the size it was measured at: with the phone's text scale
+        // (Dynamic Type) the strip came out wider than `fitDirectionIcons`
+        // allowed and spilled out of narrow blocks.
+        textScaler: TextScaler.noScaling,
         strutStyle: _strut,
         style: _badgeStyle(widget.fontSize),
       ),

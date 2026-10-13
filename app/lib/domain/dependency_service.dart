@@ -66,6 +66,12 @@ class DependencyService {
         .go();
   }
 
+  /// Whether adding [predecessorId] -> [successorId] would close a loop.
+  Future<bool> wouldCycle({
+    required String predecessorId,
+    required String successorId,
+  }) => _isReachable(from: successorId, to: predecessorId);
+
   /// Whether [to] can be reached by following successor edges forward from
   /// [from] — i.e. whether [from] already "leads to" [to] somewhere down the
   /// chain. Used to reject an edge that would close a loop.

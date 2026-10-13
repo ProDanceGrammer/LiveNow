@@ -6,10 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/queries.dart';
 import '../../domain/all_actions_summary.dart';
 import '../../domain/all_actions_view_rules.dart';
+import '../all_selection.dart';
 import '../providers.dart';
 import '../time_format.dart';
 import '../widgets/action_list_view.dart';
 import '../widgets/all_actions_options_panel.dart';
+import '../widgets/all_bulk_bar.dart';
+import 'all_marquee.dart';
 
 /// [allActionsProvider] filtered, searched and sorted by the All list's
 /// controls (see `domain/all_actions_view_rules.dart`). Everything is done in
@@ -138,6 +141,17 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
     void setFlags(SearchFlags f) =>
         ref.read(allActionsSearchFlagsProvider.notifier).state = f;
 
+    // Selected rows that left the filtered list (deleted, or filtered away)
+    // are dropped, so a bulk edit only ever touches what is listed.
+    ref.listen(filteredAllActionsProvider, (_, next) {
+      final items = next.value;
+      if (items == null) return;
+      final ids = {for (final a in items) a.id};
+      final selection = ref.read(allSelectionProvider.notifier);
+      final kept = selection.state.where(ids.contains).toSet();
+      if (kept.length != selection.state.length) selection.state = kept;
+    });
+
     return Column(
       children: [
         Padding(
@@ -227,13 +241,19 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
         if (_panelOpen) const AllActionsOptionsPanel(),
         // Only while a search / filter narrows the list: what was found.
         if (narrowed || filtering) const _ResultSummary(),
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
+        // "Select all" + the bulk actions of the selected rows.
+        const AllBulkBar(),
         Expanded(
-          child: ActionListView(
-            provider: filteredAllActionsProvider,
-            emptyMessage: narrowed || filtering
-                ? 'No matching actions.'
-                : 'No actions yet.',
+          // Press and drag with the mouse to select the rows it covers.
+          child: AllMarquee(
+            builder: (controller) => ActionListView(
+              provider: filteredAllActionsProvider,
+              controller: controller,
+              emptyMessage: narrowed || filtering
+                  ? 'No matching actions.'
+                  : 'No actions yet.',
+            ),
           ),
         ),
       ],

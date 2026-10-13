@@ -7,8 +7,14 @@ class SortChipData {
   final String id;
   final String label;
   final bool ascending;
-  const SortChipData(this.id, this.label, {this.ascending = true});
+
+  /// Drawn left of the label (null = none).
+  final Widget? icon;
+  const SortChipData(this.id, this.label, {this.ascending = true, this.icon});
 }
+
+/// One entry of the "Add sort" list: id, label and the icon left of the label.
+typedef SortOption = (String id, String label, Widget? icon);
 
 /// "Sort  [Date ↓] [Name ↑]  + Add sort": a tap on a chip flips ascending /
 /// descending, the cross removes it, a drag onto another chip reorders (the
@@ -28,8 +34,8 @@ class SortChipsRow extends StatelessWidget {
 
   final List<SortChipData> chips;
 
-  /// Levels that can still be added: (id, label).
-  final List<(String, String)> addOptions;
+  /// Levels that can still be added.
+  final List<SortOption> addOptions;
   final ValueChanged<int> onToggle;
   final ValueChanged<int> onRemove;
   final void Function(int from, int to) onMove;
@@ -60,7 +66,16 @@ class SortChipsRow extends StatelessWidget {
             onSelected: onAdd,
             itemBuilder: (_) => [
               for (final o in addOptions)
-                PopupMenuItem(value: o.$1, child: Text(o.$2)),
+                PopupMenuItem(
+                  value: o.$1,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (o.$3 != null) ...[o.$3!, const SizedBox(width: 8)],
+                      Text(o.$2),
+                    ],
+                  ),
+                ),
             ],
             child: const Chip(
               avatar: Icon(Icons.add, size: 16),
@@ -94,6 +109,7 @@ class _Chip extends StatelessWidget {
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (data.icon != null) ...[data.icon!, const SizedBox(width: 6)],
           Text(data.label),
           const SizedBox(width: 4),
           Icon(

@@ -12,6 +12,7 @@ import 'date_range_fields.dart';
 import 'glass.dart';
 import 'param_icons.dart';
 import 'sort_chips.dart';
+import 'sort_icons.dart';
 
 /// The collapsible panel under the Transactions search field: waterfall sort,
 /// where the search text looks, and the filters (categories, accounts, action
@@ -38,7 +39,7 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
 
     final remaining = [
       for (final f in TxSortField.values)
-        if (!sort.any((k) => k.field == f)) (f.name, f.label),
+        if (!sort.any((k) => k.field == f)) (f.name, f.label, sortFieldIcon(f)),
     ];
 
     return Padding(
@@ -64,6 +65,7 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
                         k.field.name,
                         k.field.label,
                         ascending: k.ascending,
+                        icon: sortFieldIcon(k.field),
                       ),
                   ],
                   addOptions: remaining,

@@ -40,6 +40,7 @@ import '../urgency_colors.dart';
 import '../widgets/round_check.dart';
 import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
+import '../widgets/bulk_dialogs.dart' show runBulkSetDate, runBulkShift;
 import '../widgets/direction_badge.dart';
 import '../widgets/glass.dart';
 import '../widgets/continue_icon.dart';
@@ -47,6 +48,11 @@ import '../widgets/glass_icon_tile.dart';
 import 'calendar_layout.dart';
 
 const double _kGutter = 56;
+
+/// Dragging a block within this many px of the grid's left/right edge, for
+/// [_kEdgeHold], turns the visible range by a day.
+const double _kEdgeZone = 40;
+const Duration _kEdgeHold = Duration(milliseconds: 600);
 const double _kHandle = 6;
 
 /// A block is never drawn shorter than this, however far the grid is zoomed
@@ -160,14 +166,6 @@ String _hhmm(DateTime utc) {
   final l = _local(utc);
   return '${twoDigits(l.hour)}:${twoDigits(l.minute)}';
 }
-
-/// The 1 px line round every event block / all-day chip (separates touching
-/// events): light on the dark theme, navy on the light one, translucent so it
-/// works over every urgency colour.
-Color _eventOutline(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-    ? const Color(0x59FFFFFF)
-    : const Color(0x4D1E293B);
 
 /// End of [a] as drawn: never shorter than the minimum block (10 min).
 DateTime _effectiveEnd(ActionListItem a) {
@@ -441,6 +439,14 @@ class CalendarView extends ConsumerWidget {
                               },
                             ),
                     ),
+                    // The selected events: set / shift their date, delete.
+                    if (items != null)
+                      Positioned(
+                        bottom: 14,
+                        left: 0,
+                        right: 0,
+                        child: Center(child: _CalendarBulkBar(items: items)),
+                      ),
                     if (phone)
                       // Over the time column: Now, full screen, options.
                       Positioned(
@@ -963,6 +969,88 @@ class _CalendarMenu extends ConsumerWidget {
   }
 }
 
+/// A floating bar over the grid while events are selected (Shift/Ctrl+click or
+/// the marquee): Set date (the earliest one starts at the picked moment, the
+/// others keep their distance), Shift by (everything moves the same amount),
+/// Delete, Clear. Each is one transaction with ONE Undo.
+class _CalendarBulkBar extends ConsumerWidget {
+  const _CalendarBulkBar({required this.items});
+
+  final List<ActionListItem> items;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sel = ref.watch(calendarSelectionProvider);
+    final chosen = [
+      for (final a in items)
+        if (sel.contains(a.id)) a,
+    ];
+    if (chosen.isEmpty) return const SizedBox.shrink();
+    final phone = usePhoneLayout(context);
+    final error = Theme.of(context).colorScheme.error;
+
+    Widget action(
+      String key,
+      IconData icon,
+      String label,
+      VoidCallback onPressed, {
+      Color? color,
+    }) => phone
+        ? IconButton(
+            key: ValueKey(key),
+            tooltip: label,
+            icon: Icon(icon, color: color),
+            onPressed: onPressed,
+          )
+        : TextButton.icon(
+            key: ValueKey(key),
+            icon: Icon(icon, size: 18, color: color),
+            label: Text(label, style: TextStyle(color: color)),
+            onPressed: onPressed,
+          );
+
+    return GlassSurface(
+      key: const ValueKey('calendar-bulk-bar'),
+      radius: 20,
+      shadow: false,
+      blurWindow: false,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${chosen.length} selected'),
+            const SizedBox(width: 6),
+            action(
+              'cal-bulk-set-date',
+              Icons.event,
+              'Set date',
+              () => runBulkSetDate(context, ref, chosen),
+            ),
+            action(
+              'cal-bulk-shift',
+              Icons.swap_horiz_rounded,
+              'Shift by',
+              () => runBulkShift(context, ref, chosen),
+            ),
+            action('cal-bulk-delete', Icons.delete_outline, 'Delete', () {
+              final ids = [for (final a in chosen) a.id];
+              setCalendarSelection(ref, const {});
+              runUndoableDeleteMany(context, ref, ids);
+            }, color: error),
+            IconButton(
+              key: const ValueKey('cal-bulk-clear'),
+              tooltip: 'Clear selection',
+              icon: const Icon(Icons.close),
+              onPressed: () => setCalendarSelection(ref, const {}),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DayHeaderRow extends StatelessWidget {
   final DateTime start;
   final int dayCount;
@@ -1302,16 +1390,17 @@ class _AllDayChip extends ConsumerWidget {
     CalendarPerfCounters.chipBuilds++;
     final scheme = Theme.of(context).colorScheme;
     final done = item.isDoneBefore;
-    // Only the band matters for the colour, so the once-a-minute urgency
-    // refresh rebuilds a chip only when its band changes.
-    final band = running
+    // Only the quantised colour position matters, so the once-a-minute urgency
+    // refresh rebuilds a chip only when its colour visibly changes.
+    final key = running
         ? null
         : ref.watch(
             actionUrgencyProvider.select(
-              (m) => m[item.id] == null ? null : urgencyBand(m[item.id]!),
+              (m) => m[item.id] == null ? null : urgencyKey(m[item.id]!),
             ),
           );
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final rc = runningColors(dark: dark);
     // No growth direction: white, "fill me in" (running keeps its colour).
     final unlinked =
         !running &&
@@ -1321,21 +1410,21 @@ class _AllDayChip extends ConsumerWidget {
           ),
         );
     final ec = unlinked ? emptyColors(dark: dark, done: done) : null;
-    // Done chips keep their band, muted.
-    final uc = band == null
+    // Done chips keep their colour, muted.
+    final uc = key == null
         ? null
         : done
-        ? urgencyColorsMutedForBand(band, dark: dark)
-        : urgencyColorsForBand(band, dark: dark);
+        ? urgencyColorsMutedForKey(key, dark: dark)
+        : urgencyColorsForKey(key, dark: dark);
     final bg = running
-        ? scheme.primary
+        ? rc.bg
         : ec?.bg ??
               uc?.bg ??
               (done
                   ? scheme.surfaceContainerHighest
                   : scheme.tertiaryContainer);
     final fg = running
-        ? scheme.onPrimary
+        ? rc.fg
         : ec?.fg ??
               uc?.fg ??
               (done ? scheme.onSurfaceVariant : scheme.onTertiaryContainer);
@@ -1368,7 +1457,7 @@ class _AllDayChip extends ConsumerWidget {
               borderRadius: BorderRadius.circular(10),
               side: selected
                   ? BorderSide(color: scheme.onSurface, width: 2)
-                  : BorderSide(color: _eventOutline(context)),
+                  : BorderSide(color: urgencyOutline(bg, dark: dark)),
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
@@ -1956,6 +2045,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   void dispose() {
     _cross.onChipDrop = null;
     _cross.stripTarget.value = null;
+    _stopEdgeTurn();
     _tick?.cancel();
     _settle?.cancel();
     _endMarquee();
@@ -2201,9 +2291,51 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _routePointer();
   }
 
+  Timer? _edgeTimer;
+  int _edgeDir = 0;
+
+  /// Holding the dragged block near the left/right edge turns the visible range
+  /// one day after a short hold, again and again while it stays there (so a
+  /// block can be carried further than the 1-7 days on screen, also on a phone).
+  void _edgeTurn(Offset pos) {
+    final box = context.findRenderObject();
+    var dir = 0;
+    if (box is RenderBox && box.attached && box.hasSize) {
+      final x = box.globalToLocal(pos).dx;
+      if (x < _kGutter + _kEdgeZone) {
+        dir = -1;
+      } else if (x > box.size.width - _kEdgeZone) {
+        dir = 1;
+      }
+    }
+    if (dir == _edgeDir) return;
+    _edgeDir = dir;
+    _edgeTimer?.cancel();
+    _edgeTimer = null;
+    if (dir == 0) return;
+    _edgeTimer = Timer(_kEdgeHold, () {
+      if (!mounted || _drag == null) return;
+      shiftCalendarDays(ref, dir);
+      _edgeTimer = Timer.periodic(_kEdgeHold, (_) {
+        if (!mounted || _drag == null) {
+          _edgeTimer?.cancel();
+          return;
+        }
+        shiftCalendarDays(ref, dir);
+      });
+    });
+  }
+
+  void _stopEdgeTurn() {
+    _edgeTimer?.cancel();
+    _edgeTimer = null;
+    _edgeDir = 0;
+  }
+
   void _dragUpdate(Offset pos) {
     final d = _drag;
     if (d == null || _committing) return;
+    _edgeTurn(pos);
     // A timed block dragged up over the all-day strip highlights that day.
     if (d.kind == _DragKind.move) {
       _cross.stripTarget.value = _cross.stripDayAt(
@@ -2296,6 +2428,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   }
 
   void _clearDrag() {
+    _stopEdgeTurn();
     _cross.gridDragging = false;
     _cross.stripTarget.value = null;
     _dragN.value = null;
@@ -2312,8 +2445,6 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   List<_Moved> _preview(_Drag d) {
     final item = d.grabbed;
     final start = item.startAt!;
-    final durMin = _effectiveEnd(item).difference(start).inMinutes;
-    final startMin = minutesOfDay(start);
     final dx = d.current.dx - d.origin.dx;
     // Pointer travel + the grid's own scroll since the drag began: a wheel
     // turning mid-drag must carry the block along.
@@ -2332,8 +2463,19 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
     switch (d.kind) {
       case _DragKind.move:
-        final hi = durMin <= 1440 - startMin ? 1440 - startMin - durMin : 0;
-        minutes = minutes.clamp(-startMin, hi);
+        // Each member has its OWN limit: a block that fits inside one day stays
+        // inside it (the day itself is changed sideways), but one that crosses
+        // midnight (a sleep, 23:00 -> 07:00) moves freely, so it can be
+        // dragged up and down too; its end may land later on the next day.
+        int minutesFor(ActionListItem m) {
+          if (m.isAllDay) return 0;
+          final s = m.startAt!;
+          final dur = _effectiveEnd(m).difference(s).inMinutes;
+          final sm = minutesOfDay(s);
+          if (dur > 1440 - sm) return minutes; // crosses midnight
+          return minutes.clamp(-sm, 1440 - sm - dur);
+        }
+
         return [
           for (final m in d.members)
             (
@@ -2343,7 +2485,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
                 endAt: m.endAt,
                 dayDelta: dayDelta,
                 // All-day chips follow the day delta only.
-                minuteDelta: m.isAllDay ? 0 : minutes,
+                minuteDelta: minutesFor(m),
                 legacyEstimatedMinutes: m.estimatedMinutes,
               ),
             ),
@@ -2882,9 +3024,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     for (final m in _preview(drag)) {
       if (m.item.isAllDay) continue;
       final s = m.schedule;
+      // The grabbed block keeps its lane only while it stays on one day; a
+      // block crossing midnight is drawn full column width in each day.
+      final oneDay =
+          dayIndexOf(s.startAt, widget.start) ==
+          dayIndexOf(
+            s.endAt.subtract(const Duration(seconds: 1)),
+            widget.start,
+          );
       final grabbed = m.item.id == drag.grabbed.id;
+      final useLane = grabbed && oneDay;
       final range = '${_hhmm(s.startAt)} – ${_hhmm(s.endAt)}';
-      final laneW = widget.dayWidth / (grabbed ? drag.laneCount : 1);
+      final laneW = widget.dayWidth / (useLane ? drag.laneCount : 1);
       var first = true;
       for (var day = 0; day < widget.dayCount; day++) {
         final ds = dayStarts[day];
@@ -2898,9 +3049,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         ghosts.add(
           Positioned(
             key: ValueKey(first ? base : '$base-d$day'),
-            left: day * widget.dayWidth + (grabbed ? drag.lane : 0) * laneW,
+            left: day * widget.dayWidth + (useLane ? drag.lane : 0) * laneW,
             top: _px(topMin),
-            width: laneW * (grabbed ? drag.span : 1) - 2,
+            width: laneW * (useLane ? drag.span : 1) - 2,
             height: math.max(_kMinBlockHeight, _px(lenMin)),
             child: _rangeBox(scheme, range),
           ),
@@ -3308,16 +3459,17 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     final scheme = theme.colorScheme;
     final item = seg.item;
     final done = item.isDoneBefore;
-    // Only the band matters for the colour, so the once-a-minute urgency
-    // refresh rebuilds a block only when its band changes.
-    final band = widget.running
+    // Only the quantised colour position matters, so the once-a-minute urgency
+    // refresh rebuilds a block only when its colour visibly changes.
+    final key = widget.running
         ? null
         : ref.watch(
             actionUrgencyProvider.select(
-              (m) => m[item.id] == null ? null : urgencyBand(m[item.id]!),
+              (m) => m[item.id] == null ? null : urgencyKey(m[item.id]!),
             ),
           );
     final dark = theme.brightness == Brightness.dark;
+    final rc = runningColors(dark: dark);
     // No growth direction: white, "fill me in" (running keeps its colour).
     final unlinked =
         !widget.running &&
@@ -3327,19 +3479,19 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
           ),
         );
     final ec = unlinked ? emptyColors(dark: dark, done: done) : null;
-    // Done events keep their band, muted.
-    final uc = band == null
+    // Done events keep their colour, muted.
+    final uc = key == null
         ? null
         : done
-        ? urgencyColorsMutedForBand(band, dark: dark)
-        : urgencyColorsForBand(band, dark: dark);
+        ? urgencyColorsMutedForKey(key, dark: dark)
+        : urgencyColorsForKey(key, dark: dark);
     final bg = widget.running
-        ? scheme.primary
+        ? rc.bg
         : ec?.bg ??
               uc?.bg ??
               (done ? scheme.surfaceContainerHighest : scheme.primaryContainer);
     final fg = widget.running
-        ? scheme.onPrimary
+        ? rc.fg
         : ec?.fg ??
               uc?.fg ??
               (done ? scheme.onSurfaceVariant : scheme.onPrimaryContainer);
@@ -3480,7 +3632,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         // blocks apart, the selected one gets a thicker border.
         border: selected
             ? Border.all(color: scheme.onSurface, width: 2)
-            : Border.all(color: _eventOutline(context)),
+            : Border.all(color: urgencyOutline(bg, dark: dark)),
       ),
       child: content,
     );

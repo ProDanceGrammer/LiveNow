@@ -1,9 +1,12 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/ui/widgets/direction_badge.dart';
 
 /// The calendar badge shows only the emojis that fit the block, then '+N'
 /// counting EVERY hidden direction (also the ones the provider already cut).
 void main() {
+  badgeScalerTest();
   test('everything fits: unchanged', () {
     expect(fitDirectionIcons('A B', null, 11), 'A B');
     expect(fitDirectionIcons('A B', 500, 11), 'A B');
@@ -38,5 +41,36 @@ void main() {
     final narrow = fitDirectionIcons('A B C D E F', w / 2, 11, maxCount: 4);
     expect(narrow.split(' ').last, startsWith('+'));
     expect(narrow.split(' ').length, lessThan(5));
+  });
+}
+
+// The badge is painted at the size it was measured at: the phone's text scale
+// (Dynamic Type) must not make it wider than `fitDirectionIcons` allowed.
+void badgeScalerTest() {
+  testWidgets('the badge ignores the system text scale', (tester) async {
+    Future<double> width(double scale) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: const Center(
+                child: DirectionBadge(
+                  actionId: 'a',
+                  icons: 'A B C D',
+                  maxWidth: 200,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      return tester.getSize(find.byType(DirectionBadge)).width;
+    }
+
+    final normal = await width(1);
+    final big = await width(1.6);
+    expect(big, closeTo(normal, 0.5));
+    expect(big, lessThanOrEqualTo(200));
   });
 }

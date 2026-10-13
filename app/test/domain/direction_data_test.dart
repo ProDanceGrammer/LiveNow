@@ -57,10 +57,22 @@ void main() {
     expect(run([('flag', DateTime.utc(2020, 1, 1))]), {'week', 'month'});
   });
 
-  test('links of unknown directions are ignored; own actions only', () {
+  test('links of unknown directions are ignored', () {
     expect(
       run([('gone', DateTime.utc(2026, 10, 14))]),
       {'week', 'month', 'flag'},
     );
+  });
+
+  test('a direction that depends on others is never white', () {
+    // `month` has sub-directions: it takes its progress from them, so it is
+    // not missing data of its own, even with no action at all.
+    final needing = directionsNeedingData(
+      metrics: [week, month, flag],
+      links: const [],
+      nowUtc: now,
+      dependentIds: {'month'},
+    );
+    expect(needing, {'week', 'flag'});
   });
 }

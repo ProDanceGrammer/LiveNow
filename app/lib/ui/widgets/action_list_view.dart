@@ -13,10 +13,14 @@ class ActionListView extends ConsumerWidget {
   final ProviderListenable<AsyncValue<List<ActionListItem>>> provider;
   final String emptyMessage;
 
+  /// The list's scroll controller (the All view's marquee scrolls it).
+  final ScrollController? controller;
+
   const ActionListView({
     super.key,
     required this.provider,
     required this.emptyMessage,
+    this.controller,
   });
 
   @override
@@ -26,6 +30,7 @@ class ActionListView extends ConsumerWidget {
       data: (items) => items.isEmpty
           ? Center(child: Text(emptyMessage))
           : ListView.builder(
+              controller: controller,
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: items.length,
               itemBuilder: (context, i) => ActionTile(

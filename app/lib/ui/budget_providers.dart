@@ -219,6 +219,19 @@ final budgetCategoryUrgencyProvider = Provider.autoDispose<Map<String, double>>(
   },
 );
 
+/// Categories whose nearest upcoming action has NO growth direction: shown white
+/// ("fill me in") like such an action everywhere else. Empty while the links
+/// load (so nothing flashes white).
+final budgetCategoryUnlinkedProvider = Provider.autoDispose<Set<String>>((ref) {
+  final view = ref.watch(budgetViewProvider).value;
+  final linked = ref.watch(actionsWithDirectionsProvider);
+  if (view == null || linked == null) return const {};
+  return {
+    for (final e in view.upcomingAction.entries)
+      if (!linked.contains(e.value)) e.key,
+  };
+});
+
 /// The transactions linked to one action (for the action editor).
 final actionBudgetTransactionsProvider = Provider.autoDispose
     .family<List<BudgetTxItem>, String>((ref, actionId) {

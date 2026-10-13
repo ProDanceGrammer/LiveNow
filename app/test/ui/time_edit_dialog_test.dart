@@ -53,7 +53,12 @@ void main() {
     });
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          // The card's white "no direction" state follows a live drift stream;
+          // these tests are about the time dialog, not about links.
+          actionsWithDirectionsProvider.overrideWith((ref) => null),
+        ],
         child: MaterialApp(
           home: Scaffold(body: ActionCard(action: item)),
         ),

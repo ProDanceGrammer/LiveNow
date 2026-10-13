@@ -113,11 +113,16 @@ void main() {
       expect(f(d: 3, h: 5), '3 days 5 hours');
     });
     test('two most significant units, skipping zero neighbours', () {
-      expect(f(m: 1, s: 20), '1 min 20 sec');
       expect(f(h: 1, s: 5), '1 hour');
       expect(f(d: 1, m: 30), '1 day');
-      expect(f(m: 59, s: 59), '59 min 59 sec');
       expect(f(h: 1, m: 23, s: 45), '1 hour 23 min');
+    });
+    test('seconds only show under a minute', () {
+      expect(f(s: 59), '59 sec');
+      expect(f(m: 1, s: 20), '1 min');
+      expect(f(m: 20, s: 26), '20 min');
+      expect(f(m: 59, s: 59), '59 min');
+      expect(f(s: 60), '1 min');
     });
     test('zero and negative', () {
       expect(formatDuration(Duration.zero), '0 sec');

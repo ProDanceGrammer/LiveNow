@@ -10,6 +10,7 @@ import 'date_range_fields.dart';
 import 'glass.dart';
 import 'metric_picker.dart';
 import 'param_icons.dart';
+import 'sort_icons.dart';
 
 /// The collapsible panel under the All list's search field: waterfall sort
 /// chips and the filters. It only edits the providers; the rules live in
@@ -87,7 +88,17 @@ class _SortRow extends ConsumerWidget {
             onSelected: (f) => set([...sort, SortKey(f)]),
             itemBuilder: (_) => [
               for (final f in remaining)
-                PopupMenuItem(value: f, child: Text(f.label)),
+                PopupMenuItem(
+                  value: f,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      sortFieldIcon(f),
+                      const SizedBox(width: 8),
+                      Text(f.label),
+                    ],
+                  ),
+                ),
             ],
             child: const Chip(
               avatar: Icon(Icons.add, size: 16),
@@ -123,6 +134,8 @@ class _SortChip extends StatelessWidget {
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          sortFieldIcon(sortKey.field),
+          const SizedBox(width: 6),
           Text(sortKey.field.label),
           const SizedBox(width: 4),
           Icon(

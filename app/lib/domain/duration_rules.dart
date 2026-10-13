@@ -50,12 +50,14 @@ Duration predictedDuration({
   return ownDuration;
 }
 
-/// Formats [d] with second precision using its two most significant
-/// consecutive units (skipping the second if it's zero): '20 sec', '1 min',
-/// '1 hour 23 min', '7 hours', '2 days', '1 day 3 hours'. Negative durations
-/// are treated as zero.
+/// Formats [d] using its two most significant consecutive units (skipping the
+/// second if it's zero): '20 sec', '1 min', '1 hour 23 min', '7 hours',
+/// '2 days', '1 day 3 hours'. Seconds only show while the whole duration is
+/// under a minute: from 60 s up they are dropped ('20 min 26 sec' reads
+/// '20 min'). Negative durations are treated as zero.
 String formatDuration(Duration d) {
-  var total = d.isNegative ? 0 : d.inSeconds;
+  final secs = d.isNegative ? 0 : d.inSeconds;
+  var total = secs >= 60 ? secs - secs % 60 : secs;
   final days = total ~/ 86400;
   total %= 86400;
   final hours = total ~/ 3600;

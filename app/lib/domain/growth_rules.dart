@@ -111,12 +111,16 @@ DateTime windowStart(DateTime nowUtc, MetricWindow window) => switch (window) {
 /// the direction's period (the last week/month/year...) or after it, i.e. in
 /// the future. [links] are (metricId, the action's start or null). A boolean
 /// direction has no period: any dated linked action counts. Linked actions
-/// without a date, and a direction with no links at all, do not count. Only the
-/// direction's OWN actions are looked at, not its sub-directions'.
+/// without a date, and a direction with no links at all, do not count.
+///
+/// A direction that DEPENDS on other directions ([dependentIds]: it has
+/// sub-directions) is never listed: it takes its progress from them, so it
+/// is not missing data of its own.
 Set<String> directionsNeedingData({
   required Iterable<GrowthMetric> metrics,
   required Iterable<(String, DateTime?)> links,
   required DateTime nowUtc,
+  Set<String> dependentIds = const {},
 }) {
   final since = <String, DateTime?>{
     for (final m in metrics)
@@ -134,7 +138,7 @@ Set<String> directionsNeedingData({
   }
   return {
     for (final m in metrics)
-      if (!hasData.contains(m.id)) m.id,
+      if (!hasData.contains(m.id) && !dependentIds.contains(m.id)) m.id,
   };
 }
 

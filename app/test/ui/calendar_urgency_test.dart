@@ -121,17 +121,8 @@ void main() {
     'Vhigh': 400,
     'Crit': 900,
   };
-  const bands = <String, UrgencyBand>{
-    'Neg': UrgencyBand.negative,
-    'Low': UrgencyBand.low,
-    'Mid': UrgencyBand.medium,
-    'High': UrgencyBand.high,
-    'Vhigh': UrgencyBand.veryHigh,
-    'Crit': UrgencyBand.critical,
-  };
-
   for (final dark in [false, true]) {
-    testWidgets('timed blocks are coloured by band (dark=$dark)', (
+    testWidgets('timed blocks take their colour from the scale (dark=$dark)', (
       tester,
     ) async {
       urgency.clear();
@@ -150,7 +141,7 @@ void main() {
       for (final e in samples.entries) {
         expect(
           blockColor(tester, e.key),
-          urgencyBackground(bands[e.key]!, dark: dark),
+          urgencyColors(samples[e.key]!, dark: dark).bg,
           reason: e.key,
         );
       }
@@ -164,8 +155,6 @@ void main() {
     urgency.clear();
     await pump(tester, urgency);
     await tomorrow(tester);
-    final scheme = Theme.of(tester.element(find.byType(CalendarView)))
-        .colorScheme;
     final unlinked = await create(tester, 'Unlinked', at(33), at(34));
     final future = await create(tester, 'Future', at(36), at(37));
     final done = await create(tester, 'Doneone', at(0), at(0, 20));
@@ -179,7 +168,7 @@ void main() {
     expect(blockColor(tester, 'Unlinked'), emptyColors(dark: false).bg);
     expect(
       blockColor(tester, 'Future'),
-      urgencyBackground(UrgencyBand.critical, dark: false),
+      urgencyColors(900, dark: false).bg,
     );
     // Linked + done: the band colour, muted. Unlinked + done: still white.
     expect(doneGrey.isNotEmpty, isTrue);
@@ -188,7 +177,7 @@ void main() {
       urgencyColorsMuted(900, dark: false).bg,
     );
     expect(blockColor(tester, 'Donegrey'), emptyColors(dark: false).bg);
-    expect(blockColor(tester, 'Runner'), scheme.primary);
+    expect(blockColor(tester, 'Runner'), runningColors(dark: false).bg);
     await unmount(tester);
   });
 
