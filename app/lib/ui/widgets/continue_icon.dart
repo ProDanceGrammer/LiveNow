@@ -24,6 +24,9 @@ class _ContinuePainter extends CustomPainter {
 
   final Color color;
 
+  /// The phone's icon size in logical px: the look every smaller size copies.
+  static const double _referenceSize = 22;
+
   static double _rad(double deg) => deg * math.pi / 180;
 
   @override
@@ -68,9 +71,15 @@ class _ContinuePainter extends CustomPainter {
       )
       ..close();
 
-    // Centre what is drawn (arc + head) in the icon box.
+    // Centre what is drawn (arc + head) in the icon box. Boxes smaller than the
+    // phone's 22 px icon (the desktop's 18 px hover tools) draw the arrow at
+    // the phone's absolute size and line weight, so it looks the same
+    // everywhere instead of smaller and thinner.
     final bounds = arc.getBounds().expandToInclude(head.getBounds());
-    canvas.translate(12 - bounds.center.dx, 12 - bounds.center.dy);
+    final k = box.width < _referenceSize ? _referenceSize / box.width : 1.0;
+    canvas.translate(12, 12);
+    canvas.scale(k);
+    canvas.translate(-bounds.center.dx, -bounds.center.dy);
     canvas.drawPath(arc, stroke);
     canvas.drawPath(head, fill);
   }
