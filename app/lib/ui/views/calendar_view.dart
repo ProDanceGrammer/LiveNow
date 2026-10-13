@@ -125,11 +125,13 @@ class _CountedBadge extends StatelessWidget {
   final String actionId;
   final String icons;
   final double? maxWidth;
+  final int? maxCount;
   const _CountedBadge({
     super.key,
     required this.actionId,
     required this.icons,
     this.maxWidth,
+    this.maxCount,
   });
 
   @override
@@ -139,6 +141,7 @@ class _CountedBadge extends StatelessWidget {
       actionId: actionId,
       icons: icons,
       maxWidth: maxWidth,
+      maxCount: maxCount,
     );
   }
 }
@@ -1309,7 +1312,16 @@ class _AllDayChip extends ConsumerWidget {
             ),
           );
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // Done chips keep their band, muted; unlinked done stay grey.
+    // No growth direction: white, "fill me in" (running keeps its colour).
+    final unlinked =
+        !running &&
+        ref.watch(
+          actionsWithDirectionsProvider.select(
+            (s) => s != null && !s.contains(item.id),
+          ),
+        );
+    final ec = unlinked ? emptyColors(dark: dark, done: done) : null;
+    // Done chips keep their band, muted.
     final uc = band == null
         ? null
         : done
@@ -1317,13 +1329,15 @@ class _AllDayChip extends ConsumerWidget {
         : urgencyColorsForBand(band, dark: dark);
     final bg = running
         ? scheme.primary
-        : uc?.bg ??
+        : ec?.bg ??
+              uc?.bg ??
               (done
                   ? scheme.surfaceContainerHighest
                   : scheme.tertiaryContainer);
     final fg = running
         ? scheme.onPrimary
-        : uc?.fg ??
+        : ec?.fg ??
+              uc?.fg ??
               (done ? scheme.onSurfaceVariant : scheme.onTertiaryContainer);
     final selected = ref.watch(
       calendarSelectionProvider.select((s) => s.contains(item.id)),
@@ -1398,7 +1412,11 @@ class _AllDayChip extends ConsumerWidget {
                       _HideWhileScrolling(
                         scrolling: cross.scrolling,
                         keepSpace: true,
-                        child: _CountedBadge(actionId: item.id, icons: icons),
+                        child: _CountedBadge(
+                          actionId: item.id,
+                          icons: icons,
+                          maxCount: 4, // the chip's width is shared with its name
+                        ),
                       ),
                     ],
                   ],
@@ -3300,7 +3318,16 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
             ),
           );
     final dark = theme.brightness == Brightness.dark;
-    // Done events keep their band, muted; unlinked done stay grey.
+    // No growth direction: white, "fill me in" (running keeps its colour).
+    final unlinked =
+        !widget.running &&
+        ref.watch(
+          actionsWithDirectionsProvider.select(
+            (s) => s != null && !s.contains(item.id),
+          ),
+        );
+    final ec = unlinked ? emptyColors(dark: dark, done: done) : null;
+    // Done events keep their band, muted.
     final uc = band == null
         ? null
         : done
@@ -3308,11 +3335,13 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         : urgencyColorsForBand(band, dark: dark);
     final bg = widget.running
         ? scheme.primary
-        : uc?.bg ??
+        : ec?.bg ??
+              uc?.bg ??
               (done ? scheme.surfaceContainerHighest : scheme.primaryContainer);
     final fg = widget.running
         ? scheme.onPrimary
-        : uc?.fg ??
+        : ec?.fg ??
+              uc?.fg ??
               (done ? scheme.onSurfaceVariant : scheme.onPrimaryContainer);
     final name = TextStyle(
       fontSize: 10,

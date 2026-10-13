@@ -1,3 +1,5 @@
+import 'package:livenow/ui/data_imports.dart'
+    show importGrowthCsv, importGrowthIcons;
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +15,8 @@ import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/screens/growth_directions_screen.dart';
 import 'package:livenow/ui/widgets/metric_picker.dart';
 import 'package:livenow/ui/widgets/param_icons.dart';
+
+import 'import_harness.dart';
 
 void main() {
   setUpAll(initPostponeTimeZoneData);
@@ -51,7 +55,16 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [databaseProvider.overrideWithValue(db), ...overrides],
-        child: const MaterialApp(home: GrowthDirectionsScreen()),
+        child: MaterialApp(
+          home: ImportHarness(
+            // The import buttons live in Settings now.
+            actions: {
+              'import-growth-csv': importGrowthCsv,
+              'import-growth-icons': importGrowthIcons,
+            },
+            child: const GrowthDirectionsScreen(),
+          ),
+        ),
       ),
     );
     await settle(tester);
@@ -255,7 +268,7 @@ void main() {
       overrides: [growthCsvPickerProvider.overrideWithValue(() async => csv)],
     );
 
-    await tester.tap(find.byTooltip('Import growth directions from CSV…'));
+    await tester.tap(find.byKey(const ValueKey('import-growth-csv')));
     await tester.pump();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 300)),
@@ -289,11 +302,7 @@ void main() {
       ],
     );
 
-    await tester.tap(
-      find.byTooltip(
-        'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
-      ),
-    );
+    await tester.tap(find.byKey(const ValueKey('import-growth-icons')));
     await tester.pump();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 300)),
@@ -345,7 +354,7 @@ void main() {
         growthCsvPickerProvider.overrideWithValue(() async => 'a,b\r\n1,2\r\n'),
       ],
     );
-    await tester.tap(find.byTooltip('Import growth directions from CSV…'));
+    await tester.tap(find.byKey(const ValueKey('import-growth-csv')));
     await tester.pump();
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 300)),

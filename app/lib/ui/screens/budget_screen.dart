@@ -9,7 +9,6 @@ import '../../domain/budget_tx_view_rules.dart';
 import '../../domain/budget_service.dart';
 import '../../domain/name_sort.dart';
 import '../budget_providers.dart';
-import '../data_imports.dart';
 import '../layout.dart';
 import '../undo.dart' show offerUndo, undoHistoryProvider;
 import '../open_entity.dart';
@@ -82,12 +81,6 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
     }
   }
 
-  // The import/export flows live in data_imports.dart (Settings uses them too).
-  Future<void> _import() => importBudgetData(context, ref);
-  Future<void> _importIcons() => importBudgetIcons(context, ref);
-  Future<void> _exportJson() => exportBudgetJson(context, ref);
-  Future<void> _exportCsv() => exportBudgetCsv(context, ref);
-
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(budgetSettingsProvider).value;
@@ -152,39 +145,6 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
                     ),
                   ),
                 ),
-              ),
-              PopupMenuButton<String>(
-                key: const ValueKey('budget-menu'),
-                icon: const Icon(Icons.import_export),
-                tooltip: 'Import / export',
-                onSelected: (v) => switch (v) {
-                  'import' => _import(),
-                  'icons' => _importIcons(),
-                  'json' => _exportJson(),
-                  _ => _exportCsv(),
-                },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    key: ValueKey('budget-import'),
-                    value: 'import',
-                    child: Text('Import (CSV or backup)…'),
-                  ),
-                  PopupMenuItem(
-                    key: ValueKey('budget-import-icons'),
-                    value: 'icons',
-                    child: Text('Import category icons (CSV)…'),
-                  ),
-                  PopupMenuItem(
-                    key: ValueKey('budget-export-json'),
-                    value: 'json',
-                    child: Text('Export backup (JSON)…'),
-                  ),
-                  PopupMenuItem(
-                    key: ValueKey('budget-export-csv'),
-                    value: 'csv',
-                    child: Text('Export CSV files…'),
-                  ),
-                ],
               ),
               IconButton(
                 key: const ValueKey('budget-settings'),

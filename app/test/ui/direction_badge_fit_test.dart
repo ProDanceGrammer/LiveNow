@@ -24,4 +24,19 @@ void main() {
   test('no room at all: just the count', () {
     expect(fitDirectionIcons('A B C', 1, 11), '+3');
   });
+
+  test('maxCount keeps the first emojis and folds the rest into +N', () {
+    expect(fitDirectionIcons('A B C D E F', null, 11, maxCount: 4), 'A B C D +2');
+    // An existing +n is merged into the count.
+    expect(
+      fitDirectionIcons('A B C D E F G H +3', null, 11, maxCount: 4),
+      'A B C D +7',
+    );
+    expect(fitDirectionIcons('A B', null, 11, maxCount: 4), 'A B');
+    // The width limit still applies after the count limit.
+    final w = directionBadgeWidth('A B C D +2', null, 11);
+    final narrow = fitDirectionIcons('A B C D E F', w / 2, 11, maxCount: 4);
+    expect(narrow.split(' ').last, startsWith('+'));
+    expect(narrow.split(' ').length, lessThan(5));
+  });
 }

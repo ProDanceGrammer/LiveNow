@@ -5,6 +5,7 @@ import '../../data/queries.dart';
 import '../../domain/duration_rules.dart';
 import '../providers.dart';
 import '../time_format.dart';
+import '../urgency_colors.dart';
 import 'action_menu_button.dart';
 import 'action_time_label.dart';
 import 'glass.dart';
@@ -32,6 +33,25 @@ class ActionTile extends ConsumerWidget {
     final urgency = ref.watch(
       actionUrgencyProvider.select((m) => m[action.id]),
     );
+    // Tinted like a Current card: no direction = white ("fill me in"), else
+    // the urgency band (muted when done); a running action stays plain.
+    final unlinked = ref.watch(
+      actionsWithDirectionsProvider.select(
+        (s) => s != null && !s.contains(action.id),
+      ),
+    );
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final done = action.isDoneBefore;
+    final tint = isRunning
+        ? null
+        : unlinked
+        ? emptyColors(dark: dark, done: done)
+        : urgency != null
+        ? (done
+              ? urgencyColorsMuted(urgency, dark: dark)
+              : urgencyColors(urgency, dark: dark))
+        : null;
+    final fg = tint?.fg;
 
     // Parts are either plain strings or the clickable time label.
     final subtitleParts = <Object>[
@@ -50,12 +70,14 @@ class ActionTile extends ConsumerWidget {
           key: const ValueKey('tileUrgency'),
           size: 19,
           style: Theme.of(context).textTheme.bodyMedium,
-          color: Theme.of(context).colorScheme.onSurface,
+          color: fg ?? Theme.of(context).colorScheme.onSurface,
         ),
     ];
 
     final tile = ListTile(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textColor: fg,
+      iconColor: fg,
       leading: Icon(
         iconForAction(action, isRunning),
         color: isRunning ? Theme.of(context).colorScheme.primary : null,
@@ -91,7 +113,13 @@ class ActionTile extends ConsumerWidget {
         // Small row: no shadow / blurred window (invisible here, costly in bulk).
         shadow: false,
         blurWindow: false,
-        child: Material(type: MaterialType.transparency, child: tile),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tint?.bg,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Material(type: MaterialType.transparency, child: tile),
+        ),
       ),
     );
   }

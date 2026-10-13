@@ -76,22 +76,32 @@ List<double> _chunkEdges(String icons, double fontSize) {
 
 final LinkedHashMap<String, String> _fitCache = LinkedHashMap();
 
-/// [icons] ('A B C D +2') cut to what fits in [maxWidth]: the first emojis
-/// that fit, then '+N' for ALL the others (hidden ones and the old '+n').
-/// Returns [icons] unchanged when everything fits (or [maxWidth] is null).
-String fitDirectionIcons(String icons, double? maxWidth, double fontSize) {
-  if (maxWidth == null) return icons;
-  final key = '$fontSize|${maxWidth.floor()}|$icons';
+/// [icons] ('A B C D +2') cut to what fits: at most [maxCount] emojis, and
+/// only as many as fit in [maxWidth]; then '+N' for ALL the others (hidden
+/// ones and the old '+n'). Returns [icons] unchanged when everything fits (or
+/// both limits are null).
+String fitDirectionIcons(
+  String icons,
+  double? maxWidth,
+  double fontSize, {
+  int? maxCount,
+}) {
+  if (maxWidth == null && maxCount == null) return icons;
+  final key = '$fontSize|${maxWidth?.floor()}|$maxCount|$icons';
   final hit = _fitCache[key];
   if (hit != null) return hit;
-  final chunks = icons.split(' ');
-  var result = icons;
-  if (_badgeTextWidth(chunks, fontSize) > maxWidth) {
-    final emoji = [for (final c in chunks) if (!c.startsWith('+')) c];
-    var total = emoji.length;
-    for (final c in chunks) {
-      if (c.startsWith('+')) total += int.tryParse(c.substring(1)) ?? 0;
-    }
+  var chunks = icons.split(' ');
+  var emoji = [for (final c in chunks) if (!c.startsWith('+')) c];
+  var total = emoji.length;
+  for (final c in chunks) {
+    if (c.startsWith('+')) total += int.tryParse(c.substring(1)) ?? 0;
+  }
+  if (maxCount != null && emoji.length > maxCount) {
+    emoji = emoji.take(maxCount).toList();
+    chunks = [...emoji, '+${total - maxCount}'];
+  }
+  var result = chunks.join(' ');
+  if (maxWidth != null && _badgeTextWidth(chunks, fontSize) > maxWidth) {
     result = '+$total';
     for (var k = emoji.length - 1; k >= 0; k--) {
       final cand = [...emoji.take(k), '+${total - k}'];
@@ -109,11 +119,15 @@ String fitDirectionIcons(String icons, double? maxWidth, double fontSize) {
 }
 
 /// Width the badge for [icons] takes when it may use up to [maxWidth].
-double directionBadgeWidth(String icons, double? maxWidth, double fontSize) =>
-    _badgeTextWidth(
-      fitDirectionIcons(icons, maxWidth, fontSize).split(' '),
-      fontSize,
-    );
+double directionBadgeWidth(
+  String icons,
+  double? maxWidth,
+  double fontSize, {
+  int? maxCount,
+}) => _badgeTextWidth(
+  fitDirectionIcons(icons, maxWidth, fontSize, maxCount: maxCount).split(' '),
+  fontSize,
+);
 
 class _Tip {
   final String text;
@@ -140,12 +154,17 @@ class DirectionBadge extends ConsumerStatefulWidget {
   /// rest (null = show them all).
   final double? maxWidth;
 
+  /// At most this many emojis (null = no count limit): for rows whose width is
+  /// shared with text and so is unknown.
+  final int? maxCount;
+
   const DirectionBadge({
     super.key,
     required this.actionId,
     required this.icons,
     this.fontSize = 11,
     this.maxWidth,
+    this.maxCount,
   });
 
   @override
@@ -167,8 +186,12 @@ class _DirectionBadgeState extends ConsumerState<DirectionBadge> {
     forceStrutHeight: true,
   );
 
-  String get _shown =>
-      fitDirectionIcons(widget.icons, widget.maxWidth, widget.fontSize);
+  String get _shown => fitDirectionIcons(
+    widget.icons,
+    widget.maxWidth,
+    widget.fontSize,
+    maxCount: widget.maxCount,
+  );
 
   _Tip? _resolve() {
     final names = ref.read(actionDirectionNamesProvider)[widget.actionId];

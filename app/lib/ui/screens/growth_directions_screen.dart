@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/growth_rules.dart';
-import '../data_imports.dart';
 import '../calendar_fullscreen.dart';
 import '../layout.dart';
 import '../providers.dart';
@@ -80,40 +79,49 @@ class GrowthDirectionsScreen extends ConsumerWidget {
             if (!full)
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Padding(
-                      padding: EdgeInsets.fromLTRB(12, 8, 4, 4),
+                      padding: const EdgeInsets.fromLTRB(12, 8, 4, 4),
                       child: GlassSurface(
                         radius: 20,
                         shadow: false,
                         blurWindow: false,
                         child: ClipRRect(
-                          borderRadius: BorderRadius.all(Radius.circular(20)),
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(20),
+                          ),
                           child: TabBar(
                             splashFactory: NoSplash.splashFactory,
                             tabs: [
-                              Tab(text: 'Balance'),
-                              Tab(text: 'List'),
-                              Tab(text: 'Mindmap'),
+                              for (final (icon, label) in const [
+                                (Icons.balance, 'Balance'),
+                                (Icons.view_list_rounded, 'List'),
+                                (Icons.account_tree, 'Mindmap'),
+                              ])
+                                Tab(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(icon, size: 18),
+                                      const SizedBox(width: 6),
+                                      // Shrinks (with an ellipsis) instead of
+                                      // overflowing a narrow tab.
+                                      Flexible(
+                                        child: Text(
+                                          label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                             ],
                           ),
                         ),
                       ),
                     ),
                   ),
-                  // Importing is a desktop job (Notion exports live on the PC).
-                  if (!usePhoneLayout(context))
-                    IconButton(
-                      icon: const Icon(Icons.emoji_emotions_outlined),
-                      tooltip: 'Import icons (saved Notion pages .htm, or name⇥emoji .tsv)…',
-                      onPressed: () => _importIcons(context, ref),
-                    ),
-                  if (!usePhoneLayout(context))
-                    IconButton(
-                      icon: const Icon(Icons.upload_file),
-                      tooltip: 'Import growth directions from CSV…',
-                      onPressed: () => _import(context, ref),
-                    ),
                   const SizedBox(width: 8),
                 ],
               ),
@@ -139,11 +147,6 @@ class GrowthDirectionsScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _importIcons(BuildContext context, WidgetRef ref) =>
-      importGrowthIcons(context, ref);
-
-  Future<void> _import(BuildContext context, WidgetRef ref) =>
-      importGrowthCsv(context, ref);
 }
 
 // ---- Balance ----------------------------------------------------------------

@@ -56,10 +56,20 @@ class ActionCard extends ConsumerWidget {
     );
     final primary = Theme.of(context).colorScheme.primary;
     final isDone = action.isDoneAt(ref.watch(currentBoardNowProvider));
-    // Urgency tint like the calendar: running and unlinked cards get none;
-    // done cards get the same band, muted.
+    // Urgency tint like the calendar: running cards get none, unlinked ones
+    // are white; done cards get the same band, muted.
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final tint = (urgency != null && !isRunning)
+    // No growth direction: white, "fill me in".
+    final unlinked = ref.watch(
+      actionsWithDirectionsProvider.select(
+        (s) => s != null && !s.contains(action.id),
+      ),
+    );
+    final tint = isRunning
+        ? null
+        : unlinked
+        ? emptyColors(dark: dark, done: isDone)
+        : urgency != null
         ? (isDone
               ? urgencyColorsMuted(urgency, dark: dark)
               : urgencyColors(urgency, dark: dark))
@@ -211,6 +221,7 @@ class ActionCard extends ConsumerWidget {
                                   key: const ValueKey('actionCardIcons'),
                                   actionId: action.id,
                                   icons: icons,
+                                  maxCount: 4,
                                 ),
                             ],
                           ),

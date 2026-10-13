@@ -80,3 +80,12 @@ Color urgencyForeground(Color background) {
   );
   return (bg: bg, fg: urgencyForeground(bg));
 }
+
+/// The "fill me in" look: an action with no growth direction, or a direction
+/// with no dated action in its period, is WHITE (a light grey on the dark
+/// theme) so it stands out from the coloured, already-linked ones. [done]
+/// mutes the text (the strikethrough on all-day items does the rest).
+({Color bg, Color fg}) emptyColors({required bool dark, bool done = false}) => (
+  bg: Color(dark ? 0xFFD5DAE3 : 0xFFFFFFFF),
+  fg: Color(done ? 0xFF475569 : 0xFF1E293B),
+);

@@ -38,6 +38,10 @@ void main() {
           databaseProvider.overrideWithValue(db),
           calendarVisibleHoursProvider.overrideWith((ref) => 24),
           actionUrgencyProvider.overrideWith((ref) => Map.of(urgency)),
+          // Linked = has an urgency (the real links stream is not awaited).
+          actionsWithDirectionsProvider.overrideWith(
+            (ref) => ref.watch(actionUrgencyProvider).keys.toSet(),
+          ),
         ],
         child: MaterialApp(
           themeMode: mode,
@@ -154,7 +158,7 @@ void main() {
     });
   }
 
-  testWidgets('unlinked and running keep their colour, done is muted or grey', (
+  testWidgets('unlinked is white, running keeps its colour, done is muted', (
     tester,
   ) async {
     urgency.clear();
@@ -172,18 +176,18 @@ void main() {
     );
     await setUrgency(tester, {future: 900, done: 900, run: 900});
     expect(unlinked.isNotEmpty, isTrue);
-    expect(blockColor(tester, 'Unlinked'), scheme.primaryContainer);
+    expect(blockColor(tester, 'Unlinked'), emptyColors(dark: false).bg);
     expect(
       blockColor(tester, 'Future'),
       urgencyBackground(UrgencyBand.critical, dark: false),
     );
-    // Linked + done: the band colour, muted. Unlinked + done: grey.
+    // Linked + done: the band colour, muted. Unlinked + done: still white.
     expect(doneGrey.isNotEmpty, isTrue);
     expect(
       blockColor(tester, 'Doneone'),
       urgencyColorsMuted(900, dark: false).bg,
     );
-    expect(blockColor(tester, 'Donegrey'), scheme.surfaceContainerHighest);
+    expect(blockColor(tester, 'Donegrey'), emptyColors(dark: false).bg);
     expect(blockColor(tester, 'Runner'), scheme.primary);
     await unmount(tester);
   });

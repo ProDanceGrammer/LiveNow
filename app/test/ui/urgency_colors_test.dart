@@ -71,4 +71,20 @@ void main() {
       }
     }
   });
+
+  test('the "fill me in" colours are white / light grey and stay readable', () {
+    expect(emptyColors(dark: false).bg, const Color(0xFFFFFFFF));
+    expect(emptyColors(dark: true).bg, isNot(const Color(0xFFFFFFFF)));
+    expect(emptyColors(dark: true).bg.computeLuminance(), greaterThan(0.6));
+    for (final dark in [false, true]) {
+      for (final done in [false, true]) {
+        final c = emptyColors(dark: dark, done: done);
+        final l1 = c.bg.computeLuminance();
+        final l2 = c.fg.computeLuminance();
+        final hi = l1 > l2 ? l1 : l2;
+        final lo = l1 > l2 ? l2 : l1;
+        expect((hi + 0.05) / (lo + 0.05), greaterThanOrEqualTo(4.5));
+      }
+    }
+  });
 }

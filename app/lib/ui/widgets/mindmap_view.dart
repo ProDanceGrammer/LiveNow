@@ -883,6 +883,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   Widget _buildMap(BuildContext context, GrowthSnapshot s, List<_Edge> edges) {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
+    final needsData = ref.watch(emptyDirectionIdsProvider) ?? const IdSet({});
     final selectedEdge = _selectedEdge;
     final glass = context.glass;
 
@@ -1085,10 +1086,14 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
                                       lite: _lod,
                                       metric: m,
                                       position: _pos[m.id]!,
-                                      colors: urgencyColors(
-                                        s.stats[m.id]?.urgency ?? 0,
-                                        dark: dark,
-                                      ),
+                                      // White = "fill me in": no dated
+                                      // action in its period or the future.
+                                      colors: needsData.contains(m.id)
+                                          ? emptyColors(dark: dark)
+                                          : urgencyColors(
+                                              s.stats[m.id]?.urgency ?? 0,
+                                              dark: dark,
+                                            ),
                                       progress: s.stats[m.id]?.progress ?? 0,
                                       selected: _selected.contains(m.id),
                                       onTap: () {

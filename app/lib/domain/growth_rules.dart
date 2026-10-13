@@ -107,6 +107,37 @@ DateTime windowStart(DateTime nowUtc, MetricWindow window) => switch (window) {
   MetricWindow.fiveYears => localDayStartMonthsBack(nowUtc, 60),
 };
 
+/// The directions that still NEED DATA: no linked action with a start date in
+/// the direction's period (the last week/month/year...) or after it, i.e. in
+/// the future. [links] are (metricId, the action's start or null). A boolean
+/// direction has no period: any dated linked action counts. Linked actions
+/// without a date, and a direction with no links at all, do not count. Only the
+/// direction's OWN actions are looked at, not its sub-directions'.
+Set<String> directionsNeedingData({
+  required Iterable<GrowthMetric> metrics,
+  required Iterable<(String, DateTime?)> links,
+  required DateTime nowUtc,
+}) {
+  final since = <String, DateTime?>{
+    for (final m in metrics)
+      m.id: m.kind == MetricKind.boolean
+          ? null
+          : windowStart(nowUtc, m.window ?? MetricWindow.week),
+  };
+  final hasData = <String>{};
+  for (final (metricId, start) in links) {
+    if (start == null || !since.containsKey(metricId)) continue;
+    final from = since[metricId];
+    // "In the window or in the future" is one comparison: the window starts
+    // in the past.
+    if (from == null || !start.isBefore(from)) hasData.add(metricId);
+  }
+  return {
+    for (final m in metrics)
+      if (!hasData.contains(m.id)) m.id,
+  };
+}
+
 /// [fact] as a percentage of [target], rounded to 2 decimals and NOT capped
 /// (12.5 h of a 7 h target is 178.57%). A non-positive target gives 0.
 double progressPercent(double fact, double target) {

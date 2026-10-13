@@ -19,7 +19,7 @@ void main() {
 
   group('actionDirectionIconsProvider', () {
     test(
-      'joins icons in a stable order, caps at 4 + n, skips blanks',
+      'joins icons in a stable order, caps at 12 + n, skips blanks',
       () async {
         final db = AppDatabase.forTesting(NativeDatabase.memory());
         addTearDown(db.close);
@@ -43,12 +43,18 @@ void main() {
           await metric('d', 'D'),
           await metric('e', 'E'),
           await metric('f', 'F'),
+          for (final x in ['G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'])
+            await metric(x.toLowerCase(), x),
         ];
         final blank = await metric('blank', '  ');
         final plain = await metric('plain', null);
 
         final actions = container.read(actionServiceProvider);
-        final many = await actions.createAction(name: 'many', metricIds: ids);
+        final many = await actions.createAction(
+          name: 'many',
+          metricIds: ids.take(6).toList(),
+        );
+        final huge = await actions.createAction(name: 'huge', metricIds: ids);
         final one = await actions.createAction(
           name: 'one',
           metricIds: [ids[1], blank],
@@ -61,10 +67,12 @@ void main() {
 
         await Future<void>.delayed(const Duration(milliseconds: 300));
         final m = container.read(actionDirectionIconsProvider);
-        expect(m[many], 'A B C D +2');
+        // The provider no longer cuts at 4: the place decides what fits.
+        expect(m[many], 'A B C D E F');
+        expect(m[huge], 'A B C D E F G H I J K L +2');
         expect(m[one], 'B');
         expect(m.containsKey(none), isFalse);
-        expect(m.length, 2);
+        expect(m.length, 3);
       },
     );
   });

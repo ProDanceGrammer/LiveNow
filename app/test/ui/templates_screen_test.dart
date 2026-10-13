@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/ui/data_imports.dart' show importTemplatesCsv;
 import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/screens/actions_section.dart';
@@ -15,6 +16,8 @@ import 'package:livenow/ui/screens/templates_screen.dart';
 import 'package:livenow/ui/widgets/action_editor.dart';
 import 'package:livenow/ui/widgets/action_import_summary_dialog.dart';
 import 'package:livenow/ui/widgets/notes_editor.dart';
+
+import 'import_harness.dart';
 
 const _csv = '''
 Name,Datetime,Next actions and time,Previous actions and time,Growth Direction
@@ -47,7 +50,13 @@ void main() {
           databaseProvider.overrideWithValue(db),
           actionsCsvPickerProvider.overrideWithValue(() async => csv),
         ],
-        child: const MaterialApp(home: TemplatesScreen()),
+        child: MaterialApp(
+          home: ImportHarness(
+            // The Import CSV button lives in Settings now.
+            actions: {'import-templates-csv': importTemplatesCsv},
+            child: const TemplatesScreen(),
+          ),
+        ),
       ),
     );
     await tester.runAsync(

@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/action_import_service.dart';
 import '../calendar_fullscreen.dart';
 import '../current_icons.dart';
-import '../data_imports.dart';
 import '../layout.dart';
 import '../providers.dart';
 import '../views/all_actions_view.dart';
@@ -45,12 +44,15 @@ final actionImportServiceProvider = Provider<ActionImportService>(
 
 /// The views inside the Actions section, in switch order.
 enum ActionsSub {
-  current('Current Actions', 'Current Actions'),
-  calendar('Calendar', 'Calendar'),
-  all('All', 'All Actions'),
-  templates('Templates', 'Templates');
+  current('Current Actions', 'Current Actions', Icons.bolt_rounded),
+  calendar('Calendar', 'Calendar', Icons.calendar_view_week_rounded),
+  all('All', 'All Actions', Icons.list_alt_rounded),
+  templates('Templates', 'Templates', Icons.dashboard_customize);
 
-  const ActionsSub(this.label, this.title);
+  const ActionsSub(this.label, this.title, this.icon);
+
+  /// The tab's icon.
+  final IconData icon;
 
   /// Tab text.
   final String label;
@@ -148,8 +150,6 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
     ref.read(currentSearchProvider.notifier).state = text;
   }
 
-  Future<void> _importCsv() => importActionsCsv(context, ref);
-
   @override
   Widget build(BuildContext context) {
     _visited.add(widget.sub);
@@ -200,7 +200,22 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
                             : null,
                         tabs: [
                           for (final s in ActionsSub.values)
-                            Tab(text: phone ? s.phoneLabel : s.label),
+                            Tab(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(s.icon, size: 18),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      phone ? s.phoneLabel : s.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -236,14 +251,6 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
                   icon: Icon(_searchOpen ? Icons.search_off : Icons.search),
                   tooltip: _searchOpen ? 'Close search' : 'Search actions',
                   onPressed: _toggleSearch,
-                ),
-              // The CSV import is a desktop job (Notion export on the PC).
-              if (!phone)
-                IconButton(
-                  key: const ValueKey('import-actions-csv'),
-                  icon: const Icon(Icons.upload_file),
-                  tooltip: 'Import actions from CSV…',
-                  onPressed: _importCsv,
                 ),
               const SizedBox(width: 8),
             ],

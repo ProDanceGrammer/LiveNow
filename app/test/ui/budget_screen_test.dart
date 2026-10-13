@@ -7,10 +7,17 @@ import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/budget_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/budget_files.dart';
+import 'package:livenow/ui/data_imports.dart'
+    show
+        exportBudgetCsv,
+        exportBudgetJson,
+        importBudgetData,
+        importBudgetIcons;
 import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/screens/budget_screen.dart';
 
+import 'import_harness.dart';
 import '../domain/budget_csv_test.dart'
     show accountsCsv, categoriesCsv, transactionsCsv;
 
@@ -76,7 +83,18 @@ void main() {
           databaseProvider.overrideWithValue(db),
           if (files != null) budgetFilesProvider.overrideWithValue(files),
         ],
-        child: const MaterialApp(home: BudgetScreen()),
+        child: MaterialApp(
+          home: ImportHarness(
+            // The import/export menu lives in Settings now.
+            actions: {
+              'budget-import': importBudgetData,
+              'budget-import-icons': importBudgetIcons,
+              'budget-export-json': exportBudgetJson,
+              'budget-export-csv': exportBudgetCsv,
+            },
+            child: const BudgetScreen(),
+          ),
+        ),
       ),
     );
     await settle(tester);
@@ -322,9 +340,6 @@ void main() {
   });
 
   Future<void> chooseMenu(WidgetTester tester, String itemKey) async {
-    await tester.tap(find.byKey(const ValueKey('budget-menu')));
-    await tester.pump(); // mounts the menu route
-    await tester.pump(const Duration(milliseconds: 500)); // its animation
     await tester.tap(find.byKey(ValueKey(itemKey)));
     await tester.pump(const Duration(milliseconds: 500));
     await settle(tester);

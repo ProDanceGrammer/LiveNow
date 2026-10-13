@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
+import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/growth_rules.dart';
 import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/mindmap_layout.dart'
@@ -72,6 +73,16 @@ void main() {
         kind: MetricKind.count,
         window: MetricWindow.week,
         target: 4,
+      );
+      // A FUTURE dated action linked to Main and Alpha: they have data (so
+      // they keep their urgency colour) without changing their progress; the
+      // unlinked Beta has none and is white.
+      final soon = DateTime.now().toUtc().add(const Duration(days: 2));
+      await ActionService(db).createAction(
+        name: 'Planned',
+        metricIds: [mainId, alphaId],
+        startAt: soon,
+        endAt: soon.add(const Duration(hours: 1)),
       );
       if (placed) {
         await m.savePositions({
@@ -155,6 +166,8 @@ void main() {
     // Main: urgency 1000 (critical); Alpha: weight 90, progress 0 -> 90.
     expect(nodeColor(tester, mainId), urgencyColors(1000, dark: false).bg);
     expect(nodeColor(tester, alphaId), urgencyColors(90, dark: false).bg);
+    // Beta has no dated action in its week or after: white, "fill me in".
+    expect(nodeColor(tester, betaId), emptyColors(dark: false).bg);
     expect(find.byKey(ValueKey('mindmapProgress-$alphaId')), findsOneWidget);
     await unmount(tester);
   });
@@ -745,6 +758,7 @@ void main() {
     await pumpMap(tester, brightness: Brightness.dark);
     expect(nodeColor(tester, mainId), urgencyColors(1000, dark: true).bg);
     expect(nodeColor(tester, alphaId), urgencyColors(90, dark: true).bg);
+    expect(nodeColor(tester, betaId), emptyColors(dark: true).bg);
 
     BoxBorder? border(String id) {
       final box = find.descendant(

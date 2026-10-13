@@ -1,9 +1,10 @@
 import 'package:drift/drift.dart'
     show OrderingTerm, TableUpdate, TableUpdateQuery, innerJoin;
-import 'package:flutter/foundation.dart' show mapEquals;
+import 'package:flutter/foundation.dart' show mapEquals, setEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
+import '../core/time_codec.dart' show dateTimeFromDb;
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
@@ -280,6 +281,41 @@ final growthSnapshotProvider = Provider.autoDispose<AsyncValue<GrowthSnapshot>>(
   },
 );
 
+/// A set of ids with value equality (a provider holding a plain Set would
+/// notify its listeners on every recompute).
+class IdSet {
+  final Set<String> ids;
+  const IdSet(this.ids);
+
+  bool contains(String id) => ids.contains(id);
+
+  @override
+  bool operator ==(Object other) => other is IdSet && setEquals(ids, other.ids);
+
+  @override
+  int get hashCode => ids.length;
+}
+
+/// Growth directions that need data (white on the mindmap): no dated linked
+/// action in their period or in the future, see `directionsNeedingData`. Null
+/// while loading, so nothing flashes white. Recomputed every minute (the
+/// window moves) and when links or directions change.
+final emptyDirectionIdsProvider = Provider.autoDispose<IdSet?>((ref) {
+  ref.watch(minuteTickProvider);
+  final metrics = ref.watch(metricsProvider).value;
+  final linked = ref.watch(metricLinkedActionsProvider).value;
+  if (metrics == null || linked == null) return null;
+  return IdSet(
+    directionsNeedingData(
+      metrics: [for (final m in metrics) GrowthMetric.fromRow(m)],
+      links: [
+        for (final (metricId, a) in linked) (metricId, dateTimeFromDb(a.startAt)),
+      ],
+      nowUtc: DateTime.now().toUtc(),
+    ),
+  );
+});
+
 /// "Urgency to Keep in Balance" per action id (sum of its directions'
 /// urgencies), live. Actions with no linked direction are absent.
 final actionUrgencyProvider = Provider.autoDispose<Map<String, double>>((ref) {
@@ -409,6 +445,19 @@ final allActionsMetricIdsProvider =
       (ref) => ref.watch(viewQueriesProvider).watchActionMetricIds(),
     );
 
+/// Ids of the actions that have at least one growth direction; null while the
+/// links load (so nothing flashes "unlinked"). Widgets `select` their own
+/// `!contains(id)`, so only a block whose flag flips rebuilds.
+final actionsWithDirectionsProvider = Provider.autoDispose<Set<String>?>((ref) {
+  final links = ref.watch(allActionsMetricIdsProvider);
+  final map = links.value;
+  if (map == null) return null;
+  return {
+    for (final e in map.entries)
+      if (e.value.isNotEmpty) e.key,
+  };
+});
+
 /// metric id -> emoji, blank icons skipped. Value-equal on purpose: a mindmap
 /// drag rewrites pos_x/pos_y (the metrics stream fires) but not the icons, so
 /// nothing downstream recomputes.
@@ -437,8 +486,10 @@ final _iconByMetricIdProvider = Provider.autoDispose<_IconMap>((ref) {
   );
 });
 
-/// At most this many direction emojis are shown, then '+n'.
-const kMaxDirectionIcons = 4;
+/// The provider emits at most this many direction emojis, then '+n'; what
+/// really shows is decided by the width of the place (calendar blocks) or a
+/// count limit (cards, chips: 4).
+const kMaxDirectionIcons = 12;
 
 /// actionId -> the emojis of its linked growth directions joined by spaces
 /// ('A B C D +2'); actions without any icon are absent. Widgets should

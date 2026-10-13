@@ -11,10 +11,8 @@ import '../../domain/growth_rules.dart';
 import '../../domain/template_import_service.dart';
 import '../../domain/template_search.dart';
 import '../../domain/template_sort.dart';
-import '../data_imports.dart';
 import '../dialog_back.dart';
 import '../dialog_stack.dart';
-import '../layout.dart';
 import '../open_entity.dart';
 import '../urgency_colors.dart';
 import '../widgets/action_tile.dart' show formatUrgency;
@@ -89,16 +87,6 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                   icon: const Icon(Icons.tune),
                   onPressed: () => setState(() => _showOptions = !_showOptions),
                 ),
-                // On a phone importing lives in Settings.
-                if (!usePhoneLayout(context)) ...[
-                  const SizedBox(width: 12),
-                  TextButton.icon(
-                    key: const ValueKey('import-templates-csv'),
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('Import CSV'),
-                    onPressed: () => _importCsv(context, ref),
-                  ),
-                ],
               ],
             ),
           ),
@@ -357,9 +345,6 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
       ]),
     );
   }
-
-  Future<void> _importCsv(BuildContext context, WidgetRef ref) =>
-      importTemplatesCsv(context, ref);
 
   /// Start now ([finished] false) or Finish now (true): creates the action
   /// from the template; the toast's Undo deletes it again.
