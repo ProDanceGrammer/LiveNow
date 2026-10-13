@@ -37,7 +37,11 @@ class ActionCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isRunning = action.isRunningAt(ref.watch(currentBoardNowProvider));
+    // The minute tick only re-evaluates the end side; the check itself uses the
+    // current moment, so a Start just pressed shows as running at once (the
+    // pinned board time can be up to a minute older than the new start).
+    ref.watch(currentBoardNowProvider);
+    final isRunning = action.isRunningAt(DateTime.now().toUtc());
     final urgency = ref.watch(
       actionUrgencyProvider.select((m) => m[action.id]),
     );
