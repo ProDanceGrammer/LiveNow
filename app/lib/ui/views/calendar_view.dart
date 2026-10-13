@@ -342,8 +342,11 @@ class CalendarView extends ConsumerWidget {
     final start = ref.watch(calendarRangeStartProvider);
     final dayCount = ref.watch(calendarDayCountProvider);
     final items = ref.watch(calendarRangeProvider).value;
-    final running =
-        ref.watch(runningOccurrencesProvider).value ?? const <String>{};
+    final nowUtc = ref.watch(currentBoardNowProvider);
+    final running = <String>{
+      for (final a in items ?? const <ActionListItem>[])
+        if (a.isRunningAt(nowUtc)) a.id,
+    };
 
     final phone = usePhoneLayout(context);
     final allDay = ref.watch(calendarAllDayProvider);

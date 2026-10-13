@@ -72,6 +72,16 @@ class ActionListItem {
     done: done,
   );
 
+  /// Running at [nowUtc]: a timed action that has started and not yet ended
+  /// (`start <= now < end`). The schedule is the only source of truth: Start and
+  /// Finish just move it to "now".
+  bool isRunningAt(DateTime nowUtc) =>
+      !isAllDay &&
+      startAt != null &&
+      endAt != null &&
+      !startAt!.isAfter(nowUtc) &&
+      endAt!.isAfter(nowUtc);
+
   /// [isDoneBefore] evaluated at the pinned instant [nowUtc].
   bool isDoneAt(DateTime nowUtc) => done_rule.isDoneBefore(
     startAt: startAt,

@@ -23,9 +23,7 @@ class ActionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isRunning =
-        ref.watch(runningOccurrencesProvider).value?.contains(action.id) ??
-        false;
+    final isRunning = action.isRunningAt(ref.watch(currentBoardNowProvider));
 
     final urgency = ref.watch(
       actionUrgencyProvider.select((m) => m[action.id]),

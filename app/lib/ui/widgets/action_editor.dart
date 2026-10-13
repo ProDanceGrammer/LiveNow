@@ -629,11 +629,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
             ],
           ),
         ),
-        if (_isEditing)
-          _TimeTrackingSection(
-            actionId: widget.existing!.id,
-            scheduledStart: _startAt,
-          ),
         SectionBlock(
           padding: kSectionTileBlockPadding,
           child: ExpansionTile(
@@ -985,62 +980,6 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         enabled: before != null,
       ),
     ];
-  }
-}
-
-/// Shows whether an occurrence is currently open (`action_occurrences`), and
-/// if so since when — using [scheduledStart] (`actions.start_at`, the single
-/// source of truth for the current start time) rather than the occurrence's
-/// own `started_at`, so this always agrees with "Scheduled start" above it.
-/// A *closed* occurrence's own start/finish is genuine frozen history and is
-/// shown as-is.
-class _TimeTrackingSection extends ConsumerWidget {
-  final String actionId;
-  final DateTime? scheduledStart;
-
-  const _TimeTrackingSection({
-    required this.actionId,
-    required this.scheduledStart,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // Shown only once the action has been started at least once.
-    final occurrences =
-        ref.watch(occurrencesOfProvider(actionId)).value ??
-        const <ActionOccurrence>[];
-    if (occurrences.isEmpty) return const SizedBox.shrink();
-
-    final latest = occurrences.first;
-    final String text;
-    if (latest.finishedAt == null) {
-      final start = scheduledStart;
-      text = start != null
-          ? 'Currently running — started ${_fmt(start)}'
-          : 'Currently running';
-    } else {
-      final started = dateTimeFromDb(latest.startedAt);
-      final finished = dateTimeFromDb(latest.finishedAt);
-      text = (started != null && finished != null)
-          ? 'Last: ${_fmt(started)} → ${_fmt(finished)}'
-          : '';
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Time tracking', style: Theme.of(context).textTheme.titleSmall),
-          if (text.isNotEmpty) Text(text),
-        ],
-      ),
-    );
-  }
-
-  String _fmt(DateTime utc) {
-    final d = utc.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
   }
 }
 

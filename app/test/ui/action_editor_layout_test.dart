@@ -131,8 +131,8 @@ void main() {
     await teardown(tester);
   });
 
-  testWidgets('Time tracking is hidden until the action has been started; '
-      'a button keeps the dialog open and reloads the schedule', (
+  testWidgets('there is no Time tracking panel; Start keeps the dialog open '
+      'and reloads the schedule (the schedule is the only source of truth)', (
     tester,
   ) async {
     setup(tester);
@@ -140,9 +140,6 @@ void main() {
     await open(tester, existing: await rowOf(tester, id));
 
     expect(find.text('Time tracking'), findsNothing);
-    expect(find.text('Not started yet.'), findsNothing);
-    expect(find.text('Done'), findsNothing);
-    expect(find.text('Open'), findsNothing);
     final before = find.textContaining('Start: ');
     expect(before, findsOneWidget);
     expect(find.textContaining('Not set'), findsNWidgets(2));
@@ -155,8 +152,8 @@ void main() {
     await settle(tester);
 
     expect(find.byType(ActionEditorDialog), findsOneWidget);
-    expect(find.text('Time tracking'), findsOneWidget);
-    expect(find.textContaining('Currently running'), findsOneWidget);
+    expect(find.text('Time tracking'), findsNothing);
+    expect(find.textContaining('Currently running'), findsNothing);
     expect(find.textContaining('Not set'), findsNothing); // schedule reloaded
     expect(find.widgetWithText(TextFormField, 'Walk typed'), findsOneWidget);
     await tester.pump(const Duration(seconds: 6)); // the Undo snackbar

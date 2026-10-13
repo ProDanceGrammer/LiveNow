@@ -676,22 +676,27 @@ class BudgetService {
     return row?.read<double>('quantity');
   }
 
-  /// Guess for quick add: the running action that started most recently,
-  /// else the most recently finished one, else null.
-  Future<String?> suggestedActionId() async {
+  /// Guess for quick add, from the schedule alone: the timed action running
+  /// now (`start <= now < end`) that started most recently, else the one that
+  /// ended most recently, else null.
+  Future<String?> suggestedActionId({DateTime? nowUtc}) async {
+    final now = dateTimeToDb(nowUtc ?? DateTime.now().toUtc())!;
     final running = await db
         .customSelect(
-          'SELECT o.action_id AS id FROM action_occurrences o '
-          'WHERE o.finished_at IS NULL AND o.started_at IS NOT NULL '
-          'ORDER BY o.started_at DESC LIMIT 1',
+          'SELECT a.id AS id FROM actions a '
+          'WHERE a.is_all_day = 0 AND a.start_at IS NOT NULL '
+          'AND a.end_at IS NOT NULL AND a.start_at <= ? AND a.end_at > ? '
+          'ORDER BY a.start_at DESC LIMIT 1',
+          variables: [Variable.withString(now), Variable.withString(now)],
         )
         .getSingleOrNull();
     if (running != null) return running.read<String>('id');
     final finished = await db
         .customSelect(
-          "SELECT o.action_id AS id FROM action_occurrences o "
-          "WHERE o.outcome = 'done' AND o.finished_at IS NOT NULL "
-          'ORDER BY o.finished_at DESC LIMIT 1',
+          'SELECT a.id AS id FROM actions a '
+          'WHERE a.is_all_day = 0 AND a.end_at IS NOT NULL AND a.end_at <= ? '
+          'ORDER BY a.end_at DESC LIMIT 1',
+          variables: [Variable.withString(now)],
         )
         .getSingleOrNull();
     return finished?.read<String>('id');
