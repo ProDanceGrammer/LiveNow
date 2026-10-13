@@ -103,7 +103,7 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(actionsTable, actionsTable.notesText);
       }
       if (from < 9) {
-        await _backfillNotesText();
+        await backfillNotesText();
       }
       if (from < 10) {
         // Budget: accounts, categories, transactions (linked to actions) and
@@ -144,9 +144,9 @@ class AppDatabase extends _$AppDatabase {
     },
   );
 
-  /// One-off (schema v9): derives `notes_text` from every existing `notes`
-  /// value, in id-ordered batches so memory stays flat with thousands of rows.
-  Future<void> _backfillNotesText() async {
+  /// Derives `notes_text` from every existing `notes` value (schema v9's
+  /// one-off, and again after a backup import), in id-ordered batches so memory stays flat with thousands of rows.
+  Future<void> backfillNotesText() async {
     const batchSize = 200;
     var lastId = '';
     while (true) {

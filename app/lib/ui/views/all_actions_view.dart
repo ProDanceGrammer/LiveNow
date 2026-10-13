@@ -38,7 +38,8 @@ final filteredAllActionsProvider =
 
       Map<String, Set<String>>? metricIds;
       Map<String, String>? metricNames;
-      if (useDirectionNames || filters.metricIds.isNotEmpty) {
+      if (useDirectionNames ||
+          filters.effectiveDirectionsMode != LinkMode.any) {
         final m = ref.watch(allActionsMetricIdsProvider);
         if (m.hasError) return AsyncValue.error(m.error!, m.stackTrace!);
         if (!m.hasValue) return const AsyncValue.loading();

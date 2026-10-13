@@ -5,7 +5,7 @@ import '../../domain/date_range_filter.dart';
 String _formatDay(DateTime utc) {
   final d = DateRangeFilter.dayOf(utc);
   String p(int n) => n.toString().padLeft(2, '0');
-  return '${d.year}-${p(d.month)}-${p(d.day)}';
+  return '${p(d.day)}-${p(d.month)}-${d.year}';
 }
 
 /// "From" and "Until" date buttons (either may stay empty) for a

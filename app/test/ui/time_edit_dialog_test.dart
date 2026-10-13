@@ -299,9 +299,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Scheduled start: 2026-10-02 14:30'), findsOneWidget);
+    expect(find.text('Scheduled start: 02-10-2026 14:30'), findsOneWidget);
     expect(find.text('Pick'), findsNothing);
-    await tester.tap(find.text('Scheduled start: 2026-10-02 14:30'));
+    await tester.tap(find.text('Scheduled start: 02-10-2026 14:30'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byKey(const ValueKey('time-end-minute')), findsNothing);
@@ -310,36 +310,43 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(got, DateTime.utc(2026, 10, 2, 11, 31));
-    expect(find.text('Scheduled start: 2026-10-02 14:31'), findsOneWidget);
+    expect(find.text('Scheduled start: 02-10-2026 14:31'), findsOneWidget);
   });
 
   test('time_format converts between UTC and Istanbul wall time', () {
     expect(wallFromUtc(start), DateTime.utc(2026, 10, 2, 14, 30));
     expect(utcFromWall(DateTime.utc(2026, 10, 2, 14, 30)), start);
-    expect(formatUtcDateTime(start), '2026-10-02 14:30');
-    expect(formatUtcDateTime(start, includeTime: false), '2026-10-02');
+    expect(formatUtcDateTime(start), '02-10-2026 14:30');
+    expect(formatUtcDateTime(start, includeTime: false), '02-10-2026');
     expect(formatTimeRange(start, end, nowUtc: start), '14:30 → 15:30');
     expect(
       formatTimeRange(start, end, nowUtc: DateTime.utc(2026, 10, 5)),
-      '2026-10-02 14:30 → 2026-10-02 15:30',
+      '02-10-2026 14:30 → 15:30', // the same date is printed once
+    );
+    // Another day: both dates; today's start stays a bare time.
+    expect(
+      formatTimeRange(start, DateTime.utc(2026, 10, 3, 23), nowUtc: start),
+      '14:30 → 04-10-2026 02:00',
+    );
+    expect(
+      formatTimeRange(start, DateTime.utc(2026, 10, 3, 23),
+          nowUtc: DateTime.utc(2026, 10, 5)),
+      '02-10-2026 14:30 → 04-10-2026 02:00',
     );
   });
 
-  test('formatShortSchedule: compact, year only when not current', () {
-    final now = DateTime.utc(2026, 10, 3, 9);
+  test('formatShortSchedule: day first, same date printed once', () {
     String? f(DateTime? a, DateTime? b, {bool allDay = false}) =>
-        formatShortSchedule(a, b, isAllDay: allDay, nowUtc: now);
+        formatShortSchedule(a, b, isAllDay: allDay);
     final s = DateTime.utc(2026, 10, 3, 10, 0); // 13:00
     final e = DateTime.utc(2026, 10, 3, 11, 40); // 14:40
-    expect(f(s, e), '3 Oct 13:00-14:40');
+    expect(f(s, e), '03-10-2026 13:00 → 14:40');
+    expect(f(s, null), '03-10-2026 13:00');
+    expect(f(s, e, allDay: true), '03-10-2026');
     expect(
-      f(DateTime.utc(2027, 10, 3, 10), DateTime.utc(2027, 10, 3, 11, 40)),
-      "3 Oct 27' 13:00-14:40",
+      f(s, DateTime.utc(2026, 10, 4, 6)),
+      '03-10-2026 13:00 → 04-10-2026 09:00',
     );
-    expect(f(s, null), '3 Oct 13:00');
-    expect(f(s, e, allDay: true), '3 Oct');
-    expect(f(DateTime.utc(2027, 1, 5), null, allDay: true), "5 Jan 27'");
-    expect(f(s, DateTime.utc(2026, 10, 4, 6)), '3 Oct 13:00-4 Oct 09:00');
     expect(f(null, e), isNull);
   });
 }

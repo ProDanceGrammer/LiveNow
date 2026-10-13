@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../widgets/action_editor.dart';
 import '../../data/reminders/reminder_scheduler.dart';
+import '../backup_providers.dart';
 import '../calendar_fullscreen.dart';
 import '../current_selection.dart';
 import '../layout.dart';
@@ -59,6 +60,12 @@ class _HomeShellState extends ConsumerState<HomeShell>
       Future<void>.microtask(() => startSyncForRole(ref));
       // Start/end notifications (iOS, Windows): no polling, see reminders.dart.
       Future<void>.microtask(() => _reminders = startReminders(ref));
+      // The 5-hourly backup file (desktop, only when switched on in Settings).
+      if (autoBackupSupported) {
+        Future<void>.microtask(
+          () => ref.read(autoBackupSchedulerProvider).reschedule(),
+        );
+      }
       WidgetsBinding.instance.addObserver(this);
     }
   }
@@ -66,7 +73,12 @@ class _HomeShellState extends ConsumerState<HomeShell>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Back in the foreground: re-plan from what is already loaded.
-    if (state == AppLifecycleState.resumed) _reminders?.resume();
+    if (state == AppLifecycleState.resumed) {
+      _reminders?.resume();
+      if (autoBackupSupported) {
+        ref.read(autoBackupSchedulerProvider).reschedule();
+      }
+    }
   }
 
   @override

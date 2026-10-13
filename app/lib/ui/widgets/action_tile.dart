@@ -35,7 +35,6 @@ class ActionTile extends ConsumerWidget {
 
     // Parts are either plain strings or the clickable time label.
     final subtitleParts = <Object>[
-      if (action.isDoneBefore) 'Done',
       if (action.startAt != null)
         ActionTimeLabel(
           key: const ValueKey('tileTimeLabel'),
@@ -98,8 +97,9 @@ class ActionTile extends ConsumerWidget {
   }
 }
 
+/// The schedule in the card's style (`20-12-2026 12:00 → 14:00`).
 String formatScheduledWhen(ActionListItem a) =>
-    formatUtcDateTime(a.startAt!, includeTime: !a.isAllDay);
+    formatTimeRange(a.startAt, a.endAt, isAllDay: a.isAllDay)!;
 
 /// The computed, human-readable duration of [a] (see `computeActionDuration`).
 String formatActionDuration(ActionListItem a) => formatDuration(

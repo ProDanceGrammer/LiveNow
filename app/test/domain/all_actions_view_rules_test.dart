@@ -145,6 +145,21 @@ void main() {
       run(const AllActionsFilters(metricIds: {'m1', 'm2'}, allMetrics: true)),
       ['2'],
     );
+    // Directions mode: none = no linked direction at all, has = at least one.
+    expect(
+      run(const AllActionsFilters(directionsMode: LinkMode.none)),
+      ['3'],
+    );
+    expect(
+      run(const AllActionsFilters(directionsMode: LinkMode.has)),
+      ['1', '2'],
+    );
+    expect(const AllActionsFilters(directionsMode: LinkMode.none).active, isTrue);
+    expect(const AllActionsFilters().active, isFalse);
+    expect(
+      run(const AllActionsFilters(directionsMode: LinkMode.linkedTo)),
+      ['1', '2', '3'], // nothing chosen yet: does not filter
+    );
     expect(
       run(const AllActionsFilters(previous: LinkFilter(mode: LinkMode.none))),
       ['1'],

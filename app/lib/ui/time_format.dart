@@ -47,15 +47,15 @@ DateTime utcFromWall(DateTime wall) {
   ).toUtc();
 }
 
-/// `2026-10-02`.
+/// `02-10-2026` (day first).
 String formatDate(DateTime wall) =>
-    '${wall.year.toString().padLeft(4, '0')}-${twoDigits(wall.month)}-${twoDigits(wall.day)}';
+    '${twoDigits(wall.day)}-${twoDigits(wall.month)}-${wall.year.toString().padLeft(4, '0')}';
 
 /// `14:05`.
 String formatTime(DateTime wall) =>
     '${twoDigits(wall.hour)}:${twoDigits(wall.minute)}';
 
-/// `2026-10-02 14:05`, or just the date.
+/// `02-10-2026 14:05`, or just the date.
 String formatDateTime(DateTime wall, {bool includeTime = true}) =>
     includeTime ? '${formatDate(wall)} ${formatTime(wall)}' : formatDate(wall);
 
@@ -68,8 +68,9 @@ String formatUtcDateTime(DateTime utc, {bool includeTime = true}) =>
 bool sameWallDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
 
-/// "start -> end" for a card: each side shows its date only when it is not
-/// today, so a range entirely in the past never renders without a date.
+/// "start -> end" for a card: a side shows its date only when it is not today,
+/// and an end on the same date as the start shows its time only
+/// (`20-12-2026 12:00 → 14:00`), so a date is never printed twice.
 /// [nowUtc] is injectable for tests. Null when [startUtc] is null.
 /// All-day ranges show dates only.
 String? formatTimeRange(
@@ -80,16 +81,19 @@ String? formatTimeRange(
 }) {
   if (startUtc == null) return null;
   final today = wallFromUtc(nowUtc ?? DateTime.now().toUtc());
-  String side(DateTime utc) {
-    final w = wallFromUtc(utc);
+  String side(DateTime w) {
     if (isAllDay) return formatDate(w);
     return sameWallDay(w, today)
         ? formatTime(w)
         : '${formatDate(w)} ${formatTime(w)}';
   }
 
-  final s = side(startUtc);
-  return endUtc == null ? s : '$s → ${side(endUtc)}';
+  final s = wallFromUtc(startUtc);
+  if (endUtc == null) return side(s);
+  final e = wallFromUtc(endUtc);
+  // Same date as the start: the end needs only its time.
+  final endText = !isAllDay && sameWallDay(s, e) ? formatTime(e) : side(e);
+  return '${side(s)} → $endText';
 }
 
 const _monthAbbr = [
@@ -117,10 +121,9 @@ String? formatStartRange(
   return '${_shortDate(a, nowUtc)} - ${_shortDate(b, nowUtc)}';
 }
 
-/// Compact schedule for list rows: `3 Oct 13:00-14:40`; the year follows the
-/// month as `'YY` only when it is not the current year (`3 Oct 27' 13:00-14:40`).
-/// All-day = the date only; no end = the start time only; an end on another
-/// day appends its date. Null when [startUtc] is null.
+/// Compact schedule for list rows: `03-10-2026 13:00 → 14:40`. All-day = the
+/// date only; no end = the start only; an end on another day appends its date
+/// (`03-10-2026 13:00 → 04-10-2026 09:00`). Null when [startUtc] is null.
 String? formatShortSchedule(
   DateTime? startUtc,
   DateTime? endUtc, {
@@ -128,14 +131,12 @@ String? formatShortSchedule(
   DateTime? nowUtc,
 }) {
   if (startUtc == null) return null;
-  String date(DateTime w) => _shortDate(w, nowUtc);
-
   final s = wallFromUtc(startUtc);
-  if (isAllDay) return date(s);
-  final head = '${date(s)} ${formatTime(s)}';
+  if (isAllDay) return formatDate(s);
+  final head = formatDateTime(s);
   if (endUtc == null) return head;
   final e = wallFromUtc(endUtc);
   return sameWallDay(s, e)
-      ? '$head-${formatTime(e)}'
-      : '$head-${date(e)} ${formatTime(e)}';
+      ? '$head → ${formatTime(e)}'
+      : '$head → ${formatDateTime(e)}';
 }

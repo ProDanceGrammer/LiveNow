@@ -235,11 +235,7 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
   }
 
   String _fmtWall(DateTime w) {
-    final d =
-        '${w.year.toString().padLeft(4, '0')}-${twoDigits(w.month)}-${twoDigits(w.day)}';
-    return widget.isAllDay
-        ? d
-        : '$d ${twoDigits(w.hour)}:${twoDigits(w.minute)}';
+    return formatDateTime(w, includeTime: !widget.isAllDay);
   }
 
   /// Phone: no keyboard segments - a Start/End switch and one Cupertino wheel

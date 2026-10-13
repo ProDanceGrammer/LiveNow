@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/reminders/local_notifications_sink.dart';
+import '../../data/backup/auto_backup.dart' show AutoBackupOutcome;
+import '../backup_providers.dart';
 import '../data_imports.dart';
 import '../reminders.dart';
 import '../notch_side.dart';
@@ -247,6 +249,42 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              title('Backup'),
+              _Panel(
+                child: Column(
+                  children: [
+                    tile(
+                      'settings-export-backup',
+                      Icons.archive_outlined,
+                      'Export everything (.livenow)',
+                      exportBackupCompact,
+                      subtitle: 'One compact file with all your data',
+                    ),
+                    tile(
+                      'settings-export-backup-csv',
+                      Icons.table_chart_outlined,
+                      'Export as CSV files',
+                      exportBackupCsv,
+                      subtitle: 'One file per table',
+                    ),
+                    tile(
+                      'settings-export-backup-db',
+                      Icons.storage_outlined,
+                      'Export a database copy',
+                      exportBackupSqlite,
+                      subtitle: 'A SQLite file',
+                    ),
+                    tile(
+                      'settings-import-backup',
+                      Icons.restore_page_outlined,
+                      'Import a backup',
+                      importBackup,
+                      subtitle: 'Merge into, or replace, the current data',
+                    ),
+                    if (autoBackupVisible) const _AutoBackupBlock(),
+                  ],
+                ),
+              ),
               title('Import'),
               _Panel(
                 child: Column(
@@ -408,4 +446,88 @@ class _TimeTile extends StatelessWidget {
       if (picked != null) onPick(picked.hour * 60 + picked.minute);
     },
   );
+}
+
+/// "Back up every 5 hours" into a folder of your choice (desktop): the switch,
+/// the folder, "Back up now" and the result of the last run.
+class _AutoBackupBlock extends ConsumerWidget {
+  const _AutoBackupBlock();
+
+  static String _ago(DateTime t) {
+    final l = t.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(l.day)}-${two(l.month)}-${l.year} ${two(l.hour)}:${two(l.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(autoBackupSettingsProvider);
+    final notifier = ref.read(autoBackupSettingsProvider.notifier);
+
+    Future<bool> chooseFolder() async {
+      final dir = await ref.read(backupFilesProvider).pickFolder();
+      if (dir == null) return false;
+      await notifier.setFolder(dir);
+      return true;
+    }
+
+    final status = s.lastError != null
+        ? 'Last backup failed: ${s.lastError}'
+        : s.lastRunAt == null
+        ? 'No backup yet'
+        : 'Last check ${_ago(s.lastRunAt!)}'
+              '${s.lastFile == null ? '' : '; newest file ${s.lastFile!.split(RegExp(r'[\\/]')).last}'}';
+
+    return Column(
+      children: [
+        const Divider(height: 1),
+        SwitchListTile(
+          key: const ValueKey('settings-auto-backup'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          secondary: const Icon(Icons.schedule),
+          title: const Text('Back up every 5 hours'),
+          subtitle: const Text(
+            'Keeps the newest 5 files in your folder; skips a run when '
+            'nothing changed. Restore with "Import a backup".',
+          ),
+          value: s.enabled,
+          onChanged: (on) async {
+            if (on && s.folder == null && !await chooseFolder()) return;
+            await notifier.setEnabled(on);
+          },
+        ),
+        ListTile(
+          key: const ValueKey('settings-auto-backup-folder'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          leading: const Icon(Icons.folder_outlined),
+          title: const Text('Backup folder'),
+          subtitle: Text(s.folder ?? 'Choose a folder'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: chooseFolder,
+        ),
+        ListTile(
+          key: const ValueKey('settings-auto-backup-now'),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+          leading: const Icon(Icons.backup_outlined),
+          title: const Text('Back up now'),
+          subtitle: Text(status),
+          onTap: s.folder == null
+              ? null
+              : () async {
+                  final r = await notifier.backupNow();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        r.outcome == AutoBackupOutcome.written
+                            ? 'Backup saved: ${r.path}'
+                            : 'Backup failed: ${r.error ?? r.outcome.name}',
+                      ),
+                    ),
+                  );
+                },
+        ),
+      ],
+    );
+  }
 }

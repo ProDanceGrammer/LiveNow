@@ -98,6 +98,10 @@ class AllActionsFilters {
 
   /// true = must have ALL chosen directions, false = ANY of them.
   final bool allMetrics;
+
+  /// Growth directions: any, has some, has none, or linked to the chosen
+  /// [metricIds] (a non-empty [metricIds] with mode `any` counts as that).
+  final LinkMode directionsMode;
   final LinkFilter previous;
   final LinkFilter next;
   final int? minMinutes;
@@ -114,6 +118,7 @@ class AllActionsFilters {
     this.nameText = '',
     this.metricIds = const {},
     this.allMetrics = false,
+    this.directionsMode = LinkMode.any,
     this.previous = const LinkFilter(),
     this.next = const LinkFilter(),
     this.minMinutes,
@@ -125,9 +130,14 @@ class AllActionsFilters {
 
   bool get usesUrgency => minUrgency != null || maxUrgency != null;
 
+  LinkMode get effectiveDirectionsMode =>
+      directionsMode == LinkMode.any && metricIds.isNotEmpty
+      ? LinkMode.linkedTo
+      : directionsMode;
+
   bool get active =>
       nameText.trim().isNotEmpty ||
-      metricIds.isNotEmpty ||
+      effectiveDirectionsMode != LinkMode.any ||
       previous.active ||
       next.active ||
       minMinutes != null ||
@@ -140,6 +150,7 @@ class AllActionsFilters {
     String? nameText,
     Set<String>? metricIds,
     bool? allMetrics,
+    LinkMode? directionsMode,
     LinkFilter? previous,
     LinkFilter? next,
     int? minMinutes,
@@ -155,6 +166,7 @@ class AllActionsFilters {
     nameText: nameText ?? this.nameText,
     metricIds: metricIds ?? this.metricIds,
     allMetrics: allMetrics ?? this.allMetrics,
+    directionsMode: directionsMode ?? this.directionsMode,
     previous: previous ?? this.previous,
     next: next ?? this.next,
     minMinutes: clearMinMinutes ? null : (minMinutes ?? this.minMinutes),
@@ -278,12 +290,21 @@ List<ActionListItem> arrangeActions({
     if (nameFilter.isNotEmpty && !a.name.toLowerCase().contains(nameFilter)) {
       return false;
     }
-    if (filters.metricIds.isNotEmpty && links.metricIdsByAction != null) {
+    if (links.metricIdsByAction != null) {
       final have = links.metricIdsByAction![a.id] ?? const <String>{};
-      final ok = filters.allMetrics
-          ? filters.metricIds.every(have.contains)
-          : filters.metricIds.any(have.contains);
-      if (!ok) return false;
+      switch (filters.effectiveDirectionsMode) {
+        case LinkMode.any:
+          break;
+        case LinkMode.has:
+          if (have.isEmpty) return false;
+        case LinkMode.none:
+          if (have.isNotEmpty) return false;
+        case LinkMode.linkedTo:
+          final ok = filters.allMetrics
+              ? filters.metricIds.every(have.contains)
+              : filters.metricIds.any(have.contains);
+          if (filters.metricIds.isNotEmpty && !ok) return false;
+      }
     }
     if (filters.previous.active &&
         links.predecessors != null &&

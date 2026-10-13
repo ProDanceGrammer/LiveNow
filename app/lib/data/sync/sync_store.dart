@@ -687,6 +687,32 @@ class SyncStore {
 
   // ---- repairs ---------------------------------------------------------------
 
+  /// Keeps the data valid after a bulk write that did NOT come from a sync (a
+  /// backup import, written with the triggers ON): dangling references are
+  /// cleared or their rows deleted, a budget category with sub-categories AND
+  /// transactions loses its newest link, and cycles are broken. Call it inside
+  /// the importing transaction, before it commits (foreign keys are deferred).
+  /// The fixes are stamped local edits, like the merge's own repairs.
+  Future<List<SyncRepair>> repairAfterBulkWrite(Set<String> touched) async {
+    final repairs = <SyncRepair>[];
+    // The repair helpers flip the switch around each fix; start from "silent"
+    // as the merge does, and hand the triggers back switched on.
+    await _setApplying(true);
+    try {
+      await _repairForeignKeys(repairs);
+      if (touched.contains('budget_categories') ||
+          touched.contains('budget_transactions')) {
+        await _repairBudgetLeaves(repairs);
+      }
+      for (final g in _graphs) {
+        if (touched.contains(g.table)) await _repairCycles(g, repairs);
+      }
+    } finally {
+      await _setApplying(false);
+    }
+    return repairs;
+  }
+
   /// References to rows that do not exist (the parent was deleted on another
   /// device): a nullable reference is cleared, a row that cannot exist without
   /// its parent is deleted. Both are stamped local edits so they travel: a

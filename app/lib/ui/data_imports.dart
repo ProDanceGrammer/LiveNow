@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/backup/backup_import_service.dart';
+import '../data/backup/backup_sources.dart';
+import '../data/backup/backup_writer.dart';
+import '../data/sync/sync_backup.dart' show defaultBackupDirectory;
 import '../domain/budget_csv.dart';
+import '../domain/full_backup.dart';
 import '../domain/budget_icons.dart';
 import '../domain/budget_io_service.dart';
 import '../domain/notion_icons.dart';
+import 'backup_files.dart' show PickedBackupFile;
+import 'backup_providers.dart';
 import 'budget_files.dart';
 import 'dialog_stack.dart';
 import 'providers.dart';
@@ -266,4 +273,161 @@ Future<void> exportBudgetCsv(BuildContext context, WidgetRef ref) async {
   final files = await ref.read(budgetIoServiceProvider).exportCsvs();
   final dir = await ref.read(budgetFilesProvider).saveFolder(files);
   if (dir != null) showInfoToast(overlay, '3 CSV files saved to $dir');
+}
+
+// ---- full backup (every table) ----------------------------------------------
+
+Future<void> exportBackupCompact(BuildContext context, WidgetRef ref) async {
+  final overlay = rootOverlayOf(context);
+  final writer = BackupWriter(ref.read(databaseProvider));
+  final path = await ref
+      .read(backupFilesProvider)
+      .exportFile('livenow-backup-${_today()}.$kBackupExtension', writer.writeCompact);
+  if (path != null) showInfoToast(overlay, 'Backup saved: $path');
+}
+
+Future<void> exportBackupCsv(BuildContext context, WidgetRef ref) async {
+  final overlay = rootOverlayOf(context);
+  final writer = BackupWriter(ref.read(databaseProvider));
+  final dir = await ref
+      .read(backupFilesProvider)
+      .exportFolder('livenow-csv-${_today()}', writer.writeCsvFolder);
+  if (dir != null) showInfoToast(overlay, 'CSV files saved to $dir');
+}
+
+Future<void> exportBackupSqlite(BuildContext context, WidgetRef ref) async {
+  final overlay = rootOverlayOf(context);
+  final writer = BackupWriter(ref.read(databaseProvider));
+  final path = await ref
+      .read(backupFilesProvider)
+      .exportFile('livenow-${_today()}.db', writer.writeSqliteCopy);
+  if (path != null) showInfoToast(overlay, 'Database copy saved: $path');
+}
+
+/// The chosen import mode, or null when cancelled.
+Future<BackupImportMode?> _askImportMode(BuildContext context) =>
+    showStackedDialog<BackupImportMode>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import this backup?'),
+        content: const Text(
+          'Merge adds what is missing and updates rows that are newer in the '
+          'file; nothing is deleted (rows you deleted since may come back).\n\n'
+          'Replace everything makes the app match the file exactly. A copy of '
+          'the current data is saved first.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            key: const ValueKey('backup-import-replace'),
+            onPressed: () => Navigator.of(ctx).pop(BackupImportMode.replace),
+            child: const Text('Replace everything'),
+          ),
+          FilledButton(
+            key: const ValueKey('backup-import-merge'),
+            onPressed: () => Navigator.of(ctx).pop(BackupImportMode.merge),
+            child: const Text('Merge'),
+          ),
+        ],
+      ),
+    );
+
+/// A .livenow file, a SQLite copy, or the CSV files of a backup (choose them
+/// together); then Merge or Replace.
+Future<void> importBackup(BuildContext context, WidgetRef ref) async {
+  final overlay = rootOverlayOf(context);
+  final service = ref.read(backupImportServiceProvider);
+  final picked = await ref.read(backupFilesProvider).pickImportFiles();
+  if (picked.isEmpty || !context.mounted) return;
+
+  String ext(PickedBackupFile f) => f.name.toLowerCase().split('.').last;
+  final compact = [for (final f in picked) if (ext(f) == kBackupExtension) f];
+  final dbs = [
+    for (final f in picked)
+      if (ext(f) == 'db' || ext(f) == 'sqlite') f,
+  ];
+  final csvs = [for (final f in picked) if (ext(f) == 'csv') f];
+
+  BackupSource? source;
+  if (compact.length == 1 && picked.length == 1) {
+    source = CompactBackupSource(compact.single.file);
+  } else if (dbs.length == 1 && picked.length == 1) {
+    source = SqliteBackupSource(dbs.single.file);
+  } else if (csvs.isNotEmpty && csvs.length == picked.length) {
+    final csv = CsvFolderBackupSource({for (final f in csvs) f.name: f.file});
+    if (csv.hasTables) source = csv;
+  }
+  if (source == null) {
+    showInfoToast(
+      overlay,
+      'Choose one .livenow file, one database copy, or the CSV files of a backup',
+    );
+    return;
+  }
+
+  final mode = await _askImportMode(context);
+  if (mode == null || !context.mounted) return;
+
+  showInfoToast(overlay, 'Importing...');
+  try {
+    final summary = await service.import(
+      source,
+      mode: mode,
+      safetyBackupDir: mode == BackupImportMode.replace
+          ? await defaultBackupDirectory()
+          : null,
+    );
+    if (!context.mounted) return;
+    await showStackedDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Backup imported'),
+        content: SizedBox(
+          width: 360,
+          child: SingleChildScrollView(
+            child: Text(backupSummaryText(summary)),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            key: const ValueKey('backup-import-done'),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  } on BackupFormatException catch (e) {
+    showInfoToast(overlay, 'Import failed: ${e.message}. Nothing was changed.');
+  } catch (e) {
+    showInfoToast(overlay, 'Import failed: $e. Nothing was changed.');
+  }
+}
+
+/// The import result dialog's text.
+@visibleForTesting
+String backupSummaryText(BackupImportSummary summary) {
+  final b = StringBuffer(
+    '${summary.written} rows added or updated, '
+    '${summary.kept} already up to date.',
+  );
+  if (summary.repairs > 0) {
+    b.write('\n${summary.repairs} broken references were fixed.');
+  }
+  if (summary.safetyCopy != null) {
+    b.write('\nPrevious data saved as ${summary.safetyCopy}');
+  }
+  b.write('\n');
+  for (final e in summary.tables.entries) {
+    if (e.value.written + e.value.kept > 0) {
+      b.write(
+        '\n${e.key}: ${e.value.written} new/updated, '
+        '${e.value.kept} unchanged',
+      );
+    }
+  }
+  return b.toString();
 }

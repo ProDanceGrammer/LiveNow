@@ -365,14 +365,57 @@ class _FilterSectionState extends ConsumerState<_FilterSection> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: MetricPicker(
-                label: 'Growth directions',
-                selectedIds: filters.metricIds,
-                onChanged: (ids) => _set(_f.copyWith(metricIds: ids)),
+            SizedBox(
+              key: ValueKey(filters.effectiveDirectionsMode),
+              width: 170,
+              child: DropdownButtonFormField<LinkMode>(
+                key: const ValueKey('filterDirections-mode'),
+                initialValue: filters.effectiveDirectionsMode,
+                isDense: true,
+                isExpanded: true,
+                dropdownColor: context.glass.fillDialog,
+                borderRadius: BorderRadius.circular(14),
+                decoration: const InputDecoration(
+                  labelText: 'Growth directions',
+                  isDense: true,
+                ),
+                items: [
+                  for (final m in LinkMode.values)
+                    DropdownMenuItem(
+                      value: m,
+                      child: Text(
+                        m == LinkMode.linkedTo
+                            ? 'Linked to…'
+                            : _LinkFilterField._modeLabel(m),
+                      ),
+                    ),
+                ],
+                // Leaving "Linked to…" drops the chosen directions, so they
+                // can never filter silently behind another mode.
+                onChanged: (m) {
+                  if (m == null) return;
+                  _set(
+                    _f.copyWith(
+                      directionsMode: m,
+                      metricIds: m == LinkMode.linkedTo ? null : const {},
+                    ),
+                  );
+                },
               ),
             ),
-            if (filters.metricIds.isNotEmpty)
+            const SizedBox(width: 8),
+            if (filters.effectiveDirectionsMode == LinkMode.linkedTo)
+              Expanded(
+                child: MetricPicker(
+                  label: 'Directions',
+                  selectedIds: filters.metricIds,
+                  onChanged: (ids) => _set(_f.copyWith(metricIds: ids)),
+                ),
+              )
+            else
+              const Spacer(),
+            if (filters.effectiveDirectionsMode == LinkMode.linkedTo &&
+                filters.metricIds.isNotEmpty)
               SegmentedButton<bool>(
                 key: const ValueKey('filterMetricMode'),
                 showSelectedIcon: false,

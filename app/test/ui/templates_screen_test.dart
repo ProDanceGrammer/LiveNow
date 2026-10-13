@@ -27,7 +27,11 @@ void main() {
 
   late AppDatabase db;
 
-  Future<void> pump(WidgetTester tester, {String? csv}) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    String? csv,
+    Future<void> Function(AppDatabase db)? seed,
+  }) async {
     // Wide window: below 900 px the app switches to the phone layout, which
     // hides the Import CSV button (Settings has it there).
     tester.view.physicalSize = const Size(1400, 900);
@@ -35,6 +39,8 @@ void main() {
     addTearDown(tester.view.reset);
     db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
+    // Seed BEFORE mounting: writing while drift streams are live deadlocks.
+    if (seed != null) await tester.runAsync(() => seed(db));
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -74,6 +80,59 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('9 h'), findsOneWidget); // tile shows the duration
+    await settleAndUnmount(tester);
+  });
+
+  testWidgets('the sort panel reorders templates by manual time', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      seed: (db) async {
+        for (final (n, m) in [('Alpha', 90), ('Beta', 15), ('Gamma', 45)]) {
+          await db
+              .into(db.actionTemplatesTable)
+              .insert(
+                ActionTemplatesTableCompanion.insert(
+                  id: newId(),
+                  name: n,
+                  payload: jsonEncode({'name': n, 'estimatedMinutes': m}),
+                ),
+              );
+        }
+      },
+    );
+    double top(String t) => tester.getTopLeft(find.text(t)).dy;
+    // Default order = name A-Z.
+    expect(top('Alpha') < top('Beta') && top('Beta') < top('Gamma'), isTrue);
+
+    await tester.tap(find.byKey(const ValueKey('templates-options-toggle')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('tpl-sort-chip-name')));
+    await tester.pump(); // Name descending
+    expect(top('Gamma') < top('Beta') && top('Beta') < top('Alpha'), isTrue);
+
+    await tester.tap(find.byKey(const ValueKey('tpl-sort-chip-name')));
+    await tester.pump(); // back to ascending, then manual time first
+    await tester.tap(find.byKey(const ValueKey('tpl-sort-add')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Manual time').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    // Name is still the FIRST level, so the order is unchanged; drop it.
+    await tester.tap(find.descendant(
+      of: find.byKey(const ValueKey('tpl-sort-chip-name')),
+      matching: find.byWidgetPredicate(
+        (w) =>
+            w is Icon &&
+            (w.icon == Icons.cancel ||
+                w.icon == Icons.clear ||
+                w.icon == Icons.close),
+      ),
+    ));
+    await tester.pump();
+    expect(top('Beta') < top('Gamma') && top('Gamma') < top('Alpha'), isTrue);
     await settleAndUnmount(tester);
   });
 

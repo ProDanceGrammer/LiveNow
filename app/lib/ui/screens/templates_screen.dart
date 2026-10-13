@@ -10,16 +10,20 @@ import '../../domain/action_urgency.dart';
 import '../../domain/growth_rules.dart';
 import '../../domain/template_import_service.dart';
 import '../../domain/template_search.dart';
+import '../../domain/template_sort.dart';
 import '../data_imports.dart';
 import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
 import '../open_entity.dart';
+import '../urgency_colors.dart';
 import '../widgets/action_tile.dart' show formatUrgency;
 import '../widgets/app_toast.dart';
 import '../widgets/param_icons.dart';
 import '../providers.dart';
 import '../widgets/glass.dart';
+import '../widgets/glass_icon_tile.dart';
+import '../widgets/sort_chips.dart';
 import '../widgets/metric_picker.dart';
 import '../widgets/notes_document.dart';
 import '../widgets/notes_editor.dart';
@@ -51,6 +55,10 @@ class TemplatesScreen extends ConsumerStatefulWidget {
 
 class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
   String _query = '';
+  bool _showOptions = false;
+  List<TemplateSortKey> _sort = const [
+    TemplateSortKey(TemplateSortField.name),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +82,13 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                     onChanged: (v) => setState(() => _query = v.toLowerCase()),
                   ),
                 ),
+                IconButton(
+                  key: const ValueKey('templates-options-toggle'),
+                  tooltip: 'Sort',
+                  isSelected: _showOptions,
+                  icon: const Icon(Icons.tune),
+                  onPressed: () => setState(() => _showOptions = !_showOptions),
+                ),
                 // On a phone importing lives in Settings.
                 if (!usePhoneLayout(context)) ...[
                   const SizedBox(width: 12),
@@ -87,6 +102,11 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
               ],
             ),
           ),
+          if (_showOptions)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: _sortRow(),
+            ),
           Expanded(
             child: templatesAsync.when(
               data: (all) {
@@ -103,7 +123,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                     ref.watch(templateAveragesProvider).value ??
                     const <String, Duration>{};
                 final stats = ref.watch(growthSnapshotProvider).value?.stats;
-                final templates = _query.isEmpty
+                final filtered = _query.isEmpty
                     ? all
                     : [
                         for (final t in all)
@@ -115,40 +135,76 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                           ))
                             t,
                       ];
-                if (templates.isEmpty) {
+                if (filtered.isEmpty) {
                   return const Center(child: Text('No matches'));
                 }
+                final infos = {
+                  for (final t in filtered)
+                    t.id: _infoOf(t, directionNames, averages[t.id], stats),
+                };
+                final templates = sortTemplates(
+                  filtered,
+                  _sort,
+                  (t) => infos[t.id]!,
+                );
+                final dark = Theme.of(context).brightness == Brightness.dark;
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: templates.length,
                   itemBuilder: (context, i) {
                     final t = templates[i];
+                    // Tinted by the urgency band like an action card; a
+                    // template without directions stays plain.
+                    final u = infos[t.id]!.urgency;
+                    final tint = u == null ? null : urgencyColors(u, dark: dark);
+                    final fg = tint?.fg;
                     final tile = ListTile(
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
+                      textColor: fg,
                       title: Text(t.name),
-                      subtitle: _subtitle(context, t, averages[t.id], stats),
+                      subtitle: _subtitle(
+                        context,
+                        t,
+                        averages[t.id],
+                        u,
+                        fg: fg,
+                      ),
                       onTap: () => _showEditor(context, existing: t),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
+                          // The same coloured tiles as the Current board's
+                          // hover toolbar.
+                          GlassIconTile(
                             key: ValueKey('template-start-${t.id}'),
-                            icon: const Icon(Icons.play_arrow),
+                            icon: Icons.play_arrow_rounded,
+                            hue: GlassHue.blue,
                             tooltip: 'Start now',
-                            onPressed: () => _run(context, ref, t, false),
+                            size: 32,
+                            iconSize: 20,
+                            onTap: () => _run(context, ref, t, false),
                           ),
-                          IconButton(
+                          const SizedBox(width: 4),
+                          GlassIconTile(
                             key: ValueKey('template-finish-${t.id}'),
-                            icon: const Icon(Icons.stop),
+                            icon: Icons.stop_rounded,
+                            hue: GlassHue.pink,
                             tooltip: 'Finish now',
-                            onPressed: () => _run(context, ref, t, true),
+                            size: 32,
+                            iconSize: 20,
+                            onTap: () => _run(context, ref, t, true),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
+                          const SizedBox(width: 4),
+                          GlassIconTile(
+                            key: ValueKey('template-delete-${t.id}'),
+                            icon: Icons.delete_outline_rounded,
+                            hue: GlassHue.error,
                             tooltip: 'Delete',
-                            onPressed: () => _confirmDelete(context, ref, t),
+                            size: 32,
+                            iconSize: 20,
+                            onTap: () => _confirmDelete(context, ref, t),
                           ),
                         ],
                       ),
@@ -162,9 +218,15 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                         radius: 16,
                         shadow: false,
                         blurWindow: false,
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: tile,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: tint?.bg,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Material(
+                            type: MaterialType.transparency,
+                            child: tile,
+                          ),
                         ),
                       ),
                     );
@@ -199,8 +261,9 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     BuildContext context,
     ActionTemplate t,
     Duration? average,
-    Map<String, MetricStat>? stats,
-  ) {
+    double? urgency, {
+    Color? fg,
+  }) {
     final payload = jsonDecode(t.payload) as Map<String, dynamic>;
     final m = payload['estimatedMinutes'];
     final manual = (m is int && m > 0) ? m : null;
@@ -208,16 +271,8 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     final avgMin = average == null
         ? null
         : (average.inSeconds / 60).round().clamp(1, 1 << 30);
-    final urgency = stats == null
-        ? null
-        : actionUrgency(
-            ((payload['metricIds'] as List<dynamic>?)?.cast<String>() ??
-                    const <String>[])
-                .toSet(),
-            stats,
-          );
     if (manual == null && avgMin == null && urgency == null) return null;
-    final base = Theme.of(context).textTheme.bodyMedium!;
+    final base = Theme.of(context).textTheme.bodyMedium!.copyWith(color: fg);
     final bold = base.copyWith(fontWeight: FontWeight.w700);
     return Wrap(
       spacing: 14,
@@ -245,6 +300,61 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
             color: base.color,
           ),
       ],
+    );
+  }
+
+  /// What the list is sorted on for [t] (the urgency is shared with the tint).
+  static TemplateSortInfo _infoOf(
+    ActionTemplate t,
+    Map<String, String> directionNames,
+    Duration? average,
+    Map<String, MetricStat>? stats,
+  ) {
+    final payload = jsonDecode(t.payload) as Map<String, dynamic>;
+    final ids = templateMetricIds(t.payload);
+    final m = payload['estimatedMinutes'];
+    return TemplateSortInfo(
+      name: t.name,
+      direction: firstDirectionName([
+        for (final id in ids)
+          if (directionNames[id] != null) directionNames[id]!,
+      ]),
+      urgency: stats == null ? null : actionUrgency(ids.toSet(), stats),
+      averageMinutes: average == null
+          ? null
+          : (average.inSeconds / 60).round().clamp(1, 1 << 30),
+      manualMinutes: (m is int && m > 0) ? m : null,
+    );
+  }
+
+  Widget _sortRow() {
+    final used = {for (final k in _sort) k.field};
+    void set(List<TemplateSortKey> v) => setState(() => _sort = v);
+    return SortChipsRow(
+      keyPrefix: 'tpl-sort',
+      chips: [
+        for (final k in _sort)
+          SortChipData(k.field.name, k.field.label, ascending: k.ascending),
+      ],
+      addOptions: [
+        for (final f in TemplateSortField.values)
+          if (!used.contains(f)) (f.name, f.label),
+      ],
+      onToggle: (i) => set([
+        for (var j = 0; j < _sort.length; j++)
+          if (j == i) _sort[j].toggled() else _sort[j],
+      ]),
+      onRemove: (i) => set([..._sort]..removeAt(i)),
+      onMove: (from, to) {
+        if (from == to) return;
+        final list = [..._sort];
+        list.insert(to, list.removeAt(from));
+        set(list);
+      },
+      onAdd: (id) => set([
+        ..._sort,
+        TemplateSortKey(TemplateSortField.values.byName(id)),
+      ]),
     );
   }
 

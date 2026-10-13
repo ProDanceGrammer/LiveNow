@@ -458,7 +458,7 @@ void main() {
     await settle(tester);
     expect(find.text('Choose an action'), findsOneWidget);
     expect(find.text('Other'), findsOneWidget);
-    expect(find.textContaining("3 Oct 99' 13:00-14:40"), findsOneWidget);
+    expect(find.textContaining('03-10-2099 13:00 → 14:40'), findsOneWidget);
     await tester.tap(find.text('Cancel').last);
     await tester.pump(const Duration(milliseconds: 400));
     await teardown(tester);

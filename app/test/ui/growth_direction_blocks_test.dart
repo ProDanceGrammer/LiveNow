@@ -132,11 +132,11 @@ void main() {
     final sortedYs = [...ys]..sort();
     expect(ys, sortedYs);
     expect(find.text('No time'), findsOneWidget);
-    // Rows show a short schedule such as "3 Oct 13:00-14:00".
+    // Rows show a short schedule such as "03-10-2026 13:00 → 14:00".
     expect(
       find.descendant(
         of: find.widgetWithText(ListTile, 'Near past'),
-        matching: find.textContaining(RegExp(r'\d{1,2} \w{3}.* \d\d:\d\d-')),
+        matching: find.textContaining(RegExp(r'\d\d-\d\d-\d{4} \d\d:\d\d')),
       ),
       findsOneWidget,
     );
