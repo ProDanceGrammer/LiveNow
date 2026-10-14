@@ -251,6 +251,29 @@ class ActionTemplatesTable extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// A named sort / filter preset of one screen (schema v13). `kind` says what it
+/// stores (`sort`, `filter` or `both`), `payload` is JSON `{"sort": {...},
+/// "filter": {...}}` written by `domain/saved_views.dart`; at most one view per
+/// screen is the default (`is_default`). Synced like every other table, so the
+/// ids a filter mentions exist on every device.
+@DataClassName('SavedView')
+class SavedViewsTable extends Table {
+  @override
+  String get tableName => 'saved_views';
+
+  TextColumn get id => text()();
+  TextColumn get screen => text()();
+  TextColumn get name => text()();
+  TextColumn get kind => text().withDefault(const Constant('both'))();
+  TextColumn get payload => text().withDefault(const Constant('{}'))();
+  BoolColumn get isDefault => boolean().withDefault(const Constant(false))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ---- Budget (schema v10) -----------------------------------------------------
 // Money is stored as plain REAL and rounded by `domain/budget_rules.dart`
 // (like `metrics.target`). A transaction snapshots its own price, rates, income

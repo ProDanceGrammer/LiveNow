@@ -243,8 +243,8 @@ class ActionCard extends ConsumerWidget {
     return _swipeable(context, ref, card);
   }
 
-  /// Phone: swipe right = Start (Finish while it runs), swipe left = Delete.
-  /// Both go through the undoable helpers; the card itself never leaves by the
+  /// Phone: swipe right = Finish, swipe left = Start - always, whatever the
+  /// action's state; a swipe never deletes. Both go through the undoable helpers; the card itself never leaves by the
   /// swipe (`confirmDismiss` returns false): the list updates from the data.
   Widget _swipeable(
     BuildContext context,
@@ -281,16 +281,22 @@ class ActionCard extends ConsumerWidget {
         Alignment.centerLeft,
       ),
       secondaryBackground: bg(
-        Colors.red.shade700,
-        Icons.delete_outline,
-        'Delete',
+        Colors.blue.shade700,
+        Icons.play_arrow_rounded,
+        'Start',
         Alignment.centerRight,
       ),
       confirmDismiss: (direction) async {
+        final service = ref.read(actionServiceProvider);
         if (direction == DismissDirection.endToStart) {
-          runUndoableDelete(context, ref, action.id);
+          runUndoable(
+            context,
+            ref,
+            action.id,
+            'Started',
+            () => service.start(action.id),
+          );
         } else {
-          final service = ref.read(actionServiceProvider);
           runUndoable(
             context,
             ref,

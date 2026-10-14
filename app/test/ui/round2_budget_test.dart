@@ -348,15 +348,21 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('budget-tx-options-toggle')));
     await settle(tester);
     // Account filter: only the Lira account.
+    await tester.ensureVisible(find.byKey(ValueKey('tx-filter-account-$a2')));
+    await tester.pump();
     await tester.tap(find.byKey(ValueKey('tx-filter-account-$a2')));
     await settle(tester);
     expect(find.text('Bread'), findsNothing);
     expect(find.text('Petrol'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('tx-filters-reset')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('tx-filters-reset')));
     await settle(tester);
     expect(find.text('Bread'), findsOneWidget);
 
     // Date range: "from" a day after the old transaction leaves only the new one.
+    await tester.ensureVisible(find.byKey(const ValueKey('tx-date-from')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('tx-date-from')));
     await tester.pumpAndSettle();
     // The date picker opens on today; confirm it (today is after June 2026).

@@ -605,4 +605,29 @@ void main() {
       'c1',
     );
   });
+
+  test('an old database gets the v13 saved_views table and its sync triggers', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db
+        .into(db.savedViewsTable)
+        .insert(
+          SavedViewsTableCompanion.insert(
+            id: 'v1',
+            screen: 'budget.tx',
+            name: 'Big ones',
+            createdAt: 't',
+            updatedAt: 't',
+          ),
+        );
+    final v = (await db.select(db.savedViewsTable).get()).single;
+    expect((v.kind, v.payload, v.isDefault), ('both', '{}', false));
+    // The generic triggers cover the new table: the insert got a version.
+    final n = await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = 'saved_views' AND row_id = 'v1'",
+        )
+        .getSingle();
+    expect(n.read<int>('n'), 1);
+  });
 }

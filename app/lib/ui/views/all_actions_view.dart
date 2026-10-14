@@ -8,6 +8,8 @@ import '../../domain/all_actions_summary.dart';
 import '../../domain/all_actions_view_rules.dart';
 import '../all_selection.dart';
 import '../providers.dart';
+import '../saved_view_hooks.dart';
+import '../saved_views_bar.dart' show SavedViewsDefaultLoader;
 import '../time_format.dart';
 import '../widgets/action_list_view.dart';
 import '../widgets/all_actions_options_panel.dart';
@@ -152,7 +154,9 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
       if (kept.length != selection.state.length) selection.state = kept;
     });
 
-    return Column(
+    return SavedViewsDefaultLoader(
+      hooks: allActionsViewHooks(ref),
+      child: Column(
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -257,6 +261,7 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
           ),
         ),
       ],
+    ),
     );
   }
 }

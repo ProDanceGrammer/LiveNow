@@ -6,13 +6,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database.dart';
 import '../../domain/budget_tx_view_rules.dart';
 import '../budget_providers.dart';
+import '../device_prefs.dart';
 import '../dialog_stack.dart';
+import '../saved_view_hooks.dart';
+import '../saved_views_bar.dart';
 import 'account_icon.dart';
 import 'date_range_fields.dart';
 import 'glass.dart';
 import 'param_icons.dart';
 import 'sort_chips.dart';
 import 'sort_icons.dart';
+
+/// Device-local choices of the Transactions list: whether the totals (the Total
+/// block and the group headers) show, and which of the three values (counting,
+/// interactional, main) are shown - in the totals and on every tile.
+const kTxTotalsPref = 'tx_totals_show';
+const kTxCountingPref = 'tx_col_counting';
+const kTxInteractPref = 'tx_col_interact';
+const kTxMainPref = 'tx_col_main';
 
 /// The collapsible panel under the Transactions search field: waterfall sort,
 /// where the search text looks, and the filters (categories, accounts, action
@@ -58,6 +69,8 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                SavedViewsBar(hooks: txViewHooks(ref)),
+                const SizedBox(height: 12),
                 SortChipsRow(
                   keyPrefix: 'tx-sort',
                   chips: [
@@ -131,6 +144,8 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
+                _ValuesRow(),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Text('Filters', style: theme.textTheme.titleSmall),
@@ -171,6 +186,47 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
                         );
                         if (picked != null) {
                           setFilters(filters.copyWith(categoryIds: picked));
+                        }
+                      },
+                    ),
+                    if (filters.categoryIds.isNotEmpty)
+                      SegmentedButton<bool>(
+                        key: const ValueKey('tx-filter-cat-mode'),
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(value: false, label: Text('Only these')),
+                          ButtonSegment(value: true, label: Text('All but')),
+                        ],
+                        selected: {filters.excludeCategories},
+                        onSelectionChanged: (s) => setFilters(
+                          filters.copyWith(excludeCategories: s.first),
+                        ),
+                      ),
+                    OutlinedButton.icon(
+                      key: const ValueKey('tx-filter-actions'),
+                      icon: const Icon(Icons.bolt_outlined, size: 18),
+                      label: Text(
+                        filters.actionIds.isEmpty
+                            ? 'Actions'
+                            : 'Actions (${filters.actionIds.length})',
+                      ),
+                      onPressed: () async {
+                        final picked = await showStackedDialog<Set<String>>(
+                          context: context,
+                          builder: (_) => _ActionsMultiPicker(
+                            options: {
+                              for (final t in ref
+                                      .read(budgetTransactionsProvider)
+                                      .value ??
+                                  const <BudgetTxItem>[])
+                                if (t.row.actionId != null)
+                                  t.row.actionId!: t.actionName ?? 'Action',
+                            },
+                            initial: filters.actionIds,
+                          ),
+                        );
+                        if (picked != null) {
+                          setFilters(filters.copyWith(actionIds: picked));
                         }
                       },
                     ),
@@ -318,11 +374,151 @@ class _CategoriesMultiPickerState extends State<_CategoriesMultiPicker> {
           child: const Text('Cancel'),
         ),
         TextButton(
+          key: const ValueKey('tx-categories-all'),
+          onPressed: () => setState(
+            () => _chosen.addAll([for (final c in rows) c.id]),
+          ),
+          child: const Text('Select all'),
+        ),
+        TextButton(
           onPressed: () => setState(_chosen.clear),
           child: const Text('Clear'),
         ),
         FilledButton(
           key: const ValueKey('tx-categories-apply'),
+          onPressed: () => Navigator.of(context).pop({..._chosen}),
+          child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Values": which of counting / interactional / main show, and whether the
+/// totals show at all. Device-local ([devicePrefsProvider]); at least one value
+/// always stays on.
+class _ValuesRow extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final totals = ref.watch(devicePrefBoolProvider((kTxTotalsPref, true)));
+    final cols = {
+      kTxCountingPref: ref.watch(devicePrefBoolProvider((kTxCountingPref, true))),
+      kTxInteractPref: ref.watch(devicePrefBoolProvider((kTxInteractPref, true))),
+      kTxMainPref: ref.watch(devicePrefBoolProvider((kTxMainPref, true))),
+    };
+    Widget chip(String key, String label, bool on, String id) => FilterChip(
+      key: ValueKey(id),
+      label: Text(label),
+      selected: on,
+      onSelected: (v) {
+        // Never switch the last value off: the list would show no amounts.
+        if (!v && cols.containsKey(key) && cols.values.where((x) => x).length == 1) {
+          return;
+        }
+        setDevicePrefBool(ref, key, v);
+      },
+    );
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('Values', style: theme.textTheme.titleSmall),
+        chip(kTxCountingPref, 'Counting', cols[kTxCountingPref]!, 'tx-col-counting'),
+        chip(kTxInteractPref, 'Interactional', cols[kTxInteractPref]!, 'tx-col-interact'),
+        chip(kTxMainPref, 'Main', cols[kTxMainPref]!, 'tx-col-main'),
+        chip(kTxTotalsPref, 'Show totals', totals, 'tx-totals-show'),
+      ],
+    );
+  }
+}
+
+/// Pick several actions that have transactions (checkbox list, searchable).
+class _ActionsMultiPicker extends StatefulWidget {
+  const _ActionsMultiPicker({required this.options, required this.initial});
+
+  /// action id -> name.
+  final Map<String, String> options;
+  final Set<String> initial;
+
+  @override
+  State<_ActionsMultiPicker> createState() => _ActionsMultiPickerState();
+}
+
+class _ActionsMultiPickerState extends State<_ActionsMultiPicker> {
+  late final Set<String> _chosen = {...widget.initial};
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = [
+      for (final e in widget.options.entries)
+        if (e.value.toLowerCase().contains(_query)) e,
+    ]..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return AlertDialog(
+      title: const Text('Actions'),
+      content: SizedBox(
+        width: 440,
+        height: 380,
+        child: Column(
+          children: [
+            TextField(
+              key: const ValueKey('tx-actions-search'),
+              decoration: const InputDecoration(
+                hintText: 'Search',
+                prefixIcon: Icon(Icons.search),
+                isDense: true,
+              ),
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                'Only actions that have transactions are listed.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final e in rows)
+                    CheckboxListTile(
+                      key: ValueKey('tx-pick-action-${e.key}'),
+                      dense: true,
+                      value: _chosen.contains(e.key),
+                      title: Text(e.value),
+                      onChanged: (v) => setState(() {
+                        if (v ?? false) {
+                          _chosen.add(e.key);
+                        } else {
+                          _chosen.remove(e.key);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          key: const ValueKey('tx-actions-all'),
+          onPressed: () =>
+              setState(() => _chosen.addAll([for (final e in rows) e.key])),
+          child: const Text('Select all'),
+        ),
+        TextButton(
+          onPressed: () => setState(_chosen.clear),
+          child: const Text('Clear'),
+        ),
+        FilledButton(
+          key: const ValueKey('tx-actions-apply'),
           onPressed: () => Navigator.of(context).pop({..._chosen}),
           child: const Text('Apply'),
         ),

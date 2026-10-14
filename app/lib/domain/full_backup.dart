@@ -26,6 +26,7 @@ const List<String> backupTableOrder = [
   'metric_dependencies',
   'action_templates',
   'budget_settings',
+  'saved_views',
 ];
 
 /// A batch of rows of one table. [columns] name the values of every row.

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
 import '../core/time_codec.dart';
 import '../data/database.dart';
+import '../domain/budget_account_view.dart';
 import '../domain/budget_rules.dart';
 import '../domain/budget_tx_view_rules.dart';
 import '../domain/budget_service.dart';
@@ -275,3 +276,10 @@ final budgetTxCollapsedProvider = StateProvider.autoDispose<Set<String>>(
 final budgetTxFiltersProvider = StateProvider.autoDispose<TxFilters>(
   (ref) => const TxFilters(),
 );
+
+/// The Accounts list's waterfall sort (default: biggest main-currency balance
+/// first).
+final budgetAccountSortProvider =
+    StateProvider.autoDispose<List<AccountSortKey>>(
+      (ref) => kDefaultAccountSort,
+    );

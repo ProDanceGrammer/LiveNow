@@ -6029,6 +6029,509 @@ class BudgetSettingsTableCompanion extends UpdateCompanion<BudgetSetting> {
   }
 }
 
+class $SavedViewsTableTable extends SavedViewsTable
+    with TableInfo<$SavedViewsTableTable, SavedView> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SavedViewsTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _screenMeta = const VerificationMeta('screen');
+  @override
+  late final GeneratedColumn<String> screen = GeneratedColumn<String>(
+    'screen',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('both'),
+  );
+  static const VerificationMeta _payloadMeta = const VerificationMeta(
+    'payload',
+  );
+  @override
+  late final GeneratedColumn<String> payload = GeneratedColumn<String>(
+    'payload',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('{}'),
+  );
+  static const VerificationMeta _isDefaultMeta = const VerificationMeta(
+    'isDefault',
+  );
+  @override
+  late final GeneratedColumn<bool> isDefault = GeneratedColumn<bool>(
+    'is_default',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_default" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    screen,
+    name,
+    kind,
+    payload,
+    isDefault,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'saved_views';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SavedView> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('screen')) {
+      context.handle(
+        _screenMeta,
+        screen.isAcceptableOrUnknown(data['screen']!, _screenMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_screenMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('payload')) {
+      context.handle(
+        _payloadMeta,
+        payload.isAcceptableOrUnknown(data['payload']!, _payloadMeta),
+      );
+    }
+    if (data.containsKey('is_default')) {
+      context.handle(
+        _isDefaultMeta,
+        isDefault.isAcceptableOrUnknown(data['is_default']!, _isDefaultMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SavedView map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SavedView(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      screen: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}screen'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      payload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload'],
+      )!,
+      isDefault: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_default'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SavedViewsTableTable createAlias(String alias) {
+    return $SavedViewsTableTable(attachedDatabase, alias);
+  }
+}
+
+class SavedView extends DataClass implements Insertable<SavedView> {
+  final String id;
+  final String screen;
+  final String name;
+  final String kind;
+  final String payload;
+  final bool isDefault;
+  final String createdAt;
+  final String updatedAt;
+  const SavedView({
+    required this.id,
+    required this.screen,
+    required this.name,
+    required this.kind,
+    required this.payload,
+    required this.isDefault,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['screen'] = Variable<String>(screen);
+    map['name'] = Variable<String>(name);
+    map['kind'] = Variable<String>(kind);
+    map['payload'] = Variable<String>(payload);
+    map['is_default'] = Variable<bool>(isDefault);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  SavedViewsTableCompanion toCompanion(bool nullToAbsent) {
+    return SavedViewsTableCompanion(
+      id: Value(id),
+      screen: Value(screen),
+      name: Value(name),
+      kind: Value(kind),
+      payload: Value(payload),
+      isDefault: Value(isDefault),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory SavedView.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SavedView(
+      id: serializer.fromJson<String>(json['id']),
+      screen: serializer.fromJson<String>(json['screen']),
+      name: serializer.fromJson<String>(json['name']),
+      kind: serializer.fromJson<String>(json['kind']),
+      payload: serializer.fromJson<String>(json['payload']),
+      isDefault: serializer.fromJson<bool>(json['isDefault']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'screen': serializer.toJson<String>(screen),
+      'name': serializer.toJson<String>(name),
+      'kind': serializer.toJson<String>(kind),
+      'payload': serializer.toJson<String>(payload),
+      'isDefault': serializer.toJson<bool>(isDefault),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  SavedView copyWith({
+    String? id,
+    String? screen,
+    String? name,
+    String? kind,
+    String? payload,
+    bool? isDefault,
+    String? createdAt,
+    String? updatedAt,
+  }) => SavedView(
+    id: id ?? this.id,
+    screen: screen ?? this.screen,
+    name: name ?? this.name,
+    kind: kind ?? this.kind,
+    payload: payload ?? this.payload,
+    isDefault: isDefault ?? this.isDefault,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  SavedView copyWithCompanion(SavedViewsTableCompanion data) {
+    return SavedView(
+      id: data.id.present ? data.id.value : this.id,
+      screen: data.screen.present ? data.screen.value : this.screen,
+      name: data.name.present ? data.name.value : this.name,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      payload: data.payload.present ? data.payload.value : this.payload,
+      isDefault: data.isDefault.present ? data.isDefault.value : this.isDefault,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedView(')
+          ..write('id: $id, ')
+          ..write('screen: $screen, ')
+          ..write('name: $name, ')
+          ..write('kind: $kind, ')
+          ..write('payload: $payload, ')
+          ..write('isDefault: $isDefault, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    screen,
+    name,
+    kind,
+    payload,
+    isDefault,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SavedView &&
+          other.id == this.id &&
+          other.screen == this.screen &&
+          other.name == this.name &&
+          other.kind == this.kind &&
+          other.payload == this.payload &&
+          other.isDefault == this.isDefault &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class SavedViewsTableCompanion extends UpdateCompanion<SavedView> {
+  final Value<String> id;
+  final Value<String> screen;
+  final Value<String> name;
+  final Value<String> kind;
+  final Value<String> payload;
+  final Value<bool> isDefault;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const SavedViewsTableCompanion({
+    this.id = const Value.absent(),
+    this.screen = const Value.absent(),
+    this.name = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.payload = const Value.absent(),
+    this.isDefault = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SavedViewsTableCompanion.insert({
+    required String id,
+    required String screen,
+    required String name,
+    this.kind = const Value.absent(),
+    this.payload = const Value.absent(),
+    this.isDefault = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       screen = Value(screen),
+       name = Value(name),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<SavedView> custom({
+    Expression<String>? id,
+    Expression<String>? screen,
+    Expression<String>? name,
+    Expression<String>? kind,
+    Expression<String>? payload,
+    Expression<bool>? isDefault,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (screen != null) 'screen': screen,
+      if (name != null) 'name': name,
+      if (kind != null) 'kind': kind,
+      if (payload != null) 'payload': payload,
+      if (isDefault != null) 'is_default': isDefault,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SavedViewsTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? screen,
+    Value<String>? name,
+    Value<String>? kind,
+    Value<String>? payload,
+    Value<bool>? isDefault,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return SavedViewsTableCompanion(
+      id: id ?? this.id,
+      screen: screen ?? this.screen,
+      name: name ?? this.name,
+      kind: kind ?? this.kind,
+      payload: payload ?? this.payload,
+      isDefault: isDefault ?? this.isDefault,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (screen.present) {
+      map['screen'] = Variable<String>(screen.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (payload.present) {
+      map['payload'] = Variable<String>(payload.value);
+    }
+    if (isDefault.present) {
+      map['is_default'] = Variable<bool>(isDefault.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SavedViewsTableCompanion(')
+          ..write('id: $id, ')
+          ..write('screen: $screen, ')
+          ..write('name: $name, ')
+          ..write('kind: $kind, ')
+          ..write('payload: $payload, ')
+          ..write('isDefault: $isDefault, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -6054,6 +6557,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $BudgetTransactionsTableTable(this);
   late final $BudgetSettingsTableTable budgetSettingsTable =
       $BudgetSettingsTableTable(this);
+  late final $SavedViewsTableTable savedViewsTable = $SavedViewsTableTable(
+    this,
+  );
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -6111,6 +6617,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     budgetCategoriesTable,
     budgetTransactionsTable,
     budgetSettingsTable,
+    savedViewsTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxActionsStart,
@@ -12577,6 +13084,274 @@ typedef $$BudgetSettingsTableTableProcessedTableManager =
       BudgetSetting,
       PrefetchHooks Function()
     >;
+typedef $$SavedViewsTableTableCreateCompanionBuilder =
+    SavedViewsTableCompanion Function({
+      required String id,
+      required String screen,
+      required String name,
+      Value<String> kind,
+      Value<String> payload,
+      Value<bool> isDefault,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$SavedViewsTableTableUpdateCompanionBuilder =
+    SavedViewsTableCompanion Function({
+      Value<String> id,
+      Value<String> screen,
+      Value<String> name,
+      Value<String> kind,
+      Value<String> payload,
+      Value<bool> isDefault,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$SavedViewsTableTableFilterComposer
+    extends Composer<_$AppDatabase, $SavedViewsTableTable> {
+  $$SavedViewsTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get screen => $composableBuilder(
+    column: $table.screen,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isDefault => $composableBuilder(
+    column: $table.isDefault,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SavedViewsTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $SavedViewsTableTable> {
+  $$SavedViewsTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get screen => $composableBuilder(
+    column: $table.screen,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isDefault => $composableBuilder(
+    column: $table.isDefault,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SavedViewsTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SavedViewsTableTable> {
+  $$SavedViewsTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get screen =>
+      $composableBuilder(column: $table.screen, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get payload =>
+      $composableBuilder(column: $table.payload, builder: (column) => column);
+
+  GeneratedColumn<bool> get isDefault =>
+      $composableBuilder(column: $table.isDefault, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$SavedViewsTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SavedViewsTableTable,
+          SavedView,
+          $$SavedViewsTableTableFilterComposer,
+          $$SavedViewsTableTableOrderingComposer,
+          $$SavedViewsTableTableAnnotationComposer,
+          $$SavedViewsTableTableCreateCompanionBuilder,
+          $$SavedViewsTableTableUpdateCompanionBuilder,
+          (
+            SavedView,
+            BaseReferences<_$AppDatabase, $SavedViewsTableTable, SavedView>,
+          ),
+          SavedView,
+          PrefetchHooks Function()
+        > {
+  $$SavedViewsTableTableTableManager(
+    _$AppDatabase db,
+    $SavedViewsTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SavedViewsTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SavedViewsTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SavedViewsTableTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> screen = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> payload = const Value.absent(),
+                Value<bool> isDefault = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SavedViewsTableCompanion(
+                id: id,
+                screen: screen,
+                name: name,
+                kind: kind,
+                payload: payload,
+                isDefault: isDefault,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String screen,
+                required String name,
+                Value<String> kind = const Value.absent(),
+                Value<String> payload = const Value.absent(),
+                Value<bool> isDefault = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => SavedViewsTableCompanion.insert(
+                id: id,
+                screen: screen,
+                name: name,
+                kind: kind,
+                payload: payload,
+                isDefault: isDefault,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SavedViewsTableTable, SavedView>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SavedViewsTableTable,
+                    SavedView
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SavedViewsTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SavedViewsTableTable,
+      SavedView,
+      $$SavedViewsTableTableFilterComposer,
+      $$SavedViewsTableTableOrderingComposer,
+      $$SavedViewsTableTableAnnotationComposer,
+      $$SavedViewsTableTableCreateCompanionBuilder,
+      $$SavedViewsTableTableUpdateCompanionBuilder,
+      (
+        SavedView,
+        BaseReferences<_$AppDatabase, $SavedViewsTableTable, SavedView>,
+      ),
+      SavedView,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -12620,4 +13395,6 @@ class $AppDatabaseManager {
       );
   $$BudgetSettingsTableTableTableManager get budgetSettingsTable =>
       $$BudgetSettingsTableTableTableManager(_db, _db.budgetSettingsTable);
+  $$SavedViewsTableTableTableManager get savedViewsTable =>
+      $$SavedViewsTableTableTableManager(_db, _db.savedViewsTable);
 }

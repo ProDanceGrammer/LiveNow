@@ -19,6 +19,8 @@ import '../widgets/action_tile.dart' show formatUrgency;
 import '../widgets/app_toast.dart';
 import '../widgets/param_icons.dart';
 import '../providers.dart';
+import '../saved_views_bar.dart';
+import '../../domain/saved_views.dart';
 import '../widgets/glass.dart';
 import '../widgets/glass_icon_tile.dart';
 import '../widgets/sort_chips.dart';
@@ -63,7 +65,9 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
   Widget build(BuildContext context) {
     final templatesAsync = ref.watch(templatesProvider);
 
-    return Scaffold(
+    return SavedViewsDefaultLoader(
+      hooks: _viewHooks(),
+      child: Scaffold(
       body: Column(
         children: [
           Padding(
@@ -94,7 +98,14 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
           if (_showOptions)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: _sortRow(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sortRow(),
+                  const SizedBox(height: 8),
+                  SavedViewsBar(hooks: _viewHooks()),
+                ],
+              ),
             ),
           Expanded(
             child: templatesAsync.when(
@@ -236,6 +247,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
               tooltip: 'New template',
               child: const Icon(Icons.add),
             ),
+    ),
     );
   }
 
@@ -316,6 +328,23 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
       manualMinutes: (m is int && m > 0) ? m : null,
     );
   }
+
+  /// Saved views for the Templates sort (templates have no filters).
+  SavedViewHooks _viewHooks() => SavedViewHooks(
+    screen: ViewScreens.actionsTemplates,
+    readSort: () => templateSortToJson(_sort),
+    applySort: (j) {
+      final keys = templateSortFromJson(j);
+      setState(
+        () => _sort = keys.isEmpty
+            ? const [TemplateSortKey(TemplateSortField.name)]
+            : keys,
+      );
+    },
+    clearSort: () => setState(
+      () => _sort = const [TemplateSortKey(TemplateSortField.name)],
+    ),
+  );
 
   Widget _sortRow() {
     final used = {for (final k in _sort) k.field};

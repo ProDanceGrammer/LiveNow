@@ -23,7 +23,9 @@ import 'budget_format.dart';
 import 'category_transactions_panel.dart';
 import 'param_icons.dart';
 import '../theme/glass_theme.dart';
+import '../time_format.dart' show formatUtcDateTime;
 import 'glass_pill_selector.dart';
+import 'section_block.dart';
 
 const _dialogWidth = 440.0;
 
@@ -38,7 +40,7 @@ Widget _dialogBody(List<Widget> children) => SizedBox(
   ),
 );
 
-const _gap = SizedBox(height: 12);
+const _gap = SizedBox(height: 16);
 
 /// Opens a category in its editor (used by every place that shows one).
 Future<void> openBudgetCategoryById(
@@ -386,9 +388,13 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
             ),
           ),
           _gap,
+          // Currency and rate share a line (equal height: the hint is under
+          // the row, not under one field).
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
+                flex: 2,
                 child: TextFormField(
                   key: const ValueKey('account-currency'),
                   controller: _currency,
@@ -400,18 +406,24 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
               ),
               const SizedBox(width: 12),
               Expanded(
+                flex: 3,
                 child: TextFormField(
                   key: const ValueKey('account-rate'),
                   controller: _rate,
                   decoration: InputDecoration(
                     labelText: 'Rate (per 1 $base)',
-                    helperText: 'e.g. 40 = 40 of this currency per 1 $base',
-                    helperMaxLines: 2,
                   ),
                   validator: (v) => number(v, positive: true),
                 ),
               ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              'e.g. 40 = 40 of this currency per 1 $base',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
           _gap,
           TextFormField(
@@ -646,6 +658,103 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
     }
   }
 
+  /// Sets, changes or clears the parent through the searchable picker. The
+  /// category itself and everything below it are not offered (no loops).
+  Future<void> _pickParent(List<BudgetCategory> cats) async {
+    final below = <String>{?widget.existing?.id};
+    var grew = true;
+    while (grew) {
+      grew = false;
+      for (final c in cats) {
+        if (c.parentId != null &&
+            below.contains(c.parentId) &&
+            below.add(c.id)) {
+          grew = true;
+        }
+      }
+    }
+    final picked = await pickBudgetCategory(
+      context,
+      leavesOnly: false,
+      excludeIds: below,
+      allowNone: true,
+      allowCreate: true,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _parentId = picked == kPickedNoCategory ? null : picked);
+  }
+
+  /// A titled block with a `+` (or edit) button on the right whose [rows] are
+  /// separate bordered blocks: the shared look of "Parent category" and
+  /// "Sub-categories".
+  Widget _linkedBlock(
+    BuildContext context, {
+    required String title,
+    required Key addKey,
+    required String addTooltip,
+    required IconData addIcon,
+    required VoidCallback onAdd,
+    required List<Widget> rows,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+          IconButton(
+            key: addKey,
+            tooltip: addTooltip,
+            icon: Icon(addIcon),
+            onPressed: onAdd,
+          ),
+        ],
+      ),
+      ...rows,
+    ],
+  );
+
+  Widget _blockRow({
+    required Key key,
+    required String title,
+    required String? subtitle,
+    required VoidCallback onTap,
+    Widget? trailing,
+  }) => SectionBlock(
+    key: key,
+    padding: EdgeInsets.zero,
+    margin: const EdgeInsets.only(bottom: 8),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(GlassTheme.radiusControl),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ),
+            ?trailing,
+          ],
+        ),
+      ),
+    ),
+  );
+
   /// The settings column, and for an existing category its transactions: to the
   /// right of it on a wide window (same height, each scrolling on its own), below
   /// it on a narrow one.
@@ -747,11 +856,40 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             ),
           ],
           _gap,
-          GlassPillSelector<bool>(
-            label: 'Type',
-            options: const {false: 'Expense', true: 'Income'},
-            value: _isIncome,
-            onChanged: (v) => setState(() => _isIncome = v),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: GlassPillSelector<bool>(
+                  label: 'Type',
+                  options: const {false: 'Expense', true: 'Income'},
+                  value: _isIncome,
+                  onChanged: (v) => setState(() => _isIncome = v),
+                ),
+              ),
+              // A group ignores it, so only a real category shows the switch.
+              // Only the switch itself toggles (a whole-row tile was too easy
+              // to hit by accident).
+              if (!isGroup) ...[
+                const SizedBox(width: 12),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      'One-time',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Switch(
+                      key: const ValueKey('category-one-time'),
+                      value: _oneTime,
+                      onChanged: (v) => setState(() => _oneTime = v),
+                    ),
+                  ],
+                ),
+              ],
+            ],
           ),
           // A group only sums its sub-categories: the unit, price, units,
           // frequency, one-time and end-date fields would all be ignored, so
@@ -770,31 +908,48 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               onChanged: (v) => setState(() => _unit = v),
             ),
             _gap,
-            if (percent) ...[
-              TextFormField(
-                key: const ValueKey('category-percent'),
-                controller: _percent,
-                decoration: const InputDecoration(labelText: 'Percent'),
-                validator: optionalNumber,
-              ),
-              _gap,
-              OutlinedButton.icon(
-                key: const ValueKey('category-percent-of'),
-                icon: const Icon(Icons.percent),
-                label: Text(
-                  _percentOfId == null
-                      ? 'Take the percent of…'
-                      : 'Percent of: ${byId[_percentOfId]?.name ?? '?'}',
-                ),
-                onPressed: () async {
-                  final picked = await pickBudgetCategory(
-                    context,
-                    excludeId: id,
-                  );
-                  if (picked != null) setState(() => _percentOfId = picked);
-                },
-              ),
-            ] else
+            if (percent)
+              // The value and the category it is taken from sit on one row.
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 120,
+                    child: TextFormField(
+                      key: const ValueKey('category-percent'),
+                      controller: _percent,
+                      decoration: const InputDecoration(labelText: 'Percent'),
+                      validator: optionalNumber,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: OutlinedButton.icon(
+                        key: const ValueKey('category-percent-of'),
+                        icon: const Icon(Icons.percent),
+                        label: Text(
+                          _percentOfId == null
+                              ? 'Take the percent of…'
+                              : 'of: ${byId[_percentOfId]?.name ?? '?'}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        onPressed: () async {
+                          final picked = await pickBudgetCategory(
+                            context,
+                            excludeId: id,
+                          );
+                          if (picked != null) {
+                            setState(() => _percentOfId = picked);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
               TextFormField(
                 key: const ValueKey('category-price'),
                 controller: _price,
@@ -805,14 +960,17 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                 validator: optionalNumber,
               ),
             _gap,
+            // Same height side by side: the hint lives under the row, not under
+            // one field (that pushed the other one out of line).
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: TextFormField(
                     key: const ValueKey('category-units'),
                     controller: _units,
                     decoration: const InputDecoration(
-                      labelText: 'Units per month (plan)',
+                      labelText: 'Units per month',
                     ),
                     validator: optionalNumber,
                   ),
@@ -823,21 +981,21 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                     key: const ValueKey('category-frequency'),
                     controller: _frequency,
                     decoration: const InputDecoration(
-                      labelText: 'Frequency (months)',
-                      helperText: '1 = monthly, 12 = yearly',
+                      labelText: 'Every N months',
                     ),
                     validator: optionalNumber,
                   ),
                 ),
               ],
             ),
-            SwitchListTile(
-              key: const ValueKey('category-one-time'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('One-time payment'),
-              value: _oneTime,
-              onChanged: (v) => setState(() => _oneTime = v),
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 4),
+              child: Text(
+                'Frequency: 1 = monthly, 12 = yearly',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ),
+            _gap,
             Row(
               children: [
                 Expanded(
@@ -862,83 +1020,62 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             ),
           ],
           _gap,
-          // Opens the searchable category list (a plain dropdown was unreadable
-          // and could not be searched). The category itself and everything
-          // below it are not offered, so a loop cannot be made.
-          InkWell(
+          // Parent category: same block style as the sub-categories below. The
+          // searchable picker never offers the category itself or anything
+          // below it, so a loop cannot be made.
+          KeyedSubtree(
             key: const ValueKey('category-parent'),
-            borderRadius: BorderRadius.circular(12),
-            onTap: () async {
-              final below = <String>{?id};
-              var grew = true;
-              while (grew) {
-                grew = false;
-                for (final c in cats) {
-                  if (c.parentId != null &&
-                      below.contains(c.parentId) &&
-                      below.add(c.id)) {
-                    grew = true;
-                  }
-                }
-              }
-              final picked = await pickBudgetCategory(
-                context,
-                leavesOnly: false,
-                excludeIds: below,
-                allowNone: true,
-                allowCreate: true,
-              );
-              if (picked == null || !mounted) return;
-              setState(
-                () => _parentId = picked == kPickedNoCategory ? null : picked,
-              );
-            },
-            child: InputDecorator(
-              decoration: InputDecoration(
-                labelText: 'Part of',
-                suffixIcon: _parentId != null && byId.containsKey(_parentId)
-                    ? IconButton(
-                        tooltip: 'Top level',
-                        icon: const Icon(Icons.clear),
-                        onPressed: () => setState(() => _parentId = null),
-                      )
-                    : const Icon(Icons.arrow_drop_down),
-              ),
-              child: Text(
-                _parentId != null && byId.containsKey(_parentId)
-                    ? byId[_parentId]!.name
-                    : '— top level —',
-                overflow: TextOverflow.ellipsis,
-              ),
+            child: _linkedBlock(
+              context,
+              title: 'Parent category',
+              addKey: const ValueKey('category-parent-add'),
+              addTooltip: _parentId != null && byId.containsKey(_parentId)
+                  ? 'Change the parent'
+                  : 'Set a parent',
+              addIcon: _parentId != null && byId.containsKey(_parentId)
+                  ? Icons.edit_outlined
+                  : Icons.add,
+              onAdd: () => _pickParent(cats),
+              rows: [
+                if (_parentId != null && byId.containsKey(_parentId))
+                  _blockRow(
+                    key: const ValueKey('category-parent-open'),
+                    title: byId[_parentId]!.name,
+                    subtitle: categoryLine(byId[_parentId]!),
+                    onTap: () => BudgetCategoryDialog.show(
+                      context,
+                      existing: byId[_parentId]!,
+                    ),
+                    trailing: IconButton(
+                      key: const ValueKey('category-parent-clear'),
+                      tooltip: 'Make top level',
+                      icon: const Icon(Icons.clear),
+                      onPressed: () => setState(() => _parentId = null),
+                    ),
+                  ),
+              ],
             ),
           ),
           if (id != null) ...[
             _gap,
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Sub-categories',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+            _linkedBlock(
+              context,
+              title: 'Sub-categories',
+              addKey: const ValueKey('category-add-sub'),
+              addTooltip: 'Add a sub-category',
+              addIcon: Icons.add,
+              onAdd: () => _addSub(cats),
+              rows: [
+                for (final c in children)
+                  _blockRow(
+                    key: ValueKey('category-sub-${c.id}'),
+                    title: c.name,
+                    subtitle: categoryLine(c),
+                    onTap: () =>
+                        BudgetCategoryDialog.show(context, existing: c),
                   ),
-                ),
-                IconButton(
-                  key: const ValueKey('category-add-sub'),
-                  tooltip: 'Add a sub-category',
-                  icon: const Icon(Icons.add),
-                  onPressed: () => _addSub(cats),
-                ),
               ],
             ),
-            for (final c in children)
-              ListTile(
-                key: ValueKey('category-sub-${c.id}'),
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(c.name),
-                subtitle: categoryLine(c) == null ? null : Text(categoryLine(c)!),
-                onTap: () => BudgetCategoryDialog.show(context, existing: c),
-              ),
           ],
           _gap,
           DropdownButtonFormField<String?>(
@@ -1093,6 +1230,8 @@ class _BudgetTransactionDialogState
   late String? _actionId =
       widget.existing?.row.actionId ?? widget.initialActionId;
   String? _actionName;
+  DateTime? _actionStart;
+  bool _actionAllDay = false;
   DateTime? _date;
   String? _error;
 
@@ -1107,6 +1246,8 @@ class _BudgetTransactionDialogState
       if (_categoryId != null) _onCategoryChosen(_categoryId!);
       if (widget.quick && _actionId == null) _suggestAction();
       if (_actionId != null) _loadActionName(_actionId!);
+    } else if (_actionId != null) {
+      _loadActionName(_actionId!);
     }
   }
 
@@ -1130,7 +1271,13 @@ class _BudgetTransactionDialogState
     final row = await (db.select(
       db.actionsTable,
     )..where((t) => t.id.equals(id))).getSingleOrNull();
-    if (mounted && _actionId == id) setState(() => _actionName = row?.name);
+    if (mounted && _actionId == id) {
+      setState(() {
+        _actionName = row?.name;
+        _actionStart = dateTimeFromDb(row?.startAt);
+        _actionAllDay = row?.isAllDay ?? false;
+      });
+    }
   }
 
   /// Fills price and quantity from the chosen category (new transactions only).
@@ -1165,6 +1312,8 @@ class _BudgetTransactionDialogState
     setState(() {
       _actionId = picked.id;
       _actionName = picked.name;
+      _actionStart = picked.startAt;
+      _actionAllDay = picked.isAllDay;
     });
   }
 
@@ -1298,17 +1447,21 @@ class _BudgetTransactionDialogState
         {for (final a in accounts) a.id: budgetAcctFromRow(a)},
       );
     }
-    Widget amountLine(Widget? icon, String label, double? v, String cur) => Row(
-      children: [
-        if (icon != null) ...[icon, const SizedBox(width: 6)],
-        Flexible(
-          child: Text(
-            '$label: ${v == null ? '—' : budgetMoney(v, sign: true)} $cur'
-                .trim(),
+    Widget amountLine(Widget? icon, String label, double? v, String cur) =>
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(
+            children: [
+              if (icon != null) ...[icon, const SizedBox(width: 6)],
+              Flexible(
+                child: Text(
+                  '$label: ${v == null ? '—' : budgetMoney(v, sign: true)} $cur'
+                      .trim(),
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
-    );
+        );
 
     return AlertDialog(
       title: Row(
@@ -1335,11 +1488,44 @@ class _BudgetTransactionDialogState
       content: Form(
         key: _form,
         child: _dialogBody([
-          OutlinedButton.icon(
-            key: const ValueKey('tx-category'),
-            icon: const ParamIcon(Param.categories, size: 18, tooltip: false),
-            label: Text(cat?.name ?? 'Pick a category'),
-            onPressed: _pickCategory,
+          // Category: open it, change it, or clear it (a transaction needs one,
+          // so Save asks for another) - the same three controls as the action.
+          Row(
+            children: [
+              const ParamIcon(Param.categories, size: 18, tooltip: false),
+              const SizedBox(width: 8),
+              Expanded(
+                child: cat == null
+                    ? const Text('No category')
+                    : TextButton(
+                        key: const ValueKey('tx-open-category'),
+                        style: TextButton.styleFrom(
+                          alignment: Alignment.centerLeft,
+                        ),
+                        onPressed: () => openBudgetCategoryById(
+                          context,
+                          ref,
+                          cat.id,
+                        ),
+                        child: Text(
+                          cat.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+              ),
+              TextButton(
+                key: const ValueKey('tx-category'),
+                onPressed: _pickCategory,
+                child: Text(cat == null ? 'Pick a category' : 'Change'),
+              ),
+              if (cat != null)
+                IconButton(
+                  key: const ValueKey('tx-clear-category'),
+                  tooltip: 'Clear the category',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => setState(() => _categoryId = null),
+                ),
+            ],
           ),
           _gap,
           Row(
@@ -1388,7 +1574,16 @@ class _BudgetTransactionDialogState
               ),
             )
           else
-            const Text('The date follows the action.'),
+            Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Text(
+                _actionStart == null
+                    ? 'The date follows the action.'
+                    : 'Action: ${formatUtcDateTime(_actionStart!, includeTime: !_actionAllDay)}',
+                key: const ValueKey('tx-action-date'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           _gap,
           TextFormField(
             key: const ValueKey('tx-name'),

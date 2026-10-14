@@ -25,6 +25,26 @@ const List<(double, int)> _anchors = [
   (600, 0xFFD9263C), // red, "> 500"
 ];
 
+/// PREVIEW (round 19): how the LIGHT theme's scale is drawn. The Settings page
+/// switches it so the variants can be compared on real screens; the chosen one
+/// becomes the only one afterwards. `current` = the saturated anchors as they
+/// were; `soft` = softened toward a lavender white; `frosted` = pastel; `deep` =
+/// the dark theme's tones used on the light page.
+enum UrgencyLightStyle {
+  current('Current'),
+  soft('Soft'),
+  frosted('Frosted'),
+  deep('Like dark');
+
+  final String label;
+  const UrgencyLightStyle(this.label);
+}
+
+UrgencyLightStyle urgencyLightStyle = UrgencyLightStyle.current;
+
+int _ck(int key, bool dark) =>
+    ((urgencyLightStyle.index * 4096) + key + 2048) * 2 + (dark ? 1 : 0);
+
 const Color _navy = Color(0xFF1E293B);
 const Color _white = Color(0xFFFFFFFF);
 const Color _darkPage = Color(0xFF0F172A);
@@ -50,7 +70,13 @@ Color _lightColorAt(double u) {
 Color urgencyBackgroundAt(double u, {required bool dark}) {
   final light = _lightColorAt(u);
   // Dark theme: the same hue, pushed deep.
-  return dark ? Color.lerp(light, _darkPage, 0.45)! : light;
+  if (dark) return Color.lerp(light, _darkPage, 0.45)!;
+  return switch (urgencyLightStyle) {
+    UrgencyLightStyle.current => light,
+    UrgencyLightStyle.soft => Color.lerp(light, const Color(0xFFF1EEFF), 0.32)!,
+    UrgencyLightStyle.frosted => Color.lerp(light, _white, 0.58)!,
+    UrgencyLightStyle.deep => Color.lerp(light, _darkPage, 0.45)!,
+  };
 }
 
 double _contrast(Color a, Color b) {
@@ -84,7 +110,7 @@ final _cacheMuted = <int, ({Color bg, Color fg})>{};
 
 /// Background and text colours for the quantised position [key] on the scale.
 ({Color bg, Color fg}) urgencyColorsForKey(int key, {required bool dark}) =>
-    _cache[key * 2 + (dark ? 1 : 0)] ??= _readable(
+    _cache[_ck(key, dark)] ??= _readable(
       urgencyBackgroundAt(key * kUrgencyStep, dark: dark),
     );
 
@@ -114,7 +140,7 @@ final _cacheMuted = <int, ({Color bg, Color fg})>{};
   }
 
   if (surface != null) return _readable(blended());
-  return _cacheMuted[key * 2 + (dark ? 1 : 0)] ??= _readable(blended());
+  return _cacheMuted[_ck(key, dark)] ??= _readable(blended());
 }
 
 ({Color bg, Color fg}) urgencyColorsMuted(

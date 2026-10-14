@@ -6,6 +6,8 @@ import '../../domain/growth_rules.dart';
 import '../calendar_fullscreen.dart';
 import '../layout.dart';
 import '../providers.dart';
+import '../saved_views_bar.dart';
+import '../../domain/saved_views.dart' show ViewScreens;
 import '../theme/glass_theme.dart';
 import '../widgets/glass.dart';
 import '../widgets/growth_direction_dialog.dart';
@@ -538,8 +540,34 @@ class _ListTabState extends ConsumerState<_ListTab> {
   _Sort _sort = _Sort.urgency;
   MetricKind? _kind;
 
+  /// Saved views: the sort is one of four orders, the filter the type.
+  SavedViewHooks _viewHooks() => SavedViewHooks(
+    screen: ViewScreens.growthList,
+    readSort: () => {'sort': _sort.name},
+    applySort: (j) => setState(
+      () => _sort = _Sort.values.firstWhere(
+        (s) => s.name == j['sort'],
+        orElse: () => _Sort.urgency,
+      ),
+    ),
+    clearSort: () => setState(() => _sort = _Sort.urgency),
+    readFilter: () => {'kind': _kind?.name},
+    applyFilter: (j) => setState(() {
+      final k = j['kind'];
+      _kind = MetricKind.values.where((m) => m.name == k).firstOrNull;
+    }),
+    clearFilter: () => setState(() => _kind = null),
+  );
+
   @override
   Widget build(BuildContext context) {
+    return SavedViewsDefaultLoader(
+      hooks: _viewHooks(),
+      child: _buildList(context),
+    );
+  }
+
+  Widget _buildList(BuildContext context) {
     return ref
         .watch(growthSnapshotProvider)
         .when(
@@ -639,6 +667,13 @@ class _ListTabState extends ConsumerState<_ListTab> {
                       onChanged: (v) => setState(() => _kind = v),
                     ),
                   ]),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: SavedViewsBar(hooks: _viewHooks()),
+                  ),
                 ),
                 Expanded(
                   child: items.isEmpty

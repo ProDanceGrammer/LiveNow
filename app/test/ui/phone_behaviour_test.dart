@@ -120,14 +120,24 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('swipe left deletes the action (undoable)', (tester) async {
+  testWidgets('swipe left always starts the action and never deletes it', (
+    tester,
+  ) async {
     await pumpPhone(tester);
     await tester.drag(find.text('Open one'), const Offset(-300, 0));
     await settle(tester);
-    final left = (await tester.runAsync(
+    final all = (await tester.runAsync(
       () => db.select(db.actionsTable).get(),
     ))!;
-    expect(left.map((a) => a.name), ['Finished one']);
+    // Nothing was deleted ...
+    expect(all.map((a) => a.name).toSet(), {'Open one', 'Finished one'});
+    // ... the swiped action was started (an unfinished occurrence), not finished.
+    final occurrences = (await tester.runAsync(
+      () => db.select(db.actionOccurrencesTable).get(),
+    ))!;
+    expect(occurrences, hasLength(1));
+    expect(occurrences.single.actionId, openId);
+    expect(occurrences.single.finishedAt, isNull);
     expect(find.text('Undo'), findsOneWidget);
     await settle(tester, 6000);
     await unmount(tester);

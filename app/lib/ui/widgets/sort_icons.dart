@@ -23,7 +23,11 @@ Widget sortFieldIcon(Object field, {double size = 16}) {
     TxSortField.date => material(Icons.event),
     TxSortField.amount => material(Icons.payments_outlined),
     TxSortField.name => material(Icons.sort_by_alpha),
-    TxSortField.category => material(Icons.category_outlined),
+    TxSortField.category => ParamIcon(
+      Param.categories,
+      size: size,
+      tooltip: false,
+    ),
     TemplateSortField.name => material(Icons.sort_by_alpha),
     TemplateSortField.direction => material(Icons.insights),
     TemplateSortField.urgency => ParamIcon.urgency(size: size, tooltip: false),

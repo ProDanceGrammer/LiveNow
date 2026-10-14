@@ -6,6 +6,7 @@ import '../../domain/budget_tx_view_rules.dart';
 import '../budget_providers.dart';
 import 'budget_dialogs.dart';
 import 'budget_format.dart';
+import 'param_icons.dart';
 
 /// The transactions of one category (a group: of everything below it), newest
 /// first: date, name, the sum in the counting currency and in the main
@@ -60,8 +61,31 @@ class CategoryTransactionsPanel extends ConsumerWidget {
       countTotals[cur] = (countTotals[cur] ?? 0) + a.count;
     }
 
+    var income = 0.0;
+    var expense = 0.0;
+    for (final a in amounts) {
+      final v = a.base;
+      if (v == null) continue;
+      if (v >= 0) {
+        income += v;
+      } else {
+        expense += v;
+      }
+    }
+    final figures = view.snapshot.byCategory[categoryId];
+    final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5);
+
+    Widget figure(Widget icon, String text, {Key? key}) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        icon,
+        const SizedBox(width: 4),
+        Text(text, key: key, style: muted),
+      ],
+    );
+
     final header = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -69,7 +93,8 @@ class CategoryTransactionsPanel extends ConsumerWidget {
             'Transactions (${items.length})',
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
-          if (items.isNotEmpty)
+          if (items.isNotEmpty) ...[
+            const SizedBox(height: 2),
             Text(
               [
                 for (final e in countTotals.entries)
@@ -80,12 +105,52 @@ class CategoryTransactionsPanel extends ConsumerWidget {
                       '${baseMissing ? ' (some without a rate)' : ''}',
               ].join('  ·  '),
               key: const ValueKey('category-tx-total'),
-              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
+              style: muted,
             ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 16,
+              runSpacing: 2,
+              children: [
+                Text(
+                  'Income ${budgetMoney(income, sign: true)} $base',
+                  key: const ValueKey('category-tx-income'),
+                  style: muted,
+                ),
+                Text(
+                  'Expense ${budgetMoney(expense, sign: true)} $base',
+                  key: const ValueKey('category-tx-expense'),
+                  style: muted,
+                ),
+              ],
+            ),
+          ],
+          if (figures != null) ...[
+            const SizedBox(height: 4),
+            // Plan first, then Fact, for the budget settings period.
+            Wrap(
+              spacing: 16,
+              runSpacing: 2,
+              children: [
+                figure(
+                  const ParamIcon(Param.plan, size: 16, tapToShow: true),
+                  '${budgetMoney(figures.planBase, sign: true)} $base',
+                  key: const ValueKey('category-tx-plan'),
+                ),
+                figure(
+                  const ParamIcon(Param.actual, size: 16, tapToShow: true),
+                  '${budgetMoney(figures.factBase, sign: true)} $base',
+                  key: const ValueKey('category-tx-fact'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
 
+    // A plain InkWell row (not a dense/compact ListTile: its fixed minimum
+    // height overflowed by 3 px with the two-line amount on the right).
     Widget tile(int i) {
       final t = items[i];
       final a = amounts[i];
@@ -93,33 +158,45 @@ class CategoryTransactionsPanel extends ConsumerWidget {
       final name = t.row.name.isNotEmpty
           ? t.row.name
           : (view.categoryById[t.row.categoryId]?.name ?? 'No name');
-      return ListTile(
+      return InkWell(
         key: ValueKey('category-tx-${t.row.id}'),
-        dense: true,
-        visualDensity: VisualDensity.compact,
-        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(budgetDate(t.date)),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              '${budgetMoney(a.count, sign: true)} $cur'.trim(),
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            if (cur != base)
-              Text(
-                a.base == null
-                    ? '— $base'
-                    : '${budgetMoney(a.base!, sign: true)} $base',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: scheme.onSurfaceVariant,
+        onTap: () => BudgetTransactionDialog.show(context, existing: t),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(budgetDate(t.date), style: muted),
+                  ],
                 ),
               ),
-          ],
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${budgetMoney(a.count, sign: true)} $cur'.trim(),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  if (cur != base)
+                    Text(
+                      a.base == null
+                          ? '— $base'
+                          : '${budgetMoney(a.base!, sign: true)} $base',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
-        onTap: () => BudgetTransactionDialog.show(context, existing: t),
       );
     }
 

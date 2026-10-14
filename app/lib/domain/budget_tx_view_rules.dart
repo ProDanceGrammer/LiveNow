@@ -75,16 +75,24 @@ enum TxActionLink { any, linked, unlinked }
 
 /// The filters of the Transactions list. Empty/null parts do not filter.
 class TxFilters {
-  /// Chosen categories; a chosen GROUP also matches everything below it.
+  /// Chosen categories; a chosen GROUP also matches everything below it. With
+  /// [excludeCategories] the chosen ones are the only ones LEFT OUT instead.
   final Set<String> categoryIds;
+  final bool excludeCategories;
   final Set<String> accountIds;
   final TxActionLink action;
+
+  /// Chosen actions: only transactions linked to one of them (on top of
+  /// [action]). Empty = any action.
+  final Set<String> actionIds;
   final DateRangeFilter dateRange;
 
   const TxFilters({
     this.categoryIds = const {},
+    this.excludeCategories = false,
     this.accountIds = const {},
     this.action = TxActionLink.any,
+    this.actionIds = const {},
     this.dateRange = const DateRangeFilter(),
   });
 
@@ -92,17 +100,22 @@ class TxFilters {
       categoryIds.isNotEmpty ||
       accountIds.isNotEmpty ||
       action != TxActionLink.any ||
+      actionIds.isNotEmpty ||
       dateRange.active;
 
   TxFilters copyWith({
     Set<String>? categoryIds,
+    bool? excludeCategories,
     Set<String>? accountIds,
     TxActionLink? action,
+    Set<String>? actionIds,
     DateRangeFilter? dateRange,
   }) => TxFilters(
     categoryIds: categoryIds ?? this.categoryIds,
+    excludeCategories: excludeCategories ?? this.excludeCategories,
     accountIds: accountIds ?? this.accountIds,
     action: action ?? this.action,
+    actionIds: actionIds ?? this.actionIds,
     dateRange: dateRange ?? this.dateRange,
   );
 }
@@ -209,6 +222,10 @@ class TxTotals {
   final Map<String, double> interact = {};
   double base = 0;
 
+  /// The main-currency sum split by sign (income / expense, the latter <= 0).
+  double income = 0;
+  double expense = 0;
+
   /// Transactions that could not be converted to the main currency.
   int noBase = 0;
   int count = 0;
@@ -228,8 +245,36 @@ class TxTotals {
       noBase++;
     } else {
       base += a.base!;
+      if (a.base! >= 0) {
+        income += a.base!;
+      } else {
+        expense += a.base!;
+      }
     }
   }
+}
+
+/// The categories whose plan and fact belong to a filtered list: the leaf
+/// categories of its transactions ([txCategoryIds]) and, when the categories are
+/// filtered in (not excluded), every leaf below the chosen ones, so a chosen
+/// category with no transaction in the period still shows its plan. [parentOf]
+/// maps a category id to its parent id.
+Set<String> figureCategoryIds({
+  required Iterable<String> txCategoryIds,
+  required TxFilters filters,
+  required Map<String, String?> parentOf,
+}) {
+  final hasKids = {for (final p in parentOf.values) ?p};
+  final out = <String>{for (final id in txCategoryIds) id};
+  if (filters.categoryIds.isNotEmpty && !filters.excludeCategories) {
+    final below = categoryWithDescendants(parentOf);
+    for (final id in filters.categoryIds) {
+      for (final d in below[id] ?? {id}) {
+        if (!hasKids.contains(d)) out.add(d);
+      }
+    }
+  }
+  return out;
 }
 
 /// For every category: itself and every category below it. [parentOf] maps a
@@ -283,8 +328,13 @@ List<String> arrangeTransactionIds({
   };
 
   bool keep(TxRowView t) {
-    if (filters.categoryIds.isNotEmpty &&
-        !(t.categoryId != null && wantedCategories.contains(t.categoryId))) {
+    if (filters.categoryIds.isNotEmpty) {
+      final inChosen =
+          t.categoryId != null && wantedCategories.contains(t.categoryId);
+      if (filters.excludeCategories ? inChosen : !inChosen) return false;
+    }
+    if (filters.actionIds.isNotEmpty &&
+        !(t.actionId != null && filters.actionIds.contains(t.actionId))) {
       return false;
     }
     if (filters.accountIds.isNotEmpty &&

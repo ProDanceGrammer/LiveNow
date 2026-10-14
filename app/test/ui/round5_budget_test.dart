@@ -176,7 +176,7 @@ void main() {
     await settle(tester);
     await tester.pump(const Duration(milliseconds: 400));
 
-    await tester.tap(find.byKey(const ValueKey('category-parent')));
+    await tester.tap(find.byKey(const ValueKey('category-parent-add')));
     await settle(tester);
     await tester.pump(const Duration(milliseconds: 400));
 

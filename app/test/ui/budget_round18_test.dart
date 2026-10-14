@@ -99,8 +99,23 @@ void main() {
       find.descendant(of: total, matching: find.textContaining('Total (2)')),
       findsOneWidget,
     );
+    // (The main row, the expense line and the period's fact all say 6.00 EUR.)
     expect(
       find.descendant(of: total, matching: find.textContaining('6.00 EUR')),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(
+        of: total,
+        matching: find.byKey(const ValueKey('tx-totals-plan')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: total,
+        matching: find.byKey(const ValueKey('tx-totals-fact')),
+      ),
       findsOneWidget,
     );
     expect(

@@ -3,16 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
+import '../../domain/budget_account_view.dart';
 import '../../domain/budget_rules.dart';
 import '../../domain/budget_tx_view_rules.dart';
 import '../../domain/budget_service.dart';
 import '../../domain/name_sort.dart';
 import '../budget_providers.dart';
+import '../device_prefs.dart';
+import '../saved_view_hooks.dart';
+import '../saved_views_bar.dart'
+    show SavedViewsBar, SavedViewsDefaultLoader;
 import '../providers.dart'
     show actionUrgencyProvider, actionsWithDirectionsProvider;
 import '../urgency_colors.dart';
 import '../widgets/action_tile.dart' show formatUrgency;
 import '../layout.dart';
+import '../time_format.dart' show formatDateTime, wallFromUtc;
 import '../undo.dart' show offerUndo, undoHistoryProvider;
 import '../open_entity.dart';
 import '../widgets/account_icon.dart';
@@ -23,6 +29,7 @@ import '../widgets/budget_dialogs.dart';
 import '../widgets/budget_format.dart';
 import '../widgets/glass.dart';
 import '../widgets/param_icons.dart';
+import '../widgets/sort_chips.dart';
 
 enum BudgetTab {
   overview('Overview'),
@@ -405,14 +412,6 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
               runSpacing: 12,
               children: [
                 _Figure(
-                  key: const ValueKey('budget-fact-total'),
-                  icon: Param.actual,
-                  label:
-                      '${budgetDate(period.factStart)} – ${budgetDate(period.asOf)}',
-                  value: snap.factTotal,
-                  currency: cur,
-                ),
-                _Figure(
                   key: const ValueKey('budget-plan-total'),
                   icon: Param.plan,
                   label:
@@ -421,9 +420,17 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
                   currency: cur,
                 ),
                 _Figure(
+                  key: const ValueKey('budget-fact-total'),
+                  icon: Param.actual,
+                  label:
+                      '${budgetDate(period.factStart)} – ${budgetDate(period.asOf)}',
+                  value: snap.factTotal,
+                  currency: cur,
+                ),
+                _Figure(
                   key: const ValueKey('budget-position'),
                   label: 'Position',
-                  trailingIcons: const [Param.actual, Param.plan],
+                  trailingIcons: const [Param.plan, Param.actual],
                   value: snap.position,
                   currency: cur,
                   strong: true,
@@ -733,11 +740,21 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
     final filters = ref.watch(budgetTxFiltersProvider);
     final grouping = ref.watch(budgetTxGroupProvider);
     final collapsed = ref.watch(budgetTxCollapsedProvider);
+    final phone = usePhoneLayout(context);
+    // Device-local: which values and whether the totals show.
+    final cols = _TxCols(
+      ref.watch(devicePrefBoolProvider((kTxCountingPref, true))),
+      ref.watch(devicePrefBoolProvider((kTxInteractPref, true))),
+      ref.watch(devicePrefBoolProvider((kTxMainPref, true))),
+    );
+    final showTotals = ref.watch(devicePrefBoolProvider((kTxTotalsPref, true)));
     final optionsActive =
         filters.active ||
         flags != const TxSearchFlags() ||
         !listEquals(sort, kDefaultTxSort);
-    return _loading(ref.watch(budgetViewProvider), (view) {
+    return SavedViewsDefaultLoader(
+      hooks: txViewHooks(ref),
+      child: _loading(ref.watch(budgetViewProvider), (view) {
       final cats = view.categoryById;
       final accounts = view.accountById;
       final now = DateTime.now().toUtc();
@@ -791,6 +808,21 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
       for (final t in items) {
         addTo(overall, t);
       }
+      // Plan and fact of the budget period for the categories the filters leave.
+      final figureIds = figureCategoryIds(
+        txCategoryIds: [for (final t in items) ?t.row.categoryId],
+        filters: filters,
+        parentOf: {for (final c in view.categories) c.id: c.parentId},
+      );
+      var planSum = 0.0;
+      var factSum = 0.0;
+      for (final id in figureIds) {
+        final f = view.snapshot.byCategory[id];
+        if (f == null) continue;
+        planSum += f.planBase;
+        factSum += f.factBase;
+      }
+      final figures = _TxFigures(planSum, factSum);
       final groups = groupTransactionRows(
         [for (final id in ids) rowById[id]!],
         grouping,
@@ -806,7 +838,22 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
           addTo(totals, byId[id]!);
         }
         final folded = grouped && collapsed.contains(g.key);
-        if (grouped) entries.add(_GroupEntry(g, totals, folded));
+        // An action group shows the action's date and time (its transactions
+        // follow it, so the first one has it).
+        String? when;
+        if (grouping == TxGroupBy.action &&
+            g.key.isNotEmpty &&
+            g.ids.isNotEmpty) {
+          final d = byId[g.ids.first]!.date;
+          final wall = wallFromUtc(d);
+          when = formatDateTime(
+            wall,
+            includeTime: wall.hour != 0 || wall.minute != 0,
+          );
+        }
+        if (grouped) {
+          entries.add(_GroupEntry(g, totals, folded, subtitle: when));
+        }
         if (folded) continue;
         BudgetTxItem? prev;
         for (final id in g.ids) {
@@ -853,14 +900,18 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
           // The total of everything the search and filters leave in the list.
           if (items.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
               child: _TotalsBlock(
                 key: const ValueKey('tx-totals'),
                 title: 'Total (${items.length})',
                 totals: overall,
                 base: base,
+                cols: cols,
+                showTotals: showTotals,
+                figures: showTotals ? figures : null,
               ),
             ),
+          if (items.isNotEmpty && !phone) _TxColumnsHeader(cols: cols),
           Expanded(
             child: items.isEmpty
                 ? Center(
@@ -879,6 +930,8 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                         return _GroupHeader(
                           entry: e,
                           base: base,
+                          cols: cols,
+                          showTotals: showTotals,
                           onToggle: () {
                             final n = ref.read(budgetTxCollapsedProvider.notifier);
                             final next = {...n.state};
@@ -901,7 +954,12 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                       return _TransactionTile(
                         item: t,
                         category: cats[t.row.categoryId],
+                        amounts: amounts[t.row.id]!,
                         currency: accounts[t.row.accountCountId]?.currency,
+                        useCurrency: accounts[t.row.accountUseId]?.currency,
+                        base: base,
+                        cols: cols,
+                        phone: phone,
                         accountIcon: accounts[t.row.accountCountId]?.icon,
                         hasAccount: accounts[t.row.accountCountId] != null,
                       );
@@ -910,34 +968,72 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
           ),
         ],
       );
-    });
+    }),
+    );
   }
 }
 
+/// Which of the three values (counting, interactional, main) are shown.
+class _TxCols {
+  const _TxCols(this.counting, this.interact, this.main);
+
+  final bool counting;
+  final bool interact;
+  final bool main;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _TxCols &&
+      other.counting == counting &&
+      other.interact == interact &&
+      other.main == main;
+
+  @override
+  int get hashCode => Object.hash(counting, interact, main);
+}
+
+/// Plan and fact of the period for the categories of the filtered list.
+class _TxFigures {
+  const _TxFigures(this.plan, this.fact);
+
+  final double plan;
+  final double fact;
+}
+
+/// Width of one value column on a wide window (header and tiles share it).
+const double _kTxColW = 132;
+
 /// A group header row of the Transactions list.
 class _GroupEntry {
-  const _GroupEntry(this.group, this.totals, this.folded);
+  const _GroupEntry(this.group, this.totals, this.folded, {this.subtitle});
 
   final TxGroup group;
   final TxTotals totals;
   final bool folded;
+
+  /// Under the title (an action group: the action's date and time).
+  final String? subtitle;
 }
 
 class _GroupHeader extends StatelessWidget {
   const _GroupHeader({
     required this.entry,
     required this.base,
+    required this.cols,
+    required this.showTotals,
     required this.onToggle,
   });
 
   final _GroupEntry entry;
   final String base;
+  final _TxCols cols;
+  final bool showTotals;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 4),
       child: InkWell(
         key: ValueKey('tx-group-header-${entry.group.key}'),
         borderRadius: BorderRadius.circular(12),
@@ -955,8 +1051,11 @@ class _GroupHeader extends StatelessWidget {
               Expanded(
                 child: _TotalsBlock(
                   title: '${entry.group.title} (${entry.group.ids.length})',
+                  subtitle: entry.subtitle,
                   totals: entry.totals,
                   base: base,
+                  cols: cols,
+                  showTotals: showTotals,
                   bold: true,
                 ),
               ),
@@ -968,32 +1067,52 @@ class _GroupHeader extends StatelessWidget {
   }
 }
 
-/// A title and the three totals: counting and interactional per currency, then
-/// the main currency (with a note when some amounts have no rate).
+/// A title and the chosen totals as separate labelled rows (counting and
+/// interactional per currency, then the main currency with a note when some
+/// amounts have no rate). The overall block also shows income / expense and the
+/// period's plan and fact ([figures]).
 class _TotalsBlock extends StatelessWidget {
   const _TotalsBlock({
     super.key,
     required this.title,
+    this.subtitle,
     required this.totals,
     required this.base,
+    required this.cols,
+    required this.showTotals,
     this.bold = false,
+    this.figures,
   });
 
   final String title;
+  final String? subtitle;
   final TxTotals totals;
   final String base;
+  final _TxCols cols;
+  final bool showTotals;
   final bool bold;
+  final _TxFigures? figures;
 
   static String _sums(Map<String, double> m) => [
-    for (final e in m.entries) '${budgetMoney(e.value, sign: true)} ${e.key}'.trim(),
+    for (final e in m.entries)
+      '${budgetMoney(e.value, sign: true)} ${e.key}'.trim(),
   ].join(', ');
 
   @override
   Widget build(BuildContext context) {
-    final small = TextStyle(
-      fontSize: 12,
-      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final scheme = Theme.of(context).colorScheme;
+    final small = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
+    Widget row(String label, String value) => Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 92, child: Text(label, style: small)),
+          Expanded(child: Text(value, style: small)),
+        ],
+      ),
     );
+    final f = figures;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1001,21 +1120,96 @@ class _TotalsBlock extends StatelessWidget {
           title,
           style: TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w600),
         ),
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: 'Counting: ${_sums(totals.counting)}'),
-              if (totals.interact.isNotEmpty)
-                TextSpan(text: '   Interactional: ${_sums(totals.interact)}'),
-              TextSpan(
-                text: '   Main: ${budgetMoney(totals.base, sign: true)} $base'
-                    '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
-              ),
-            ],
+        if (subtitle != null)
+          Text(
+            subtitle!,
+            key: const ValueKey('tx-group-date'),
+            style: small,
           ),
-          style: small,
-        ),
+        if (showTotals) ...[
+          if (cols.counting) row('Counting', _sums(totals.counting)),
+          if (cols.interact && totals.interact.isNotEmpty)
+            row('Interactional', _sums(totals.interact)),
+          if (cols.main)
+            row(
+              'Main',
+              '${budgetMoney(totals.base, sign: true)} $base'
+                  '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
+            ),
+          if (f != null) ...[
+            row(
+              'Income',
+              '${budgetMoney(totals.income, sign: true)} $base',
+            ),
+            row(
+              'Expense',
+              '${budgetMoney(totals.expense, sign: true)} $base',
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Wrap(
+                spacing: 16,
+                runSpacing: 2,
+                children: [
+                  // Plan first, then Fact (the budget settings period).
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const ParamIcon(Param.plan, size: 16, tapToShow: true),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${budgetMoney(f.plan, sign: true)} $base',
+                        key: const ValueKey('tx-totals-plan'),
+                        style: small,
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const ParamIcon(Param.actual, size: 16, tapToShow: true),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${budgetMoney(f.fact, sign: true)} $base',
+                        key: const ValueKey('tx-totals-fact'),
+                        style: small,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ],
+    );
+  }
+}
+
+/// The column names above the list (wide windows; a phone labels each value).
+class _TxColumnsHeader extends StatelessWidget {
+  const _TxColumnsHeader({required this.cols});
+
+  final _TxCols cols;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.labelMedium;
+    Widget cell(String text) => SizedBox(
+      width: _kTxColW,
+      child: Text(text, textAlign: TextAlign.right, style: style),
+    );
+    return Padding(
+      // The tile's card margin (12) + its inner right padding (16).
+      padding: const EdgeInsets.fromLTRB(28, 4, 28, 0),
+      child: Row(
+        children: [
+          const Spacer(),
+          if (cols.counting) cell('Counting'),
+          if (cols.interact) cell('Interactional'),
+          if (cols.main) cell('Main'),
+        ],
+      ),
     );
   }
 }
@@ -1024,14 +1218,24 @@ class _TransactionTile extends ConsumerWidget {
   const _TransactionTile({
     required this.item,
     required this.category,
+    required this.amounts,
     required this.currency,
+    this.useCurrency,
+    required this.base,
+    required this.cols,
+    required this.phone,
     this.accountIcon,
     this.hasAccount = false,
   });
 
   final BudgetTxItem item;
   final BudgetCategory? category;
+  final TxAmounts amounts;
   final String? currency;
+  final String? useCurrency;
+  final String base;
+  final _TxCols cols;
+  final bool phone;
 
   /// The counting account's picture (null = none) and whether there is an
   /// account at all (no account = no icon shown).
@@ -1041,9 +1245,6 @@ class _TransactionTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final t = item.row;
-    final amount =
-        (t.isIncome ? 1 : -1) *
-        (t.isAmount ? t.quantity : t.unitPrice * t.quantity);
     final scheme = Theme.of(context).colorScheme;
     final detail = t.isAmount
         ? null
@@ -1064,6 +1265,73 @@ class _TransactionTile extends ConsumerWidget {
     );
     final tint = _urgencyTint(context, urgency: urgency, unlinked: unlinked);
     final fg = tint?.fg;
+
+    // The three values. The counting one keeps its sign colour (red / green)
+    // unless the tile is tinted (then the text colour, to stay readable).
+    final countColor = fg ?? (amounts.count < 0 ? scheme.error : Colors.green);
+    String money(double? v, String cur) =>
+        v == null ? '—' : '${budgetMoney(v, sign: true)} $cur'.trim();
+    final countText = money(amounts.count, currency ?? '');
+    final interactText = useCurrency == null
+        ? '—'
+        : money(amounts.interact, useCurrency!);
+    final mainText = money(amounts.base, base);
+    final valueStyle = TextStyle(fontWeight: FontWeight.w600, color: fg);
+    final labelStyle = TextStyle(
+      fontSize: 10,
+      color: (fg ?? scheme.onSurface).withValues(alpha: 0.65),
+    );
+
+    Widget wideCell(String text, {Color? color, Widget? leading}) => SizedBox(
+      width: _kTxColW,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          if (leading != null) ...[leading, const SizedBox(width: 4)],
+          Flexible(
+            child: Text(
+              text,
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              style: valueStyle.copyWith(color: color ?? fg),
+            ),
+          ),
+        ],
+      ),
+    );
+    Widget phoneLine(String label, String text, {Color? color}) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$label ', style: labelStyle),
+        Text(text, style: valueStyle.copyWith(color: color ?? fg, fontSize: 12.5)),
+      ],
+    );
+
+    final accountLeading = hasAccount
+        ? AccountIcon(icon: accountIcon, size: 18)
+        : null;
+    final Widget values = phone
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (cols.counting)
+                phoneLine('Counting', countText, color: countColor),
+              if (cols.interact) phoneLine('Interactional', interactText),
+              if (cols.main) phoneLine('Main', mainText),
+            ],
+          )
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (cols.counting)
+                wideCell(countText, color: countColor, leading: accountLeading),
+              if (cols.interact) wideCell(interactText),
+              if (cols.main) wideCell(mainText),
+            ],
+          );
+
+    final dim = TextStyle(fontSize: 12.5, color: fg ?? scheme.onSurfaceVariant);
     return _card(
       padding: EdgeInsets.zero,
       child: DecoratedBox(
@@ -1072,99 +1340,93 @@ class _TransactionTile extends ConsumerWidget {
           borderRadius: BorderRadius.circular(16),
         ),
         child: Material(
-        type: MaterialType.transparency,
-        child: ListTile(
-          key: ValueKey('budget-tx-${t.id}'),
-          shape: RoundedRectangleBorder(
+          type: MaterialType.transparency,
+          child: InkWell(
+            key: ValueKey('budget-tx-${t.id}'),
             borderRadius: BorderRadius.circular(16),
-          ),
-          textColor: fg,
-          iconColor: fg,
-          dense: true,
-          // Line 1: the transaction's own name.
-          title: t.name.isEmpty
-              ? Text(
-                  'No name',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                )
-              : Text(t.name),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Line 2: the categories icon and the category name.
-              Row(
-                key: ValueKey('budget-tx-category-${t.id}'),
-                mainAxisSize: MainAxisSize.min,
+            onTap: () => BudgetTransactionDialog.show(context, existing: item),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  ParamIcon(
-                    Param.categories,
-                    size: 14,
-                    tooltip: false,
-                    color: fg,
-                  ),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      category?.name ?? 'No category',
-                      overflow: TextOverflow.ellipsis,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Line 1: the transaction's own name.
+                        t.name.isEmpty
+                            ? Text(
+                                'No name',
+                                style: TextStyle(color: scheme.onSurfaceVariant),
+                              )
+                            : Text(
+                                t.name,
+                                style: TextStyle(color: fg),
+                              ),
+                        // Line 2: the categories icon and the category name.
+                        Row(
+                          key: ValueKey('budget-tx-category-${t.id}'),
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ParamIcon(
+                              Param.categories,
+                              size: 14,
+                              tooltip: false,
+                              color: fg,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                category?.name ?? 'No category',
+                                overflow: TextOverflow.ellipsis,
+                                style: dim,
+                              ),
+                            ),
+                          ],
+                        ),
+                        // Line 3: quantity x price.
+                        if (detail != null) Text(detail, style: dim),
+                        // Line 4: the action, as before.
+                        if (t.actionId != null)
+                          InkWell(
+                            key: ValueKey('budget-tx-action-${t.id}'),
+                            onTap: () => openActionById(context, ref, t.actionId!),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.bolt_outlined, size: 14, color: fg),
+                                Flexible(
+                                  child: Text(
+                                    item.actionName ?? 'Action',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: dim,
+                                  ),
+                                ),
+                                // Urgency of the action, coloured like its tile.
+                                if (urgency != null) ...[
+                                  const SizedBox(width: 8),
+                                  ParamValue.urgency(
+                                    formatUrgency(urgency),
+                                    key: ValueKey('budget-tx-urgency-${t.id}'),
+                                    size: 16,
+                                    color: fg ?? scheme.onSurface,
+                                    iconColor: fg,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  values,
                 ],
               ),
-              // Line 3: quantity x price.
-              if (detail != null) Text(detail),
-              // Line 4: the action, as before.
-              if (t.actionId != null)
-                InkWell(
-                  key: ValueKey('budget-tx-action-${t.id}'),
-                  onTap: () => openActionById(context, ref, t.actionId!),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.bolt_outlined, size: 14, color: fg),
-                      Flexible(
-                        child: Text(
-                          item.actionName ?? 'Action',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      // Urgency of the action, coloured like its tile.
-                      if (urgency != null) ...[
-                        const SizedBox(width: 8),
-                        ParamValue.urgency(
-                          formatUrgency(urgency),
-                          key: ValueKey('budget-tx-urgency-${t.id}'),
-                          size: 16,
-                          color: fg ?? scheme.onSurface,
-                          iconColor: fg,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-            ],
+            ),
           ),
-          onTap: () => BudgetTransactionDialog.show(context, existing: item),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (hasAccount) ...[
-                AccountIcon(icon: accountIcon, size: 20),
-                const SizedBox(width: 6),
-              ],
-              Text(
-                '${budgetMoney(amount, sign: true)} ${currency ?? ''}'.trim(),
-                // The amount carries its sign; on a tinted tile it uses the text
-                // colour (red/green would clash with the scale).
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: fg ?? (amount < 0 ? scheme.error : Colors.green),
-                ),
-              ),
-            ],
-          ),
-        ),
         ),
       ),
     );
@@ -1183,68 +1445,191 @@ class _AccountsView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return _loading(ref.watch(budgetViewProvider), (view) {
+    final sort = ref.watch(budgetAccountSortProvider);
+    return SavedViewsDefaultLoader(
+      hooks: accountViewHooks(ref),
+      child: _loading(ref.watch(budgetViewProvider), (view) {
       final base = view.settings.baseCurrency;
       if (view.accounts.isEmpty) {
         return const Center(child: Text('No accounts yet.'));
       }
-      final accounts = [...view.accounts]
-        ..sort((a, b) => compareIgnoringEmoji(a.name, b.name));
+      final byId = {for (final a in view.accounts) a.id: a};
+      double balanceOf(BudgetAccount a) =>
+          view.balances[a.id]?.amount ?? a.openingBalance;
+      final ordered = sortAccounts([
+        for (final a in view.accounts)
+          AccountSortInput(
+            id: a.id,
+            name: a.name,
+            type: a.type,
+            rate: a.rateToBase,
+            balance: balanceOf(a),
+            mainBalance: accountMainBalance(balanceOf(a), a.rateToBase),
+          ),
+      ], sort);
+
+      void setSort(List<AccountSortKey> v) =>
+          ref.read(budgetAccountSortProvider.notifier).state = v;
+      final remaining = <SortOption>[
+        for (final f in AccountSortField.values)
+          if (!sort.any((k) => k.field == f)) (f.name, f.label, null),
+      ];
+
+      Widget figure(String label, String value, {Key? key}) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            value,
+            key: key,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          ),
+        ],
+      );
+
       return ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 88),
         children: [
-          for (final a in accounts)
-            _card(
-              padding: EdgeInsets.zero,
-              child: Material(
-                type: MaterialType.transparency,
-                child: ListTile(
-                  key: ValueKey('budget-account-${a.id}'),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: SortChipsRow(
+              keyPrefix: 'account-sort',
+              chips: [
+                for (final k in sort)
+                  SortChipData(
+                    k.field.name,
+                    k.field.label,
+                    ascending: k.ascending,
                   ),
-                  leading: AccountIcon(
-                    key: ValueKey('budget-account-icon-${a.id}'),
-                    icon: a.icon,
-                    size: 36,
-                  ),
-                  title: Text(a.name),
-                  subtitle: Text(
-                    [
-                      if (a.type != null) a.type!,
-                      '${a.currency} · ${budgetNumber(a.rateToBase)} per 1 $base',
-                    ].join(' · '),
-                  ),
-                  onTap: () => BudgetAccountDialog.show(context, existing: a),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (view.balances[a.id]?.incomplete ?? false)
-                        const Tooltip(
-                          message: 'Some transactions have no rate and are left out.',
-                          child: Icon(Icons.warning_amber_rounded, size: 18),
-                        ),
-                      Text(
-                        '${_balanceText(view.balances[a.id]?.amount ?? a.openingBalance, a.rateToBase)} ${a.currency}',
-                        key: ValueKey('budget-balance-${a.id}'),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
+              ],
+              addOptions: remaining,
+              onToggle: (i) => setSort([
+                for (var j = 0; j < sort.length; j++)
+                  if (j == i) sort[j].toggled() else sort[j],
+              ]),
+              onRemove: (i) => setSort([...sort]..removeAt(i)),
+              onMove: (from, to) {
+                if (from == to) return;
+                final list = [...sort];
+                list.insert(to, list.removeAt(from));
+                setSort(list);
+              },
+              onAdd: (id) => setSort([
+                ...sort,
+                AccountSortKey(AccountSortField.values.byName(id)),
+              ]),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: SavedViewsBar(hooks: accountViewHooks(ref)),
+          ),
+          for (final item in ordered)
+            Builder(
+              builder: (context) {
+                final a = byId[item.id]!;
+                final incomplete = view.balances[a.id]?.incomplete ?? false;
+                return _card(
+                  padding: EdgeInsets.zero,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: InkWell(
+                      key: ValueKey('budget-account-${a.id}'),
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () =>
+                          BudgetAccountDialog.show(context, existing: a),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 4, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // The parameters sit on top, over the balances.
+                            Row(
+                              children: [
+                                AccountIcon(
+                                  key: ValueKey('budget-account-icon-${a.id}'),
+                                  icon: a.icon,
+                                  size: 36,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        a.name,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium,
+                                      ),
+                                      Text(
+                                        [
+                                          if (a.type != null &&
+                                              a.type!.trim().isNotEmpty)
+                                            a.type!,
+                                          a.currency,
+                                          '${budgetNumber(a.rateToBase)} per 1 $base',
+                                        ].join(' · '),
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  key: ValueKey('budget-delete-account-${a.id}'),
+                                  tooltip: 'Delete',
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () =>
+                                      _deleteAccount(context, ref, a),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 48),
+                              child: Wrap(
+                                spacing: 24,
+                                runSpacing: 6,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  figure(
+                                    'Balance',
+                                    '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
+                                    key: ValueKey('budget-balance-${a.id}'),
+                                  ),
+                                  figure(
+                                    'Main ($base)',
+                                    item.mainBalance == null
+                                        ? '—'
+                                        : '${budgetMoney(item.mainBalance!)} $base',
+                                    key: ValueKey('budget-main-balance-${a.id}'),
+                                  ),
+                                  if (incomplete)
+                                    const Tooltip(
+                                      message:
+                                          'Some transactions have no rate and are left out.',
+                                      child: Icon(
+                                        Icons.warning_amber_rounded,
+                                        size: 18,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      IconButton(
-                        key: ValueKey('budget-delete-account-${a.id}'),
-                        tooltip: 'Delete',
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _deleteAccount(context, ref, a),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
         ],
       );
-    });
+    }),
+    );
   }
 }

@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../urgency_colors.dart';
+import '../urgency_style.dart';
 import '../../data/reminders/local_notifications_sink.dart';
 import '../../data/backup/auto_backup.dart' show AutoBackupOutcome;
 import '../backup_providers.dart';
@@ -95,6 +97,8 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              title('Urgency colours (preview)'),
+              const _UrgencyStyleBlock(),
               if (LocalNotificationsSink.supported) ...[
                 title('Notifications'),
                 _Panel(
@@ -373,6 +377,79 @@ class SettingsScreen extends ConsumerWidget {
 /// A rounded glass-tinted panel that is itself a Material, so the ListTiles
 /// inside paint their ink on it (a decorated Container around them would hide
 /// it).
+/// PREVIEW (round 19): picks how the light theme draws the urgency scale and
+/// shows the scale itself; every list takes the choice at once.
+class _UrgencyStyleBlock extends ConsumerWidget {
+  const _UrgencyStyleBlock();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = ref.watch(urgencyStyleProvider);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return SectionBlock(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final s in UrgencyLightStyle.values)
+                ChoiceChip(
+                  key: ValueKey('urgency-style-${s.name}'),
+                  label: Text(s.label),
+                  selected: style == s,
+                  onSelected: (_) => setUrgencyStyle(ref, s),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            dark
+                ? 'The dark theme is not affected: switch to Light to compare.'
+                : 'Applies to Current, All, Templates, Calendar and the Budget.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final u in const [-300.0, -100.0, 0.0, 125.0, 350.0, 600.0])
+                Expanded(
+                  child: Builder(
+                    builder: (_) {
+                      final c = urgencyColors(u, dark: dark);
+                      return Container(
+                        height: 36,
+                        margin: const EdgeInsets.only(right: 4),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: c.bg,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: urgencyOutline(c.bg, dark: dark),
+                          ),
+                        ),
+                        child: Text(
+                          u.toStringAsFixed(0),
+                          style: TextStyle(
+                            color: c.fg,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Panel extends StatelessWidget {
   const _Panel({required this.child});
 

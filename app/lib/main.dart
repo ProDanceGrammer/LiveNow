@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'domain/postpone_rules.dart';
+import 'ui/urgency_style.dart';
 import 'ui/link_launcher.dart';
 import 'ui/root_navigator.dart';
 import 'ui/screens/home_shell.dart';
@@ -59,8 +60,9 @@ class LiveNowApp extends ConsumerWidget {
           themeMode: ref.watch(themeModeProvider),
           // The window background (gradient + clouds + its blurred snapshot)
           // sits once under every page and dialog; pages are transparent.
-          builder: (context, child) =>
-              GlassBackground(child: child ?? const SizedBox.shrink()),
+          builder: (context, child) => UrgencyStyleScope(
+            child: GlassBackground(child: child ?? const SizedBox.shrink()),
+          ),
           home: const HomeShell(),
         ),
       ),

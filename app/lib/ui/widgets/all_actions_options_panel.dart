@@ -1,3 +1,5 @@
+import '../saved_view_hooks.dart';
+import '../saved_views_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -28,11 +30,17 @@ class AllActionsOptionsPanel extends ConsumerWidget {
         blurWindow: false,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 320),
-          child: const SingleChildScrollView(
-            padding: EdgeInsets.all(12),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [_SortRow(), SizedBox(height: 12), _FilterSection()],
+              children: [
+                SavedViewsBar(hooks: allActionsViewHooks(ref)),
+                const SizedBox(height: 12),
+                const _SortRow(),
+                const SizedBox(height: 12),
+                const _FilterSection(),
+              ],
             ),
           ),
         ),

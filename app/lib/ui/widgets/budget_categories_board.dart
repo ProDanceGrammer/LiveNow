@@ -7,7 +7,10 @@ import '../../data/database.dart';
 import '../../domain/budget_category_view.dart';
 import '../budget_category_rows.dart';
 import '../budget_providers.dart';
+import '../device_prefs.dart';
 import '../layout.dart';
+import '../saved_view_hooks.dart';
+import '../saved_views_bar.dart';
 import '../theme/glass_theme.dart';
 import '../urgency_colors.dart';
 import 'account_icon.dart';
@@ -24,10 +27,12 @@ class CategoryPerfCounters {
 }
 
 const double _kWideRow = 56;
-const double _kPhoneRow = 66;
+const double _kPhoneRow = 76; // two description rows + the bar
+
+/// Device-local: the phone's Sort / search / Flat toolbar is hidden.
+const kCategoriesToolbarHiddenPref = 'categories_toolbar_hidden';
 const double _kPlanW = 104;
 const double _kFactW = 104;
-const double _kBarW = 84;
 const double _kUrgencyW = 70;
 
 /// The Categories tab: ONE glass board (search, sort levels, a Flat switch, then
@@ -143,6 +148,8 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
           ),
         ),
         const SizedBox(width: 8),
+        _levelButtons(flat),
+        const SizedBox(width: 4),
         FilterChip(
           key: const ValueKey('cat-flat'),
           visualDensity: VisualDensity.compact,
@@ -152,6 +159,73 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
           onSelected: (v) =>
               ref.read(budgetCategoryFlatProvider.notifier).state = v,
         ),
+      ],
+    );
+  }
+
+  /// Opens or folds the whole hierarchy: everything, only the parents (level
+  /// 1) or 2-4 levels. Off in Flat mode and while searching (a search ignores
+  /// folding anyway).
+  Widget _levelButtons(bool flat) {
+    final searching = ref.watch(budgetCategoryQueryProvider).isNotEmpty;
+    final enabled = !flat && !searching;
+    void apply(int? level) {
+      final cats = ref.read(budgetViewProvider).value?.categories ?? const [];
+      ref.read(budgetCategoryCollapsedProvider.notifier).state =
+          collapsedForLevel([
+            for (final c in cats) CategoryInfo(c.id, c.name, c.parentId),
+          ], level);
+    }
+
+    final entries = <(String, String, IconData?, int?)>[
+      ('all', 'Open every level', Icons.unfold_more, null),
+      ('1', 'Parents only', Icons.unfold_less, 1),
+      ('2', 'Show 2 levels', null, 2),
+      ('3', 'Show 3 levels', null, 3),
+      ('4', 'Show 4 levels', null, 4),
+    ];
+    if (usePhoneLayout(context)) {
+      return PopupMenuButton<int>(
+        key: const ValueKey('cat-levels-menu'),
+        tooltip: 'Open or fold levels',
+        enabled: enabled,
+        icon: const Icon(Icons.account_tree_outlined, size: 20),
+        onSelected: (v) => apply(v == 0 ? null : v),
+        itemBuilder: (_) => [
+          for (final e in entries)
+            PopupMenuItem(value: e.$4 ?? 0, child: Text(e.$2)),
+        ],
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final e in entries)
+          Tooltip(
+            message: e.$2,
+            child: InkWell(
+              key: ValueKey('cat-level-${e.$1}'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: enabled ? () => apply(e.$4) : null,
+              child: SizedBox(
+                width: 32,
+                height: 32,
+                child: Center(
+                  child: e.$3 != null
+                      ? Icon(e.$3, size: 20)
+                      : Text(
+                          e.$1,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: enabled
+                                ? null
+                                : Theme.of(context).disabledColor,
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -182,7 +256,6 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
           ),
           cell(_kPlanW, money(Param.plan, 'Plan')),
           cell(_kFactW, money(Param.actual, 'Fact')),
-          cell(_kBarW, Text('Used', style: s)),
           if (showUrgency)
             cell(_kUrgencyW, const ParamIcon(Param.urgency, size: 18)),
           const SizedBox(width: 12),
@@ -197,6 +270,11 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
     final phone = usePhoneLayout(context);
     final query = ref.watch(budgetCategoryQueryProvider);
     final showUrgency = ref.watch(budgetShowUrgencyProvider);
+    final toolbarHidden =
+        phone &&
+        ref.watch(
+          devicePrefBoolProvider((kCategoriesToolbarHiddenPref, false)),
+        );
 
     final Widget list;
     if (rows == null) {
@@ -222,7 +300,9 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
       }
     }
 
-    return Padding(
+    return SavedViewsDefaultLoader(
+      hooks: categoryViewHooks(ref),
+      child: Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       child: GlassSurface(
         radius: GlassTheme.radiusPanel,
@@ -231,23 +311,66 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-              child: TextField(
-                key: const ValueKey('budget-categories-search'),
-                controller: _search,
-                onChanged: _onSearch,
-                decoration: const InputDecoration(
-                  hintText: 'Search categories',
-                  prefixIcon: Icon(Icons.search),
-                  isDense: true,
-                ),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: Row(
+                children: [
+                  // A phone can hide the whole toolbar (search, sort, Flat,
+                  // levels) to give the list the room.
+                  if (!toolbarHidden)
+                    Expanded(
+                      child: TextField(
+                        key: const ValueKey('budget-categories-search'),
+                        controller: _search,
+                        onChanged: _onSearch,
+                        decoration: const InputDecoration(
+                          hintText: 'Search categories',
+                          prefixIcon: Icon(Icons.search),
+                          isDense: true,
+                        ),
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  if (phone)
+                    IconButton(
+                      key: const ValueKey('cat-toolbar-toggle'),
+                      tooltip: toolbarHidden
+                          ? 'Show search, sort and filters'
+                          : 'Hide search, sort and filters',
+                      icon: Badge(
+                        isLabelVisible:
+                            toolbarHidden &&
+                            (query.isNotEmpty ||
+                                ref.watch(budgetCategoryFlatProvider)),
+                        smallSize: 8,
+                        child: Icon(
+                          toolbarHidden ? Icons.tune : Icons.expand_less,
+                        ),
+                      ),
+                      onPressed: () => setDevicePrefBool(
+                        ref,
+                        kCategoriesToolbarHiddenPref,
+                        !toolbarHidden,
+                      ),
+                    ),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-              child: _sortRow(),
-            ),
-            if (!phone) _header(context, showUrgency),
+            if (!toolbarHidden)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                child: _sortRow(),
+              ),
+            if (!toolbarHidden)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: SavedViewsBar(hooks: categoryViewHooks(ref)),
+              ),
+            if (!phone)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: _header(context, showUrgency),
+              ),
             // A row's tint is an `Ink`, which paints on the nearest Material:
             // a local one, clipped to the list, keeps tinted rows from bleeding
             // over the header above or the screen edge below.
@@ -259,6 +382,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
           ],
         ),
       ),
+    ),
     );
   }
 }
@@ -345,7 +469,36 @@ class _CategoryBoardRow extends StatelessWidget {
                 ),
             ],
           ),
-          if (vm.subline != null || vm.accountName != null)
+          if (phone) ...[
+            // Two short rows: `amount per unit`, then `each N months · until
+            // ... in <account>`.
+            if (vm.amountLine != null)
+              Text(
+                vm.amountLine!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: small,
+              ),
+            if (vm.schedule != null || vm.accountName != null)
+              Text.rich(
+                TextSpan(
+                  children: [
+                    if (vm.schedule != null) TextSpan(text: vm.schedule),
+                    if (vm.accountName != null) ...[
+                      TextSpan(text: vm.schedule == null ? 'in ' : ' in '),
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: AccountIcon(icon: vm.accountIcon, size: 12),
+                      ),
+                      TextSpan(text: ' ${vm.accountName}'),
+                    ],
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: small,
+              ),
+          ] else if (vm.subline != null || vm.accountName != null)
             Text.rich(
               TextSpan(
                 children: [
@@ -403,20 +556,6 @@ class _CategoryBoardRow extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(
-            width: _kBarW,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: CustomPaint(
-                size: const Size(double.infinity, 6),
-                painter: _PlanBarPainter(
-                  vm.ratio,
-                  barColor,
-                  (fg ?? scheme.onSurface).withValues(alpha: 0.16),
-                ),
-              ),
-            ),
-          ),
         ],
       );
     }
@@ -450,26 +589,26 @@ class _CategoryBoardRow extends StatelessWidget {
       key: ValueKey('budget-category-${vm.id}'),
       borderRadius: BorderRadius.circular(12),
       onTap: () => onOpen(c),
-      child: phone
-          ? Stack(
-              children: [
-                Positioned.fill(child: content),
-                Positioned(
-                  left: 40.0 + vm.depth * 16,
-                  right: 12,
-                  bottom: 4,
-                  height: 3,
-                  child: CustomPaint(
-                    painter: _PlanBarPainter(
-                      vm.ratio,
-                      barColor,
-                      (fg ?? scheme.onSurface).withValues(alpha: 0.16),
-                    ),
-                  ),
-                ),
-              ],
-            )
-          : content,
+      child: Stack(
+        children: [
+          Positioned.fill(child: content),
+          // "Used" (fact against plan) as a thin bar under the row, wide and
+          // phone alike.
+          Positioned(
+            left: 40.0 + vm.depth * 16,
+            right: 12,
+            bottom: 4,
+            height: 3,
+            child: CustomPaint(
+              painter: _PlanBarPainter(
+                vm.ratio,
+                barColor,
+                (fg ?? scheme.onSurface).withValues(alpha: 0.16),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
 
     return Padding(

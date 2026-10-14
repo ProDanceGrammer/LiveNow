@@ -205,3 +205,32 @@ int _compareOn(
       return nullsLast(urgency[a.id], urgency[b.id]);
   }
 }
+
+/// The folded set that shows exactly [level] levels of the hierarchy (1 = only
+/// the top-level categories, 2 = top level and their children, ...); a null
+/// [level] opens everything. Groups at depth >= level - 1 are folded (deeper
+/// ones too, so opening a level keeps their folding). A parent loop cannot hang
+/// it: the depth walk stops on a repeated id.
+Set<String> collapsedForLevel(List<CategoryInfo> categories, int? level) {
+  if (level == null) return const {};
+  final byId = {for (final c in categories) c.id: c};
+  final groups = <String>{
+    for (final c in categories)
+      if (c.parentId != null && byId.containsKey(c.parentId)) c.parentId!,
+  };
+  int depthOf(CategoryInfo c) {
+    var depth = 0;
+    final seen = <String>{c.id};
+    var p = c.parentId;
+    while (p != null && byId.containsKey(p) && seen.add(p)) {
+      depth++;
+      p = byId[p]!.parentId;
+    }
+    return depth;
+  }
+
+  return {
+    for (final c in categories)
+      if (groups.contains(c.id) && depthOf(c) >= level - 1) c.id,
+  };
+}

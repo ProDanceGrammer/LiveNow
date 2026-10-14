@@ -259,7 +259,7 @@ void main() {
     await pump(tester);
     await tester.tap(row(rent));
     await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('category-parent')));
+    await tester.tap(find.byKey(const ValueKey('category-parent-add')));
     await settle(tester);
     expect(find.byKey(const ValueKey('pick-category-new')), findsOneWidget);
     expect(find.textContaining('10 × 3 per month'), findsWidgets);

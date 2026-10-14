@@ -38,6 +38,8 @@ class CategoryRowView {
     required this.hasChildren,
     required this.collapsed,
     required this.subline,
+    this.schedule,
+    this.amountLine,
     this.accountName,
     this.accountIcon,
     required this.planText,
@@ -57,6 +59,13 @@ class CategoryRowView {
   /// The entered fields in one grey line ([categoryLine]), null when nothing
   /// is entered.
   final String? subline;
+
+  /// The phone's second row: the schedule part of [subline] (the first row
+  /// then shows only `amount per unit`).
+  final String? schedule;
+
+  /// The first row on a phone: `amount per unit` only (null = none entered).
+  final String? amountLine;
 
   /// The account to count in: its icon (base64) and name follow the line.
   final String? accountName;
@@ -91,6 +100,8 @@ class CategoryRowView {
       other.hasChildren == hasChildren &&
       other.collapsed == collapsed &&
       other.subline == subline &&
+      other.schedule == schedule &&
+      other.amountLine == amountLine &&
       other.accountName == accountName &&
       other.accountIcon == accountIcon &&
       other.planText == planText &&
@@ -108,6 +119,8 @@ class CategoryRowView {
     hasChildren,
     collapsed,
     subline,
+    schedule,
+    amountLine,
     planText,
     factText,
     urgency,
@@ -130,12 +143,7 @@ class CategoryRows {
   int get hashCode => rows.length;
 }
 
-/// The entered fields of a category as one line, without the account (the
-/// caller draws the account icon + name after it):
-/// `12.5 × 4 per kilogram each 2 months` (`× units` only when units per month
-/// is above 0; `each 1 month` in the singular), then `· until 27-07-2026`.
-/// Null when the category has none of these data.
-String? categoryLine(BudgetCategory c) {
+({String? amount, String? each, String? until}) _lineBits(BudgetCategory c) {
   final unit = BudgetUnit.fromDb(c.unit);
   final units = c.unitsPerMonth;
   final String? amount = unit == BudgetUnit.percentPerMonth
@@ -147,19 +155,36 @@ String? categoryLine(BudgetCategory c) {
       : budgetNumber(c.price!);
   final unitName = switch (unit) {
     BudgetUnit.piece => 'piece',
-    BudgetUnit.kilogram => 'kilogram',
+    BudgetUnit.kilogram => 'kg/lt',
     BudgetUnit.month || BudgetUnit.percentPerMonth => 'month',
   };
   final f = c.frequencyMonths;
   final end = dateTimeFromDb(c.endDate);
-  final text = [
-    if (amount != null) '$amount per $unitName',
-    if (f != null) 'each ${f == 1 ? 'month' : '${budgetNumber(f)} months'}',
-  ].join(' ');
-  final withEnd = [
-    if (text.isNotEmpty) text,
-    if (end != null) 'until ${budgetDate(end)}',
-  ].join(' · ');
+  return (
+    amount: amount == null ? null : '$amount per $unitName',
+    each: f == null ? null : 'each ${f == 1 ? 'month' : '${budgetNumber(f)} months'}',
+    until: end == null ? null : 'until ${budgetDate(end)}',
+  );
+}
+
+/// The entered fields of a category in two parts (the phone shows them on two
+/// rows): `12.5 × 4 per kg/lt` and `each 2 months · until 27-07-2026`. Either
+/// may be null; both null when the category has none of these data.
+({String? amount, String? schedule}) categoryLineParts(BudgetCategory c) {
+  final b = _lineBits(c);
+  final schedule = [?b.each, ?b.until].join(' · ');
+  return (amount: b.amount, schedule: schedule.isEmpty ? null : schedule);
+}
+
+/// The entered fields of a category as one line, without the account (the
+/// caller draws the account icon + name after it):
+/// `12.5 × 4 per kg/lt each 2 months` (`× units` only when units per month
+/// is above 0; `each 1 month` in the singular), then `· until 27-07-2026`.
+/// Null when the category has none of these data.
+String? categoryLine(BudgetCategory c) {
+  final b = _lineBits(c);
+  final text = [?b.amount, ?b.each].join(' ');
+  final withEnd = [if (text.isNotEmpty) text, ?b.until].join(' · ');
   return withEnd.isEmpty ? null : withEnd;
 }
 
@@ -207,6 +232,8 @@ final budgetCategoryRowsProvider = Provider.autoDispose<CategoryRows?>((ref) {
           hasChildren: r.hasChildren,
           collapsed: r.collapsed,
           subline: categoryLine(c),
+          schedule: categoryLineParts(c).schedule,
+          amountLine: categoryLineParts(c).amount,
           accountName: account?.name,
           accountIcon: account?.icon,
           planText: f == null ? '—' : budgetMoney(f.planBase),
