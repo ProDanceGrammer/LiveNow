@@ -98,12 +98,13 @@ void main() {
     );
     await settle(tester);
     if (tab != null) {
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('budget-switch')),
-          matching: find.text(tab),
-        ),
+      final tabFinder = find.descendant(
+        of: find.byKey(const ValueKey('budget-switch')),
+        matching: find.text(tab),
       );
+      await tester.ensureVisible(tabFinder);
+      await tester.pump();
+      await tester.tap(tabFinder);
       await settle(tester);
     }
   }
@@ -221,20 +222,43 @@ void main() {
       await unmount(tester);
     });
 
+    testWidgets('price, units and frequency share a row; the accounts sit below', (
+      tester,
+    ) async {
+      await pump(tester, tab: 'Categories');
+      await openCategory(tester, catFlat);
+      final price = tester.getTopLeft(find.byKey(const ValueKey('category-price')));
+      final units = tester.getTopLeft(find.byKey(const ValueKey('category-units')));
+      final freq = tester.getTopLeft(find.byKey(const ValueKey('category-frequency')));
+      expect(units.dy, price.dy);
+      expect(freq.dy, price.dy);
+      expect(price.dx, lessThan(units.dx));
+      expect(units.dx, lessThan(freq.dx));
+      final count = tester.getTopLeft(find.byKey(const ValueKey('category-account-count')));
+      final use = tester.getTopLeft(find.byKey(const ValueKey('category-account-use')));
+      expect(count.dy, greaterThan(price.dy));
+      expect(use.dy, greaterThan(count.dy));
+      // ... and above the parent block.
+      final parent = tester.getTopLeft(find.byKey(const ValueKey('category-parent')));
+      expect(use.dy, lessThan(parent.dy));
+      await unmount(tester);
+    });
+
     testWidgets('the transactions panel shows income, expense, plan and fact', (
       tester,
     ) async {
       await pump(tester, tab: 'Categories');
       await openCategory(tester, catFood);
-      expect(find.byKey(const ValueKey('category-tx-income')), findsOneWidget);
-      expect(find.byKey(const ValueKey('category-tx-expense')), findsOneWidget);
+      // The three totals and the plan / fact; no income / expense lines.
+      expect(find.byKey(const ValueKey('category-tx-counting')), findsOneWidget);
+      expect(find.byKey(const ValueKey('category-tx-main')), findsOneWidget);
       expect(find.byKey(const ValueKey('category-tx-plan')), findsOneWidget);
       expect(find.byKey(const ValueKey('category-tx-fact')), findsOneWidget);
+      expect(find.byKey(const ValueKey('category-tx-income')), findsNothing);
+      expect(find.byKey(const ValueKey('category-tx-expense')), findsNothing);
       // 2 x 100 TRY at 40 TRY per EUR = 5 EUR spent.
       expect(
-        tester
-            .widget<Text>(find.byKey(const ValueKey('category-tx-expense')))
-            .data,
+        tester.widget<Text>(find.byKey(const ValueKey('category-tx-main'))).data,
         contains('5.00'),
       );
       await unmount(tester);
@@ -327,10 +351,33 @@ void main() {
       await unmount(tester);
     });
 
-    testWidgets('values can be switched off, the last one stays', (tester) async {
+    testWidgets('a wide window shows all three values and has no value chips', (
+      tester,
+    ) async {
       await pump(tester, tab: 'Transactions');
       await tester.tap(find.byKey(const ValueKey('budget-tx-options-toggle')));
       await settle(tester);
+      expect(find.byKey(const ValueKey('tx-col-main')), findsNothing);
+      expect(find.byKey(const ValueKey('tx-totals-show')), findsOneWidget);
+      final tile = find.byKey(ValueKey('budget-tx-$txBread'));
+      expect(
+        find.descendant(of: tile, matching: find.textContaining('TRY')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: tile, matching: find.textContaining('EUR')),
+        findsOneWidget,
+      );
+      await unmount(tester);
+    });
+
+    testWidgets('on a phone the values can be switched off, the last one stays', (
+      tester,
+    ) async {
+      await pump(tester, tab: 'Transactions', size: const Size(375, 812));
+      await tester.tap(find.byKey(const ValueKey('budget-tx-options-toggle')));
+      await settle(tester);
+      await tester.ensureVisible(find.byKey(const ValueKey('tx-col-main')));
       await tester.tap(find.byKey(const ValueKey('tx-col-main')));
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('tx-col-interact')));

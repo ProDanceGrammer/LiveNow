@@ -1,4 +1,5 @@
-import 'package:appflowy_editor/appflowy_editor.dart' show TextTransaction;
+import 'package:appflowy_editor/appflowy_editor.dart'
+    show AppFlowyEditor, TextTransaction;
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -193,15 +194,31 @@ void main() {
     editor(tester).onToggleExpand!();
     await tester.pump(const Duration(milliseconds: 400));
     expect(editor(tester).expanded, isTrue);
-    expect(find.widgetWithText(TextFormField, 'Task'), findsOneWidget);
+    // Really full screen: the Name field, the other sections, the title and
+    // Cancel / Save are hidden; Save moves into the notes toolbar; the dialog
+    // has no insets and no rounding.
+    expect(find.widgetWithText(TextFormField, 'Task'), findsNothing);
     expect(find.text('Manual parameters'), findsNothing);
     expect(find.text('Connected actions'), findsNothing);
+    expect(find.text('Edit action'), findsNothing);
+    expect(find.text('Cancel'), findsNothing);
+    expect(find.byKey(const ValueKey('notes-save')), findsOneWidget);
+    final dialog = tester.widget<AlertDialog>(
+      find.byKey(const ValueKey('action-editor-dialog')),
+    );
+    expect(dialog.insetPadding, EdgeInsets.zero);
+    expect(dialog.shape, isA<RoundedRectangleBorder>());
+    // The editor box fills the screen height (less the chrome).
+    final box = tester.getSize(find.byType(NotesEditor));
+    expect(box.height, greaterThan(tester.view.physicalSize.height * 0.6));
     expect(tester.state(find.byType(NotesEditor)), same(stateBefore));
 
     editor(tester).onToggleExpand!();
     await tester.pump(const Duration(milliseconds: 400));
     expect(editor(tester).expanded, isFalse);
     expect(find.text('Manual parameters'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, 'Task'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
     expect(tester.state(find.byType(NotesEditor)), same(stateBefore));
     await teardown(tester);
   });
@@ -368,6 +385,44 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(NotesEditor), findsNothing);
     expect(find.text('Manual parameters'), findsOneWidget);
+    await teardown(tester);
+  });
+
+  testWidgets('on a phone a long note does not trap the finger: the page scrolls', (
+    tester,
+  ) async {
+    setup(tester);
+    tester.view.physicalSize = const Size(375, 812);
+    final paragraphs = [
+      for (var i = 0; i < 60; i++)
+        '{"type":"paragraph","data":{"delta":[{"insert":"line $i"}]}}',
+    ].join(',');
+    final longNotes =
+        '{"document":{"type":"page","children":[$paragraphs]}}';
+    final row = await seed(tester, notes: longNotes);
+    await open(tester, existing: row);
+    expect(find.byType(NotesEditor), findsOneWidget);
+    ScrollableState pageScroll() => tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('action-editor-dialog')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.ensureVisible(find.byType(AppFlowyEditor));
+    await tester.pump();
+    final before = pageScroll().position.pixels;
+    // The page can still move further down.
+    final room = pageScroll().position.maxScrollExtent - before;
+    expect(room, greaterThan(20));
+    // Drag up INSIDE the notes box, far more than the note can scroll: the
+    // editor reaches its end and hands the rest to the page.
+    for (var i = 0; i < 24; i++) {
+      await tester.drag(find.byType(AppFlowyEditor), const Offset(0, -150));
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    expect(pageScroll().position.pixels, greaterThan(before + 10));
     await teardown(tester);
   });
 }

@@ -45,35 +45,37 @@ class CategoryTransactionsPanel extends ConsumerWidget {
     final accts = {for (final a in view.accounts) a.id: budgetAcctFromRow(a)};
     final base = view.settings.baseCurrency;
 
-    var baseTotal = 0.0;
-    var baseMissing = false;
-    final countTotals = <String, double>{};
+    // The three totals (counting and interactional per currency, main as one
+    // number) of this category's transactions - the same sums as the
+    // Transactions tab - and the period's plan / fact.
+    final totals = TxTotals();
     final amounts = <TxAmounts>[];
     for (final t in items) {
       final a = transactionAmounts(t.toRules(), accts);
       amounts.add(a);
-      if (a.base == null) {
-        baseMissing = true;
-      } else {
-        baseTotal += a.base!;
-      }
-      final cur = view.accountById[t.row.accountCountId]?.currency ?? '';
-      countTotals[cur] = (countTotals[cur] ?? 0) + a.count;
-    }
-
-    var income = 0.0;
-    var expense = 0.0;
-    for (final a in amounts) {
-      final v = a.base;
-      if (v == null) continue;
-      if (v >= 0) {
-        income += v;
-      } else {
-        expense += v;
-      }
+      totals.add(
+        a,
+        countCurrency: view.accountById[t.row.accountCountId]?.currency ?? '',
+        interactCurrency: view.accountById[t.row.accountUseId]?.currency,
+      );
     }
     final figures = view.snapshot.byCategory[categoryId];
     final muted = TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5);
+
+    String sums(Map<String, double> m) => [
+      for (final e in m.entries)
+        '${budgetMoney(e.value, sign: true)} ${e.key}'.trim(),
+    ].join(', ');
+    Widget row(String label, String value, Key key) => Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 88, child: Text(label, style: muted)),
+          Expanded(child: Text(value, key: key, style: muted)),
+        ],
+      ),
+    );
 
     Widget figure(Widget icon, String text, {Key? key}) => Row(
       mainAxisSize: MainAxisSize.min,
@@ -95,38 +97,26 @@ class CategoryTransactionsPanel extends ConsumerWidget {
           ),
           if (items.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Text(
-              [
-                for (final e in countTotals.entries)
-                  '${budgetMoney(e.value, sign: true)} ${e.key}'.trim(),
-                if (countTotals.length != 1 ||
-                    countTotals.keys.single != base)
-                  '${budgetMoney(baseTotal, sign: true)} $base'
-                      '${baseMissing ? ' (some without a rate)' : ''}',
-              ].join('  ·  '),
-              key: const ValueKey('category-tx-total'),
-              style: muted,
+            row(
+              'Counting',
+              sums(totals.counting),
+              const ValueKey('category-tx-counting'),
             ),
-            const SizedBox(height: 4),
-            Wrap(
-              spacing: 16,
-              runSpacing: 2,
-              children: [
-                Text(
-                  'Income ${budgetMoney(income, sign: true)} $base',
-                  key: const ValueKey('category-tx-income'),
-                  style: muted,
-                ),
-                Text(
-                  'Expense ${budgetMoney(expense, sign: true)} $base',
-                  key: const ValueKey('category-tx-expense'),
-                  style: muted,
-                ),
-              ],
+            if (totals.interact.isNotEmpty)
+              row(
+                'Interactional',
+                sums(totals.interact),
+                const ValueKey('category-tx-interact'),
+              ),
+            row(
+              'Main',
+              '${budgetMoney(totals.base, sign: true)} $base'
+                  '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
+              const ValueKey('category-tx-main'),
             ),
           ],
           if (figures != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             // Plan first, then Fact, for the budget settings period.
             Wrap(
               spacing: 16,

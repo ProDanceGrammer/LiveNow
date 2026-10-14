@@ -30,7 +30,7 @@ import 'growth_direction_dialog.dart';
 const double _handleSize = 16;
 const double _edgeHitDistance = 8;
 const double _minScale = 0.04;
-const double _maxScale = 12;
+const double _maxScale = 30;
 const double _canvasPadding = 600;
 
 /// Below this zoom a node's text is unreadable, so a node is drawn as a plain

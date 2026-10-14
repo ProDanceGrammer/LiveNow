@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/domain/budget_account_view.dart';
 import 'package:livenow/domain/budget_category_view.dart';
 import 'package:livenow/domain/budget_tx_view_rules.dart';
+import 'package:livenow/ui/budget_category_rows.dart';
 
 /// Round 19: account sorting + main balance, category level folding, the new
 /// transaction filters (chosen actions, "all but" categories) and the totals.
@@ -196,6 +197,20 @@ void main() {
         parentOf: parentOf,
       );
       expect(excluded, {'solo'});
+    });
+  });
+
+  group('categories bar scale', () {
+    test('no rows: scale 1 (a 100 % row fills the track)', () {
+      expect(barScaleOf(const []), 1);
+      expect(const CategoryRows([]).scale, 1);
+    });
+
+    test('rows with different scales are different snapshots', () {
+      expect(
+        const CategoryRows([], scale: 1) == const CategoryRows([], scale: 3),
+        isFalse,
+      );
     });
   });
 }

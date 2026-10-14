@@ -15,6 +15,7 @@ import '../../domain/duration_rules.dart';
 import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
+import '../notch_side.dart';
 import '../open_entity.dart';
 import '../providers.dart';
 import '../sync_providers.dart';
@@ -129,6 +130,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   bool _notesOpen = false; // the Notes section (tile) is open
   bool _notesExpanded = false; // the editor's wide "Expand" mode
   final _notesKey = GlobalKey<NotesEditorState>();
+  final _contentScroll = ScrollController();
   StreamSubscription<ActionRow?>? _rowSub;
   ActionRow? _seen; // the last database row seen (to spot external changes)
   String? _openStamp; // sync clock stamp of the row when the form was opened
@@ -314,6 +316,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     unregisterDraftDialog(this);
     _notesTimer?.cancel();
     _rowSub?.cancel();
+    _contentScroll.dispose();
     _nameController.dispose();
     super.dispose();
   }
@@ -322,10 +325,29 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   Widget build(BuildContext context) {
     final screen = MediaQuery.sizeOf(context);
     final expanded = _notesExpanded;
+    // Expanded Notes = REALLY full screen: the dialog loses its insets and
+    // rounding, the title, the Name field, every other section and the Cancel /
+    // Save buttons are hidden (Save moves into the notes toolbar), the editor
+    // takes the rest of the screen height (less the keyboard) and is the only
+    // scroll. Phone landscape keeps a free band only on the notch side.
+    final media = MediaQuery.of(context);
+    final landscape = media.orientation == Orientation.landscape;
+    final notchLeft = ref.watch(notchOnLeftProvider);
+    final safeLeft = (!landscape || notchLeft) ? media.padding.left : 0.0;
+    final safeRight = (!landscape || !notchLeft) ? media.padding.right : 0.0;
     final width = expanded
-        ? math.min(1100.0, screen.width - 48)
+        ? math.max(280.0, screen.width - safeLeft - safeRight - 24)
         : math.min(720.0, screen.width - 80);
-    final notesHeight = expanded ? math.max(320.0, screen.height - 260) : 320.0;
+    final notesHeight = expanded
+        ? math.max(
+            200.0,
+            screen.height -
+                media.padding.top -
+                media.padding.bottom -
+                media.viewInsets.bottom -
+                (widget.existing == null ? 120 : 176),
+          )
+        : 320.0;
     final compactLandscape =
         usePhoneLayout(context) &&
         MediaQuery.orientationOf(context) == Orientation.landscape;
@@ -339,18 +361,29 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
             _save,
       },
       child: AlertDialog(
+        key: const ValueKey('action-editor-dialog'),
         // Landscape phone: the title scrolls with the content (see below) so
         // the keyboard leaves room for the Name field; Save/Cancel stay pinned.
-        insetPadding: compactLandscape
+        insetPadding: expanded
+            ? EdgeInsets.zero
+            : compactLandscape
             ? const EdgeInsets.symmetric(horizontal: 16, vertical: 6)
             : null,
-        contentPadding: compactLandscape
+        shape: expanded ? const RoundedRectangleBorder() : null,
+        contentPadding: expanded
+            ? EdgeInsets.fromLTRB(
+                12 + safeLeft,
+                8 + media.padding.top,
+                12 + safeRight,
+                4 + media.padding.bottom,
+              )
+            : compactLandscape
             ? const EdgeInsets.fromLTRB(20, 8, 20, 0)
             : null,
         actionsPadding: compactLandscape
             ? const EdgeInsets.fromLTRB(16, 0, 16, 4)
             : null,
-        title: compactLandscape
+        title: expanded || compactLandscape
             ? null
             : _isEditing && usePhoneLayout(context)
             // Phone: Delete sits in the dialog's top-right corner.
@@ -370,13 +403,14 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         content: SizedBox(
           width: math.max(280.0, width),
           child: SingleChildScrollView(
+            controller: _contentScroll,
             child: Form(
               key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (compactLandscape)
+                  if (compactLandscape && !expanded)
                     Row(
                       children: [
                         Expanded(
@@ -396,16 +430,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                           ),
                       ],
                     ),
-                  TextFormField(
-                    controller: _nameController,
-                    // A hint (not a label) so the word disappears once filled.
-                    decoration: const InputDecoration(hintText: 'Name'),
-                    autofocus: true,
-                    // Enter = the Save button.
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _save(),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  Visibility(
+                    visible: !expanded,
+                    maintainState: true,
+                    child: TextFormField(
+                      controller: _nameController,
+                      // A hint (not a label) so the word disappears once filled.
+                      decoration: const InputDecoration(hintText: 'Name'),
+                      autofocus: true,
+                      // Enter = the Save button.
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _save(),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
                   ),
                   Visibility(
                     visible: !expanded,
@@ -452,6 +490,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                             _scheduleNotesAutosave();
                           },
                           onSave: _save,
+                          outerScroll: _contentScroll,
                           toolbarExtra: widget.existing == null
                               ? null
                               : WhatIsDoneControl(
@@ -477,13 +516,15 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
             ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(onPressed: _save, child: const Text('Save')),
-        ],
+        actions: expanded
+            ? const []
+            : [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(onPressed: _save, child: const Text('Save')),
+              ],
       ),
     );
   }

@@ -353,7 +353,7 @@ void main() {
     tester,
   ) async {
     // Guards the zoom ceiling: at maximum zoom a 190 px node must fill most
-    // of the screen (about 12x), so a single direction is easy to read.
+    // of the screen, so a single direction is easy to read (the ceiling is 30x).
     await pumpMap(tester);
     final pointer = TestPointer(1, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(
@@ -363,15 +363,18 @@ void main() {
       await tester.sendEventToBinding(pointer.scroll(const Offset(0, -120)));
       await tester.pump();
     }
-    expect(shownWidth(tester), greaterThan(2000));
+    // 190 px x 30 = 5700 px: far past the old 12x ceiling (2280 px).
+    expect(shownWidth(tester), greaterThan(5000));
 
     await tester.tap(find.byTooltip('Fit all'));
     await tester.pump();
-    for (var i = 0; i < 30; i++) {
+    final fitted = shownWidth(tester);
+    // The buttons zoom about the viewport centre: 8 steps = 1.25^8 = ~6x.
+    for (var i = 0; i < 8; i++) {
       await tester.tap(find.byTooltip('Zoom in'));
       await tester.pump();
     }
-    expect(shownWidth(tester), greaterThan(2000));
+    expect(shownWidth(tester), greaterThan(fitted * 4));
     await unmount(tester);
   });
 

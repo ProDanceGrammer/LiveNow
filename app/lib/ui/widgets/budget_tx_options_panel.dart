@@ -8,6 +8,7 @@ import '../../domain/budget_tx_view_rules.dart';
 import '../budget_providers.dart';
 import '../device_prefs.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../saved_view_hooks.dart';
 import '../saved_views_bar.dart';
 import 'account_icon.dart';
@@ -144,7 +145,12 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _ValuesRow(),
+                // Which values show is a phone's choice: a wide window shows all.
+                if (usePhoneLayout(context)) ...[
+                  _ValuesRow(),
+                  const SizedBox(height: 12),
+                ] else
+                  const _TotalsOnlyRow(),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -521,6 +527,30 @@ class _ActionsMultiPickerState extends State<_ActionsMultiPicker> {
           key: const ValueKey('tx-actions-apply'),
           onPressed: () => Navigator.of(context).pop({..._chosen}),
           child: const Text('Apply'),
+        ),
+      ],
+    );
+  }
+}
+
+/// The wide window's only display choice: whether the totals show.
+class _TotalsOnlyRow extends ConsumerWidget {
+  const _TotalsOnlyRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final totals = ref.watch(devicePrefBoolProvider((kTxTotalsPref, true)));
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('Display', style: Theme.of(context).textTheme.titleSmall),
+        FilterChip(
+          key: const ValueKey('tx-totals-show'),
+          label: const Text('Show totals'),
+          selected: totals,
+          onSelected: (v) => setDevicePrefBool(ref, kTxTotalsPref, v),
         ),
       ],
     );

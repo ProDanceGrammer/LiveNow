@@ -17,7 +17,12 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
+    show
+        HapticFeedback,
+        HardwareKeyboard,
+        KeyDownEvent,
+        KeyEvent,
+        LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:timezone/timezone.dart' as tz;
@@ -199,9 +204,54 @@ DateTime _realEnd(ActionListItem a) => a.startAt!.add(
 String? _pressCollapseId;
 bool _pressDragged = false;
 
-void _onPress(WidgetRef ref, String id, PointerDownEvent e) {
+/// Kind of the last pressed pointer: a finger never selects by touching (a tap
+/// opens the editor, or toggles once something is selected; a long-press
+/// selects), unlike a mouse.
+PointerDeviceKind _pressKind = PointerDeviceKind.mouse;
+bool get _touchPress =>
+    _pressKind == PointerDeviceKind.touch ||
+    _pressKind == PointerDeviceKind.stylus;
+
+/// How long a touch must stay down after the selecting long-press (500 ms)
+/// before the event can be pulled to a new time: twice as long in all.
+const Duration _kArmMoveAfter = Duration(milliseconds: 500);
+
+/// Phone tap on an event: with a selection (made by long-press) it adds or
+/// removes the event, otherwise it opens the editor.
+void _phoneTap(BuildContext context, WidgetRef ref, String id) {
+  if (_touchPress && ref.read(calendarSelectionProvider).isNotEmpty) {
+    toggleCalendarEvent(ref, id);
+    return;
+  }
+  openActionEditor(context, ref, id);
+}
+
+/// Phone long-press: selects the event (adds to a selection already made); one
+/// that is selected stays selected.
+void _phoneSelect(WidgetRef ref, String id) {
+  HapticFeedback.selectionClick();
+  final sel = ref.read(calendarSelectionProvider);
+  if (sel.contains(id)) {
+    ref.read(calendarSelectedActionProvider.notifier).state = id;
+  } else if (sel.isEmpty) {
+    selectOnlyCalendarEvent(ref, id);
+  } else {
+    toggleCalendarEvent(ref, id);
+  }
+}
+
+void _onPress(
+  WidgetRef ref,
+  String id,
+  PointerDownEvent e, {
+  bool phone = false,
+}) {
   _pressCollapseId = null;
   _pressDragged = false;
+  _pressKind = e.kind;
+  // On a phone a touch only selects through the long-press (see
+  // [_phoneSelect]); a wide window's clicks always select on press.
+  if (phone && _touchPress) return;
   if ((e.buttons & kPrimaryButton) == 0) return;
   final sel = ref.read(calendarSelectionProvider);
   if (isAdditiveCalendarClick()) {
@@ -1449,7 +1499,7 @@ class _AllDayChip extends ConsumerWidget {
         scrolling: cross.scrolling,
         child: Listener(
           onPointerDown: (e) {
-            _onPress(ref, item.id, e);
+            _onPress(ref, item.id, e, phone: usePhoneLayout(context));
             cross.press(item, e);
           },
           // A press that travels becomes a drag towards the time grid.
@@ -1471,11 +1521,15 @@ class _AllDayChip extends ConsumerWidget {
               // Selection happens on press (see [_onPress]); double-click edits.
               // On a phone a tap opens the editor.
               onTap: usePhoneLayout(context)
-                  ? () => openActionEditor(context, ref, item.id)
+                  ? () => _phoneTap(context, ref, item.id)
                   : () {},
               onDoubleTap: usePhoneLayout(context)
                   ? null
                   : () => openActionEditor(context, ref, item.id),
+              // A long-press selects the chip, like a timed block.
+              onLongPress: usePhoneLayout(context)
+                  ? () => _phoneSelect(ref, item.id)
+                  : null,
               child: Container(
                 height: 18,
                 width: double.infinity,
@@ -3445,6 +3499,24 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
   /// changes only (no per-band widgets).
   bool _inBand = false;
 
+  /// Touch: the long-press selected the event; holding on for [_kArmMoveAfter]
+  /// more arms the move (a buzz tells the user it can be pulled).
+  Timer? _armTimer;
+  bool _armed = false;
+  Offset _pressPos = Offset.zero;
+
+  void _disarm() {
+    _armTimer?.cancel();
+    _armTimer = null;
+    _armed = false;
+  }
+
+  @override
+  void dispose() {
+    _armTimer?.cancel();
+    super.dispose();
+  }
+
   _DragKind _kindAt(double dy) {
     final height = widget.height;
     final h = math.min(_kHandle, height / 3);
@@ -3651,7 +3723,8 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     // release) arrives through the grid's global pointer route, so the drag
     // survives this block being rebuilt or unmounted mid-drag.
     return Listener(
-      onPointerDown: (e) => _onPress(ref, item.id, e),
+      onPointerDown: (e) =>
+          _onPress(ref, item.id, e, phone: usePhoneLayout(context)),
       onPointerUp: (_) => _onRelease(ref, item.id),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -3660,17 +3733,34 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         // block (a plain drag must scroll the grid). Desktop: double-click
         // edits, a drag moves or resizes.
         onTap: usePhoneLayout(context)
-            ? () => openActionEditor(context, ref, item.id)
+            ? () => _phoneTap(context, ref, item.id)
             : null,
         onDoubleTap: usePhoneLayout(context)
             ? null
             : () => openActionEditor(context, ref, item.id),
+        // Phone: a long-press SELECTS; keeping the finger down for as long
+        // again arms the move, then the block follows the finger.
         onLongPressStart: usePhoneLayout(context)
-            ? (d) => widget.onDragStart(_DragKind.move, d.globalPosition)
+            ? (d) {
+                _disarm();
+                _pressPos = d.globalPosition;
+                _phoneSelect(ref, item.id);
+                _armTimer = Timer(_kArmMoveAfter, () {
+                  if (!mounted) return;
+                  _armed = true;
+                  HapticFeedback.mediumImpact();
+                  widget.onDragStart(_DragKind.move, _pressPos);
+                });
+              }
             : null,
         onLongPressMoveUpdate: usePhoneLayout(context)
-            ? (d) => widget.onDragUpdate(d.globalPosition)
+            ? (d) {
+                _pressPos = d.globalPosition;
+                if (_armed) widget.onDragUpdate(d.globalPosition);
+              }
             : null,
+        onLongPressEnd: usePhoneLayout(context) ? (_) => _disarm() : null,
+        onLongPressCancel: usePhoneLayout(context) ? _disarm : null,
         onPanStart: usePhoneLayout(context)
             ? null
             : (d) => widget.onDragStart(

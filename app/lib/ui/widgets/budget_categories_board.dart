@@ -26,8 +26,8 @@ class CategoryPerfCounters {
   static void reset() => rowBuilds = 0;
 }
 
-const double _kWideRow = 56;
-const double _kPhoneRow = 76; // two description rows + the bar
+const double _kWideRow = 62;
+const double _kPhoneRow = 82; // two description rows + the bar
 
 /// Device-local: the phone's Sort / search / Flat toolbar is hidden.
 const kCategoriesToolbarHiddenPref = 'categories_toolbar_hidden';
@@ -57,11 +57,17 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
   /// handed back as the identical instance.
   final _rowCache = <String, _CategoryBoardRow>{};
 
-  _CategoryBoardRow _rowFor(CategoryRowView vm, bool phone, bool showUrgency) {
+  _CategoryBoardRow _rowFor(
+    CategoryRowView vm,
+    bool phone,
+    bool showUrgency,
+    double scale,
+  ) {
     final old = _rowCache[vm.id];
     if (old != null &&
         old.phone == phone &&
         old.showUrgency == showUrgency &&
+        old.scale == scale &&
         old.vm == vm) {
       return old;
     }
@@ -70,6 +76,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
       vm: vm,
       phone: phone,
       showUrgency: showUrgency,
+      scale: scale,
       onOpen: widget.onOpen,
       onToggle: _toggle,
     );
@@ -266,7 +273,9 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
 
   @override
   Widget build(BuildContext context) {
-    final rows = ref.watch(budgetCategoryRowsProvider)?.rows;
+    final rowsData = ref.watch(budgetCategoryRowsProvider);
+    final rows = rowsData?.rows;
+    final barScale = rowsData?.scale ?? 1.0;
     final phone = usePhoneLayout(context);
     final query = ref.watch(budgetCategoryQueryProvider);
     final showUrgency = ref.watch(budgetShowUrgencyProvider);
@@ -292,7 +301,8 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
         itemCount: rows.length,
         findChildIndexCallback: (key) =>
             key is ValueKey<String> ? indexById[key.value] : null,
-        itemBuilder: (context, i) => _rowFor(rows[i], phone, showUrgency),
+        itemBuilder: (context, i) =>
+            _rowFor(rows[i], phone, showUrgency, barScale),
       );
       // Rows that left the list are forgotten.
       if (_rowCache.length > rows.length * 2 + 16) {
@@ -396,6 +406,7 @@ class _CategoryBoardRow extends StatelessWidget {
     required this.vm,
     required this.phone,
     required this.showUrgency,
+    required this.scale,
     required this.onOpen,
     required this.onToggle,
   });
@@ -403,6 +414,7 @@ class _CategoryBoardRow extends StatelessWidget {
   final CategoryRowView vm;
   final bool phone;
   final bool showUrgency;
+  final double scale;
   final void Function(BudgetCategory) onOpen;
   final void Function(String) onToggle;
 
@@ -591,17 +603,25 @@ class _CategoryBoardRow extends StatelessWidget {
       onTap: () => onOpen(c),
       child: Stack(
         children: [
-          Positioned.fill(child: content),
-          // "Used" (fact against plan) as a thin bar under the row, wide and
-          // phone alike.
+          // The text keeps clear of the bar below it.
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: content,
+            ),
+          ),
+          // "Used" (fact against plan): a bolder bar under the text, the full
+          // row wide; the longest ratio of the list fills it and the others are
+          // proportional (a tick marks 100 % once somebody is over plan).
           Positioned(
-            left: 40.0 + vm.depth * 16,
-            right: 12,
-            bottom: 4,
-            height: 3,
+            left: 8,
+            right: 8,
+            bottom: 3,
+            height: 5,
             child: CustomPaint(
               painter: _PlanBarPainter(
                 vm.ratio,
+                scale,
                 barColor,
                 (fg ?? scheme.onSurface).withValues(alpha: 0.16),
               ),
@@ -629,9 +649,12 @@ class _CategoryBoardRow extends StatelessWidget {
 /// How much of the plan is used: a rounded track with a fill (capped at the
 /// full width; spending above the plan is shown by the row's colour).
 class _PlanBarPainter extends CustomPainter {
-  _PlanBarPainter(this.ratio, this.fill, this.track);
+  _PlanBarPainter(this.ratio, this.scale, this.fill, this.track);
 
   final double? ratio;
+
+  /// The ratio that fills the whole track (>= 1).
+  final double scale;
   final Color fill;
   final Color track;
 
@@ -642,14 +665,25 @@ class _PlanBarPainter extends CustomPainter {
     canvas.drawRRect(full, Paint()..color = track);
     final v = ratio;
     if (v == null || v <= 0) return;
-    final w = size.width * v.clamp(0.0, 1.0);
+    final w = size.width * (v.clamp(0.0, scale) / scale);
     canvas.drawRRect(
       RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, size.height), r),
       Paint()..color = fill,
     );
+    if (scale > 1.0001) {
+      // 100 % of the plan.
+      final x = size.width / scale;
+      canvas.drawRect(
+        Rect.fromLTWH(x - 0.75, -1, 1.5, size.height + 2),
+        Paint()..color = fill.withValues(alpha: 0.9),
+      );
+    }
   }
 
   @override
   bool shouldRepaint(_PlanBarPainter old) =>
-      old.ratio != ratio || old.fill != fill || old.track != track;
+      old.ratio != ratio ||
+      old.scale != scale ||
+      old.fill != fill ||
+      old.track != track;
 }

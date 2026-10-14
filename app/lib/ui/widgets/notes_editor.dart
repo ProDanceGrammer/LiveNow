@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart' hide Overlay, OverlayEntry;
 import 'package:flutter/services.dart';
 
@@ -107,6 +108,11 @@ class NotesEditor extends StatefulWidget {
   /// Extra controls in the toolbar row (the action editor's "What is done?").
   final Widget? toolbarExtra;
 
+  /// The scroll view the editor sits in (the dialog's). On a phone a drag that
+  /// reaches the editor's own top or bottom edge is handed to it, so a long note
+  /// never traps the finger: the page keeps scrolling.
+  final ScrollController? outerScroll;
+
   const NotesEditor({
     super.key,
     this.initialJson,
@@ -116,6 +122,7 @@ class NotesEditor extends StatefulWidget {
     this.onToggleExpand,
     this.onSave,
     this.toolbarExtra,
+    this.outerScroll,
   });
 
   @override
@@ -182,6 +189,33 @@ class NotesEditorState extends State<NotesEditor> {
           return KeyEventResult.handled;
         },
       ),
+      // Ctrl+V: when the clipboard still holds what THIS editor copied, paste
+      // the exact blocks back (toggles, bullets, numbers, checkboxes with their
+      // state, code, collapsed state); anything else takes the package's paste.
+      CommandShortcutEvent(
+        key: 'paste keeping the structure',
+        getDescription: () => 'Paste (same format for text copied here)',
+        command: 'ctrl+v',
+        macOSCommand: 'cmd+v',
+        handler: (state) {
+          if (_lastCopy == null) return KeyEventResult.ignored;
+          _pasteInApp(state);
+          return KeyEventResult.handled;
+        },
+      ),
+      // Ctrl+X: the same copy (Markdown text + exact blocks), then the cut.
+      CommandShortcutEvent(
+        key: 'cut keeping the structure',
+        getDescription: () => 'Cut (same format when pasted here)',
+        command: 'ctrl+x',
+        macOSCommand: 'cmd+x',
+        handler: (_) {
+          final sel = _editorState.selection;
+          if (sel == null || sel.isCollapsed) return KeyEventResult.ignored;
+          _cutSelection();
+          return KeyEventResult.handled;
+        },
+      ),
       // Ctrl+C puts Markdown on the clipboard (text channel).
       CommandShortcutEvent(
         key: 'copy as markdown',
@@ -236,7 +270,13 @@ class NotesEditorState extends State<NotesEditor> {
     if (!mounted || text == null || text.trim().isEmpty) return;
     final nodes = markdownToNotesDocument(text).root.children.toList();
     if (nodes.isEmpty) return;
+    await _insertBlocks(nodes);
+  }
 
+  /// Inserts [nodes] after the selected block (replacing it when it is an empty
+  /// paragraph), or at the end when nothing is selected, and puts the cursor at
+  /// the end of the insertion.
+  Future<void> _insertBlocks(List<Node> nodes) async {
     final root = _editorState.document.root;
     final selected = _editorState.selection == null
         ? null
@@ -271,11 +311,59 @@ class NotesEditorState extends State<NotesEditor> {
 
   Future<void> _resetChecklist() => resetChecklist(_editorState);
 
+  /// Sets every checkbox row inside [sel] to [checked] in ONE transaction (one
+  /// Undo step); the selection is kept so the next toggle works on the same rows.
+  /// Returns how many rows it touched.
+  int _setTodos(Selection sel, bool checked) {
+    final todos = [
+      for (final n in _editorState.getNodesInSelection(sel))
+        if (n.type == 'todo_list') n,
+    ];
+    if (todos.isEmpty) return 0;
+    final transaction = _editorState.transaction;
+    for (final n in todos) {
+      if ((n.attributes['checked'] == true) != checked) {
+        transaction.updateNode(n, {'checked': checked});
+      }
+    }
+    transaction.afterSelection = sel;
+    _editorState.apply(transaction);
+    return todos.length;
+  }
+
+  /// A tap on a checkbox: with several rows selected it sets ALL their
+  /// checkboxes to the opposite of the tapped one; otherwise the normal toggle.
+  void _tapCheckbox(Node node, VoidCallback onCheck) {
+    final sel = _editorState.selection;
+    if (sel != null && !sel.isCollapsed) {
+      final inside = _editorState
+          .getNodesInSelection(sel)
+          .any((n) => identical(n, node) || listEquals(n.path, node.path));
+      if (inside) {
+        _setTodos(sel, node.attributes['checked'] != true);
+        return;
+      }
+    }
+    onCheck();
+  }
+
   /// Ctrl+Enter on a checkbox row flips it, on a toggle row opens/closes it.
-  /// False when the cursor is on any other line.
+  /// With a selection over several checkbox rows it ticks them all (or clears
+  /// them all when every one is ticked). False when the cursor is on any other
+  /// line.
   bool _toggleCurrentRow() {
     final sel = _editorState.selection;
     if (sel == null) return false;
+    if (!sel.isCollapsed) {
+      final todos = [
+        for (final n in _editorState.getNodesInSelection(sel))
+          if (n.type == 'todo_list') n,
+      ];
+      if (todos.isNotEmpty) {
+        _setTodos(sel, !todos.every((n) => n.attributes['checked'] == true));
+        return true;
+      }
+    }
     final node = _editorState.getNodeAtPath(sel.end.path);
     if (node == null) return false;
     final Map<String, Object?> change;
@@ -296,10 +384,26 @@ class NotesEditorState extends State<NotesEditor> {
     return true;
   }
 
-  /// Puts the selection on the clipboard as Markdown text.
+  /// What THIS editor last copied: the exact text it put on the clipboard and
+  /// the blocks as JSON. A later paste whose clipboard text is still that text
+  /// restores the blocks with every attribute (the clipboard itself can only
+  /// carry the Markdown). Shared by every notes editor of the app.
+  static ({String text, List<Map<String, Object>> nodes})? _lastCopy;
+
+  /// Puts the selection on the clipboard as Markdown text (and remembers its
+  /// blocks for an exact paste here). A selection inside ONE code block copies
+  /// just its raw text.
   Future<void> copyAsMarkdown() async {
     final selection = _editorState.selection?.normalized;
     if (selection == null || selection.isCollapsed) return;
+    if (listEquals(selection.start.path, selection.end.path) &&
+        _editorState.getNodeAtPath(selection.start.path)?.type ==
+            codeBlockType) {
+      _lastCopy = null;
+      final raw = _editorState.getTextInSelection(selection).join('\n');
+      await AppFlowyClipboard.setData(text: raw.isEmpty ? null : raw);
+      return;
+    }
     final nodes = _editorState.getSelectedNodes(selection: selection);
     final document = Document.blank()..insert([0], nodes);
     var markdown = documentToMarkdown(
@@ -309,7 +413,76 @@ class NotesEditorState extends State<NotesEditor> {
     if (markdown.isEmpty) {
       markdown = _editorState.getTextInSelection(selection).join('\n');
     }
+    _lastCopy = markdown.isEmpty
+        ? null
+        : (text: markdown, nodes: [for (final n in nodes) n.toJson()]);
     await AppFlowyClipboard.setData(text: markdown.isEmpty ? null : markdown);
+  }
+
+  /// The phone's paste buttons: the exact blocks when the clipboard holds what
+  /// was copied here, otherwise the clipboard text converted from Markdown.
+  Future<void> pasteSmart() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final stored = _lastCopy;
+    if (!mounted) return;
+    if (stored != null && data?.text == stored.text) {
+      await _pasteNodes([for (final j in stored.nodes) Node.fromJson(j)]);
+    } else {
+      await pasteAsMarkdown();
+    }
+  }
+
+  /// Cut: [copyAsMarkdown], then delete the selection.
+  Future<void> _cutSelection() async {
+    final selection = _editorState.selection?.normalized;
+    if (selection == null || selection.isCollapsed) return;
+    await copyAsMarkdown();
+    await _editorState.deleteSelection(selection);
+    final transaction = _editorState.transaction
+      ..afterSelection = Selection.collapsed(selection.start);
+    await _editorState.apply(transaction);
+  }
+
+  /// Ctrl+V with something copied here: the stored blocks when the clipboard
+  /// still holds their text, else the package's own paste.
+  Future<void> _pasteInApp(EditorState state) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final stored = _lastCopy;
+    if (!mounted) return;
+    if (stored == null || data?.text != stored.text) {
+      pasteCommand.handler(state);
+      return;
+    }
+    final nodes = [for (final j in stored.nodes) Node.fromJson(j)];
+    await _pasteNodes(nodes);
+  }
+
+  /// Inserts [nodes] at the cursor: over a selection first deleting it; a single
+  /// plain paragraph merges into the text, anything else is inserted as blocks
+  /// after the current block (replacing an empty paragraph).
+  Future<void> _pasteNodes(List<Node> nodes) async {
+    if (nodes.isEmpty) return;
+    await _editorState.deleteSelectionIfNeeded();
+    final sel = _editorState.selection;
+    final target = sel == null ? null : _editorState.getNodeAtPath(sel.end.path);
+    if (sel != null &&
+        target != null &&
+        target.delta != null &&
+        nodes.length == 1 &&
+        nodes.first.type == 'paragraph' &&
+        nodes.first.children.isEmpty &&
+        nodes.first.delta != null) {
+      final delta = nodes.first.delta!;
+      final index = sel.end.offset;
+      final transaction = _editorState.transaction
+        ..insertTextDelta(target, index, delta)
+        ..afterSelection = Selection.collapsed(
+          Position(path: target.path, offset: index + delta.length),
+        );
+      await _editorState.apply(transaction);
+      return;
+    }
+    await _insertBlocks(nodes);
   }
 
   /// Appends a new section at the end: a heading, then one empty checkbox per
@@ -397,7 +570,7 @@ class NotesEditorState extends State<NotesEditor> {
       // selection toolbar next to the formatting items.
       if (usePhoneLayout(context)) ...[
         _markdownItem('notes.copy_md', 'Copy MD', copyAsMarkdown),
-        _markdownItem('notes.paste_md', 'Paste MD', pasteAsMarkdown),
+        _markdownItem('notes.paste_md', 'Paste MD', pasteSmart),
       ],
     ];
 
@@ -424,17 +597,45 @@ class NotesEditorState extends State<NotesEditor> {
             editorState: _editorState,
             editorScrollController: _scrollController,
             textDirection: TextDirection.ltr,
-            child: AppFlowyEditor(
-              editorState: _editorState,
-              editorScrollController: _scrollController,
-              editorStyle: style,
-              blockComponentBuilders: _blocks!,
-              characterShortcutEvents: _characters,
-              commandShortcutEvents: _commands,
+            child: _withScrollHandOff(
+              context,
+              AppFlowyEditor(
+                editorState: _editorState,
+                editorScrollController: _scrollController,
+                editorStyle: style,
+                blockComponentBuilders: _blocks!,
+                characterShortcutEvents: _characters,
+                commandShortcutEvents: _commands,
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  /// Phone: clamping physics make the editor's list report the drag it cannot
+  /// use ([OverscrollNotification]); that rest moves the OUTER scroll view.
+  Widget _withScrollHandOff(BuildContext context, Widget editor) {
+    final outer = widget.outerScroll;
+    if (outer == null || !usePhoneLayout(context)) return editor;
+    return NotificationListener<OverscrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.axis != Axis.vertical || !outer.hasClients) return false;
+        final p = outer.position;
+        final target = (p.pixels + n.overscroll).clamp(
+          p.minScrollExtent,
+          p.maxScrollExtent,
+        );
+        if (target != p.pixels) outer.jumpTo(target);
+        return true;
+      },
+      child: ScrollConfiguration(
+        behavior: ScrollConfiguration.of(
+          context,
+        ).copyWith(physics: const ClampingScrollPhysics()),
+        child: editor,
+      ),
     );
   }
 
@@ -489,12 +690,25 @@ class NotesEditorState extends State<NotesEditor> {
               if (usePhoneLayout(context))
                 TextButton(
                   style: buttonStyle,
-                  onPressed: pasteAsMarkdown,
+                  onPressed: pasteSmart,
                   child: const Text('Paste as Markdown'),
                 ),
             ],
           ),
         ),
+        // Full screen hides the dialog's own buttons: Save lives here.
+        if (widget.expanded && widget.onSave != null) ...[
+          TextButton(
+            key: const ValueKey('notes-save'),
+            style: buttonStyle,
+            onPressed: () {
+              _flush();
+              widget.onSave?.call();
+            },
+            child: const Text('Save'),
+          ),
+          const SizedBox(width: 6),
+        ],
         if (widget.onToggleExpand != null)
           TextButton(
             style: buttonStyle,
@@ -524,7 +738,7 @@ class NotesEditorState extends State<NotesEditor> {
       final checked = node.attributes[TodoListBlockKeys.checked] == true;
       return GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onCheck,
+        onTap: () => _tapCheckbox(node, onCheck),
         child: Padding(
           padding: const EdgeInsets.only(right: 6, top: 2),
           child: Icon(

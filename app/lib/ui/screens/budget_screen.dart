@@ -742,11 +742,14 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
     final collapsed = ref.watch(budgetTxCollapsedProvider);
     final phone = usePhoneLayout(context);
     // Device-local: which values and whether the totals show.
-    final cols = _TxCols(
+    // A wide window has room for all three values: always shown there (the
+    // choice is a phone's).
+    final prefCols = _TxCols(
       ref.watch(devicePrefBoolProvider((kTxCountingPref, true))),
       ref.watch(devicePrefBoolProvider((kTxInteractPref, true))),
       ref.watch(devicePrefBoolProvider((kTxMainPref, true))),
     );
+    final cols = phone ? prefCols : const _TxCols(true, true, true);
     final showTotals = ref.watch(devicePrefBoolProvider((kTxTotalsPref, true)));
     final optionsActive =
         filters.active ||
@@ -957,6 +960,8 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                         amounts: amounts[t.row.id]!,
                         currency: accounts[t.row.accountCountId]?.currency,
                         useCurrency: accounts[t.row.accountUseId]?.currency,
+                        useAccountIcon: accounts[t.row.accountUseId]?.icon,
+                        hasUseAccount: accounts[t.row.accountUseId] != null,
                         base: base,
                         cols: cols,
                         phone: phone,
@@ -1001,7 +1006,7 @@ class _TxFigures {
 }
 
 /// Width of one value column on a wide window (header and tiles share it).
-const double _kTxColW = 132;
+const double _kTxColW = 176;
 
 /// A group header row of the Transactions list.
 class _GroupEntry {
@@ -1221,6 +1226,8 @@ class _TransactionTile extends ConsumerWidget {
     required this.amounts,
     required this.currency,
     this.useCurrency,
+    this.useAccountIcon,
+    this.hasUseAccount = false,
     required this.base,
     required this.cols,
     required this.phone,
@@ -1233,6 +1240,10 @@ class _TransactionTile extends ConsumerWidget {
   final TxAmounts amounts;
   final String? currency;
   final String? useCurrency;
+
+  /// The USE account's picture (null = none) and whether there is one.
+  final String? useAccountIcon;
+  final bool hasUseAccount;
   final String base;
   final _TxCols cols;
   final bool phone;
@@ -1299,10 +1310,16 @@ class _TransactionTile extends ConsumerWidget {
         ],
       ),
     );
-    Widget phoneLine(String label, String text, {Color? color}) => Row(
+    Widget phoneLine(
+      String label,
+      String text, {
+      Color? color,
+      Widget? leading,
+    }) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text('$label ', style: labelStyle),
+        if (leading != null) ...[leading, const SizedBox(width: 3)],
         Text(text, style: valueStyle.copyWith(color: color ?? fg, fontSize: 12.5)),
       ],
     );
@@ -1310,14 +1327,23 @@ class _TransactionTile extends ConsumerWidget {
     final accountLeading = hasAccount
         ? AccountIcon(icon: accountIcon, size: 18)
         : null;
+    final useLeading = hasUseAccount
+        ? AccountIcon(icon: useAccountIcon, size: 18)
+        : null;
     final Widget values = phone
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
               if (cols.counting)
-                phoneLine('Counting', countText, color: countColor),
-              if (cols.interact) phoneLine('Interactional', interactText),
+                phoneLine(
+                  'Counting',
+                  countText,
+                  color: countColor,
+                  leading: accountLeading,
+                ),
+              if (cols.interact)
+                phoneLine('Interactional', interactText, leading: useLeading),
               if (cols.main) phoneLine('Main', mainText),
             ],
           )
@@ -1326,7 +1352,7 @@ class _TransactionTile extends ConsumerWidget {
             children: [
               if (cols.counting)
                 wideCell(countText, color: countColor, leading: accountLeading),
-              if (cols.interact) wideCell(interactText),
+              if (cols.interact) wideCell(interactText, leading: useLeading),
               if (cols.main) wideCell(mainText),
             ],
           );
@@ -1475,8 +1501,10 @@ class _AccountsView extends ConsumerWidget {
           if (!sort.any((k) => k.field == f)) (f.name, f.label, null),
       ];
 
-      Widget figure(String label, String value, {Key? key}) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      Widget figure(String label, String value, {Key? key, bool end = false}) =>
+          Column(
+        crossAxisAlignment:
+            end ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           Text(label, style: Theme.of(context).textTheme.bodySmall),
           Text(
@@ -1588,34 +1616,46 @@ class _AccountsView extends ConsumerWidget {
                               ],
                             ),
                             const SizedBox(height: 8),
+                            // The balances sit in the bottom-right corner.
                             Padding(
-                              padding: const EdgeInsets.only(left: 48),
-                              child: Wrap(
-                                spacing: 24,
-                                runSpacing: 6,
-                                crossAxisAlignment: WrapCrossAlignment.center,
+                              padding: const EdgeInsets.only(right: 12),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  figure(
-                                    'Balance',
-                                    '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
-                                    key: ValueKey('budget-balance-${a.id}'),
-                                  ),
-                                  figure(
-                                    'Main ($base)',
-                                    item.mainBalance == null
-                                        ? '—'
-                                        : '${budgetMoney(item.mainBalance!)} $base',
-                                    key: ValueKey('budget-main-balance-${a.id}'),
-                                  ),
                                   if (incomplete)
-                                    const Tooltip(
-                                      message:
-                                          'Some transactions have no rate and are left out.',
-                                      child: Icon(
-                                        Icons.warning_amber_rounded,
-                                        size: 18,
+                                    const Padding(
+                                      padding: EdgeInsets.only(right: 12),
+                                      child: Tooltip(
+                                        message:
+                                            'Some transactions have no rate and are left out.',
+                                        child: Icon(
+                                          Icons.warning_amber_rounded,
+                                          size: 18,
+                                        ),
                                       ),
                                     ),
+                                  Flexible(
+                                    child: figure(
+                                      'Balance',
+                                      '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
+                                      key: ValueKey('budget-balance-${a.id}'),
+                                      end: true,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  Flexible(
+                                    child: figure(
+                                      'Main ($base)',
+                                      item.mainBalance == null
+                                          ? '—'
+                                          : '${budgetMoney(item.mainBalance!)} $base',
+                                      key: ValueKey(
+                                        'budget-main-balance-${a.id}',
+                                      ),
+                                      end: true,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),

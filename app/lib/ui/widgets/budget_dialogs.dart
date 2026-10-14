@@ -815,6 +815,75 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
 
     final children = [for (final c in cats) if (c.parentId == id) c]
       ..sort((a, b) => compareIgnoringEmoji(a.name, b.name));
+    // Account to count / use: directly under the price and units fields.
+    final accountFields = <Widget>[
+      _gap,
+      DropdownButtonFormField<String?>(
+        key: const ValueKey('category-account-count'),
+        initialValue: accounts.any((a) => a.id == _countAccount)
+            ? _countAccount
+            : null,
+        isExpanded: true,
+        dropdownColor: context.glass.fillDialog,
+        decoration: const InputDecoration(
+          labelText: 'Account to count',
+          helperText: 'The currency this category is counted in',
+        ),
+        items: [
+          noneItem('— none —'),
+          for (final a in accounts)
+            DropdownMenuItem<String?>(
+              value: a.id,
+              child: Row(
+                children: [
+                  AccountIcon(icon: a.icon, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${a.name} (${a.currency})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+        onChanged: (v) => setState(() => _countAccount = v),
+      ),
+      _gap,
+      DropdownButtonFormField<String?>(
+        key: const ValueKey('category-account-use'),
+        initialValue: accounts.any((a) => a.id == _useAccount)
+            ? _useAccount
+            : null,
+        isExpanded: true,
+        dropdownColor: context.glass.fillDialog,
+        decoration: const InputDecoration(
+          labelText: 'Account to use',
+          helperText: 'The account the money actually moves through',
+        ),
+        items: [
+          noneItem('— none —'),
+          for (final a in accounts)
+            DropdownMenuItem<String?>(
+              value: a.id,
+              child: Row(
+                children: [
+                  AccountIcon(icon: a.icon, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${a.name} (${a.currency})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+        onChanged: (v) => setState(() => _useAccount = v),
+      ),
+    ];
     return AlertDialog(
       title: Row(
         children: [
@@ -908,64 +977,34 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               onChanged: (v) => setState(() => _unit = v),
             ),
             _gap,
-            if (percent)
-              // The value and the category it is taken from sit on one row.
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 120,
-                    child: TextFormField(
-                      key: const ValueKey('category-percent'),
-                      controller: _percent,
-                      decoration: const InputDecoration(labelText: 'Percent'),
-                      validator: optionalNumber,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: OutlinedButton.icon(
-                        key: const ValueKey('category-percent-of'),
-                        icon: const Icon(Icons.percent),
-                        label: Text(
-                          _percentOfId == null
-                              ? 'Take the percent of…'
-                              : 'of: ${byId[_percentOfId]?.name ?? '?'}',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onPressed: () async {
-                          final picked = await pickBudgetCategory(
-                            context,
-                            excludeId: id,
-                          );
-                          if (picked != null) {
-                            setState(() => _percentOfId = picked);
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else
-              TextFormField(
-                key: const ValueKey('category-price'),
-                controller: _price,
-                decoration: const InputDecoration(
-                  labelText: 'Price per unit',
-                  helperText: 'The expected price, even if it varies',
-                ),
-                validator: optionalNumber,
-              ),
-            _gap,
-            // Same height side by side: the hint lives under the row, not under
-            // one field (that pushed the other one out of line).
+            // Price (or the percent), units per month and the frequency share one
+            // row, equal height: the hint lives under the row, not under one field.
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
+                  flex: 3,
+                  child: percent
+                      ? TextFormField(
+                          key: const ValueKey('category-percent'),
+                          controller: _percent,
+                          decoration: const InputDecoration(
+                            labelText: 'Percent',
+                          ),
+                          validator: optionalNumber,
+                        )
+                      : TextFormField(
+                          key: const ValueKey('category-price'),
+                          controller: _price,
+                          decoration: const InputDecoration(
+                            labelText: 'Price per unit',
+                          ),
+                          validator: optionalNumber,
+                        ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 3,
                   child: TextFormField(
                     key: const ValueKey('category-units'),
                     controller: _units,
@@ -975,8 +1014,9 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                     validator: optionalNumber,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
+                  flex: 2,
                   child: TextFormField(
                     key: const ValueKey('category-frequency'),
                     controller: _frequency,
@@ -991,10 +1031,40 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 4),
               child: Text(
-                'Frequency: 1 = monthly, 12 = yearly',
+                percent
+                    ? 'Frequency: 1 = monthly, 12 = yearly'
+                    : 'Price: the expected one, even if it varies. '
+                          'Frequency: 1 = monthly, 12 = yearly.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
+            if (percent) ...[
+              _gap,
+              // The category the percent is taken from.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  key: const ValueKey('category-percent-of'),
+                  icon: const Icon(Icons.percent),
+                  label: Text(
+                    _percentOfId == null
+                        ? 'Take the percent of…'
+                        : 'of: ${byId[_percentOfId]?.name ?? '?'}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: () async {
+                    final picked = await pickBudgetCategory(
+                      context,
+                      excludeId: id,
+                    );
+                    if (picked != null) {
+                      setState(() => _percentOfId = picked);
+                    }
+                  },
+                ),
+              ),
+            ],
+            ...accountFields,
             _gap,
             Row(
               children: [
@@ -1019,6 +1089,8 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               ],
             ),
           ],
+          // A group has no price fields: its accounts follow the Type row.
+          if (isGroup) ...accountFields,
           _gap,
           // Parent category: same block style as the sub-categories below. The
           // searchable picker never offers the category itself or anything
@@ -1077,72 +1149,6 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               ],
             ),
           ],
-          _gap,
-          DropdownButtonFormField<String?>(
-            key: const ValueKey('category-account-count'),
-            initialValue: accounts.any((a) => a.id == _countAccount)
-                ? _countAccount
-                : null,
-            isExpanded: true,
-            dropdownColor: context.glass.fillDialog,
-            decoration: const InputDecoration(
-              labelText: 'Account to count',
-              helperText: 'The currency this category is counted in',
-            ),
-            items: [
-              noneItem('— none —'),
-              for (final a in accounts)
-                DropdownMenuItem<String?>(
-                  value: a.id,
-                  child: Row(
-                    children: [
-                      AccountIcon(icon: a.icon, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${a.name} (${a.currency})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-            onChanged: (v) => setState(() => _countAccount = v),
-          ),
-          _gap,
-          DropdownButtonFormField<String?>(
-            key: const ValueKey('category-account-use'),
-            initialValue: accounts.any((a) => a.id == _useAccount)
-                ? _useAccount
-                : null,
-            isExpanded: true,
-            dropdownColor: context.glass.fillDialog,
-            decoration: const InputDecoration(
-              labelText: 'Account to use',
-              helperText: 'The account the money actually moves through',
-            ),
-            items: [
-              noneItem('— none —'),
-              for (final a in accounts)
-                DropdownMenuItem<String?>(
-                  value: a.id,
-                  child: Row(
-                    children: [
-                      AccountIcon(icon: a.icon, size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '${a.name} (${a.currency})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-            onChanged: (v) => setState(() => _useAccount = v),
-          ),
           if (_error != null) ...[
             _gap,
             Text(

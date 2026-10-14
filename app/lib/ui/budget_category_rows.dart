@@ -131,16 +131,31 @@ class CategoryRowView {
 /// The board's rows with value equality, so the provider only notifies when a
 /// line really changed.
 class CategoryRows {
-  const CategoryRows(this.rows);
+  const CategoryRows(this.rows, {this.scale = 1});
 
   final List<CategoryRowView> rows;
 
+  /// The bars' scale: a bar is `ratio / scale` of the row width, so the row
+  /// furthest over its plan fills the whole width and a 100 % row is shorter
+  /// by the same proportion. Never below 1 (nobody over plan: 100 % = full).
+  final double scale;
+
   @override
   bool operator ==(Object other) =>
-      other is CategoryRows && listEquals(other.rows, rows);
+      other is CategoryRows && other.scale == scale && listEquals(other.rows, rows);
 
   @override
   int get hashCode => rows.length;
+}
+
+/// The longest ratio among [rows], at least 1 (rows without a plan count 0).
+double barScaleOf(Iterable<CategoryRowView> rows) {
+  var max = 1.0;
+  for (final r in rows) {
+    final v = r.ratio;
+    if (v != null && v > max) max = v;
+  }
+  return max;
 }
 
 ({String? amount, String? each, String? until}) _lineBits(BudgetCategory c) {
@@ -218,7 +233,7 @@ final budgetCategoryRowsProvider = Provider.autoDispose<CategoryRows?>((ref) {
     flat: ref.watch(budgetCategoryFlatProvider),
   );
   final byId = view.categoryById;
-  return CategoryRows([
+  final views = [
     for (final r in arranged)
       () {
         final c = byId[r.id]!;
@@ -245,5 +260,6 @@ final budgetCategoryRowsProvider = Provider.autoDispose<CategoryRows?>((ref) {
           unlinked: unlinked.contains(r.id),
         );
       }(),
-  ]);
+  ];
+  return CategoryRows(views, scale: barScaleOf(views));
 });

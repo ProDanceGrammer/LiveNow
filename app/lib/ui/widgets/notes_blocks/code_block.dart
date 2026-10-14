@@ -1,8 +1,10 @@
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 // ignore: depend_on_referenced_packages
 import 'package:provider/provider.dart';
 
+import '../app_toast.dart';
 import 'toggle_list_block.dart' show convertToParagraph;
 
 /// Block type string of the code block.
@@ -99,10 +101,11 @@ class _CodeBlockComponentWidgetState extends State<CodeBlockComponentWidget>
       height: 1.5,
     );
 
-    Widget child = Container(
+    Widget box = Container(
       width: double.infinity,
       alignment: alignment,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      // Room on the right for the copy button.
+      padding: const EdgeInsets.fromLTRB(14, 10, 40, 10),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(6),
@@ -125,6 +128,36 @@ class _CodeBlockComponentWidgetState extends State<CodeBlockComponentWidget>
         selectionColor: editorState.editorStyle.selectionColor,
         cursorWidth: editorState.editorStyle.cursorWidth,
       ),
+    );
+
+    // A Copy button in the corner: the block's whole code text on the
+    // clipboard (no fences), for a phone where selecting inside code is fiddly.
+    Widget child = Stack(
+      children: [
+        box,
+        Positioned(
+          top: 2,
+          right: 2,
+          child: IconButton(
+            key: ValueKey('code-copy-${widget.node.id}'),
+            tooltip: 'Copy the code',
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            icon: Icon(
+              Icons.copy_rounded,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+            onPressed: () async {
+              final overlay = rootOverlayOf(context);
+              await Clipboard.setData(
+                ClipboardData(text: widget.node.delta?.toPlainText() ?? ''),
+              );
+              showInfoToast(overlay, 'Copied');
+            },
+          ),
+        ),
+      ],
     );
 
     child = Container(key: blockComponentKey, padding: padding, child: child);
