@@ -259,3 +259,91 @@ CalendarSchedule resizedSchedule({
   if (newEnd.isBefore(earliest)) newEnd = earliest;
   return (startAt: startAt, endAt: newEnd);
 }
+
+/// The result of [snapToNeighbours]: the (possibly shifted) schedule and the
+/// neighbour edge it locked onto (null = no snap).
+typedef SnapResult = ({CalendarSchedule schedule, DateTime? snappedTo});
+
+/// Magnet: besides the 10-minute grid, a dragged event locks exactly onto the
+/// edges of OTHER events (their start / end instants, [neighbourEdges] sorted
+/// ascending) when it comes within [thresholdPx] of one, so actions line up one
+/// after another and off-grid times (10:05, 23:59) are reachable.
+///
+/// [moveWhole] true (a move): the start or the end - whichever is closest to an
+/// edge - snaps and BOTH shift by the same amount (the length is kept).
+/// false (a resize): only the moved edge snaps ([movedEdgeIsStart]), the other
+/// one stays, and a snap that would shorten the event below
+/// [kMinDurationMinutes] is dropped.
+/// The threshold is constant on screen: `thresholdPx / pxPerMinute` minutes,
+/// never above [kSnapMinutes] (it must not swallow the grid) and at least 1.
+SnapResult snapToNeighbours({
+  required CalendarSchedule schedule,
+  required bool moveWhole,
+  bool movedEdgeIsStart = true,
+  required List<DateTime> neighbourEdges,
+  required double pxPerMinute,
+  double thresholdPx = 8,
+}) {
+  if (neighbourEdges.isEmpty) return (schedule: schedule, snappedTo: null);
+  final thr = Duration(
+    seconds: ((thresholdPx / pxPerMinute).clamp(1.0, kSnapMinutes.toDouble()) *
+            60)
+        .round(),
+  );
+
+  DateTime? nearest(DateTime t) {
+    // Binary search for the first edge >= t, then compare it with its
+    // predecessor.
+    var lo = 0, hi = neighbourEdges.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (neighbourEdges[mid].isBefore(t)) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    DateTime? best;
+    for (final i in [lo - 1, lo]) {
+      if (i < 0 || i >= neighbourEdges.length) continue;
+      final e = neighbourEdges[i];
+      if (best == null ||
+          e.difference(t).abs() < best.difference(t).abs()) {
+        best = e;
+      }
+    }
+    if (best == null || best.difference(t).abs() > thr) return null;
+    return best;
+  }
+
+  final s = schedule.startAt, e = schedule.endAt;
+  if (moveWhole) {
+    final a = nearest(s), b = nearest(e);
+    final da = a?.difference(s), db = b?.difference(e);
+    Duration? shift;
+    DateTime? hit;
+    if (da != null && (db == null || da.abs() <= db.abs())) {
+      shift = da;
+      hit = a;
+    } else if (db != null) {
+      shift = db;
+      hit = b;
+    }
+    if (shift == null || shift == Duration.zero && hit == null) {
+      return (schedule: schedule, snappedTo: null);
+    }
+    return (
+      schedule: (startAt: s.add(shift), endAt: e.add(shift)),
+      snappedTo: hit,
+    );
+  }
+  final edge = movedEdgeIsStart ? s : e;
+  final hit = nearest(edge);
+  if (hit == null) return (schedule: schedule, snappedTo: null);
+  final newStart = movedEdgeIsStart ? hit : s;
+  final newEnd = movedEdgeIsStart ? e : hit;
+  if (newEnd.difference(newStart) < const Duration(minutes: kMinDurationMinutes)) {
+    return (schedule: schedule, snappedTo: null);
+  }
+  return (schedule: (startAt: newStart, endAt: newEnd), snappedTo: hit);
+}

@@ -16,18 +16,33 @@ class TransactionPick {
   const TransactionPick.create() : item = null, createNew = true;
 }
 
-/// A searchable "Link a transaction" list for the action editor: the existing
-/// transactions that belong to no action yet, with "Create new transaction"
-/// pinned on top. Search matches the transaction name, category name, date and
-/// amount.
+/// A searchable list of existing transactions with "Create new transaction"
+/// pinned on top. For the action editor ("Link a transaction") it lists the
+/// transactions that belong to no action yet; with [excludeCategoryId] (the
+/// category dialog's "Add a transaction") it lists every transaction NOT in
+/// that category. Search matches the transaction name, category name, action
+/// name, date and amount.
 class TransactionPickerDialog extends ConsumerStatefulWidget {
-  const TransactionPickerDialog({super.key});
+  const TransactionPickerDialog({
+    super.key,
+    this.excludeCategoryId,
+    this.title = 'Link a transaction',
+  });
 
-  static Future<TransactionPick?> show(BuildContext context) =>
-      showStackedDialog<TransactionPick>(
-        context: context,
-        builder: (_) => const TransactionPickerDialog(),
-      );
+  final String? excludeCategoryId;
+  final String title;
+
+  static Future<TransactionPick?> show(
+    BuildContext context, {
+    String? excludeCategoryId,
+    String title = 'Link a transaction',
+  }) => showStackedDialog<TransactionPick>(
+    context: context,
+    builder: (_) => TransactionPickerDialog(
+      excludeCategoryId: excludeCategoryId,
+      title: title,
+    ),
+  );
 
   @override
   ConsumerState<TransactionPickerDialog> createState() =>
@@ -50,7 +65,7 @@ class _TransactionPickerDialogState
     };
     final all = ref.watch(budgetTransactionsProvider);
     return AlertDialog(
-      title: const Text('Link a transaction'),
+      title: Text(widget.title),
       content: SizedBox(
         width: math.min(640.0, MediaQuery.sizeOf(context).width - 80),
         height: 400,
@@ -74,14 +89,20 @@ class _TransactionPickerDialogState
                 data: (items) {
                   final free = [
                     for (final t in items)
-                      if (t.row.actionId == null)
+                      if (widget.excludeCategoryId == null
+                          ? t.row.actionId == null
+                          : t.row.categoryId != widget.excludeCategoryId)
                         if (_query.isEmpty ||
                             _haystack(t, cats).contains(_query))
                           t,
                   ];
                   if (free.isEmpty) {
-                    return const Center(
-                      child: Text('No unlinked transactions.'),
+                    return Center(
+                      child: Text(
+                        widget.excludeCategoryId == null
+                            ? 'No unlinked transactions.'
+                            : 'No other transactions.',
+                      ),
                     );
                   }
                   return ListView.builder(
@@ -124,7 +145,8 @@ class _TransactionPickerDialogState
   }
 
   String _haystack(BudgetTxItem t, Map<String, String> cats) =>
-      '${t.row.name} ${cats[t.row.categoryId] ?? ''} ${budgetDate(t.date)} '
+      '${t.row.name} ${cats[t.row.categoryId] ?? ''} ${t.actionName ?? ''} '
+              '${budgetDate(t.date)} '
               '${budgetNumber(_amount(t).abs())}'
           .toLowerCase();
 }

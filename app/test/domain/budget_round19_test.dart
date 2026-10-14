@@ -199,41 +199,47 @@ void main() {
     });
   });
 
-  group('categories bar segments', () {
-    test('the plan is 1/5 of the track, the fact is ratio x 1/5', () {
-      final s = barSegments(plan: 100, fact: 77, isIncome: false);
-      expect(s.plan, 0.2);
-      expect(s.fact, closeTo(0.154, 1e-9));
-      expect(s.over, isFalse);
-      expect(barSegments(plan: 100, fact: 0, isIncome: false).fact, 0);
-      expect(barSegments(plan: 100, fact: 100, isIncome: false).fact, 0.2);
+  group('categories bar geometry (standard bar + 100 % marker)', () {
+    test('within plan: the bar fills the ratio, no marker', () {
+      final g = barGeometry(plan: 100, fact: 62, isIncome: false);
+      expect(g.fill, closeTo(0.62, 1e-9));
+      expect(g.showMarker, isFalse);
+      expect(g.over, isFalse);
+      expect(barGeometry(plan: 100, fact: 0, isIncome: false).fill, 0);
+      expect(barGeometry(plan: 100, fact: 100, isIncome: false).fill, 1.0);
     });
 
-    test('over plan: red, longer than the plan segment, capped at 5x', () {
-      final three = barSegments(plan: -50, fact: -150, isIncome: false);
-      expect(three.fact, closeTo(0.6, 1e-9));
-      expect(three.over, isTrue);
-      final eight = barSegments(plan: -53, fact: -424, isIncome: false);
-      expect(eight.fact, 1.0);
-      expect(eight.over, isTrue);
-      expect(barSegments(plan: 10, fact: 50, isIncome: false).fact, 1.0);
+    test('over plan: the marker shows 100 %, the bar runs on, each row own scale', () {
+      final a = barGeometry(plan: -50, fact: -70, isIncome: false); // 140 %
+      expect(a.fill, 1.0);
+      expect(a.marker, closeTo(1 / 1.4, 1e-9));
+      expect(a.showMarker, isTrue);
+      expect(a.over, isTrue);
+      final b = barGeometry(plan: -50, fact: -160, isIncome: false); // 320 %
+      expect(b.marker, closeTo(0.3125, 1e-9));
+      // Different ranges in different rows.
+      expect(b.marker, lessThan(a.marker));
     });
 
     test('an income above its plan is good, never over', () {
-      final s = barSegments(plan: 100, fact: 300, isIncome: true);
-      expect(s.fact, closeTo(0.6, 1e-9));
-      expect(s.over, isFalse);
+      final g = barGeometry(plan: 100, fact: 300, isIncome: true);
+      expect(g.showMarker, isTrue);
+      expect(g.over, isFalse);
+      expect(g.marker, closeTo(1 / 3, 1e-9));
     });
 
     test('no plan: a fact fills the track (over for an expense), nothing = nothing', () {
-      final s = barSegments(plan: 0, fact: -20, isIncome: false);
-      expect((s.plan, s.fact, s.over), (0.0, 1.0, true));
-      final none = barSegments(plan: 0, fact: 0, isIncome: false);
-      expect((none.plan, none.fact, none.over), (0.0, 0.0, false));
+      final g = barGeometry(plan: 0, fact: -20, isIncome: false);
+      expect((g.fill, g.showMarker, g.over), (1.0, false, true));
+      final none = barGeometry(plan: 0, fact: 0, isIncome: false);
+      expect((none.fill, none.over), (0.0, false));
     });
 
     test('a refund counts by size', () {
-      expect(barSegments(plan: -100, fact: 50, isIncome: false).fact, closeTo(0.1, 1e-9));
+      expect(
+        barGeometry(plan: -100, fact: 50, isIncome: false).fill,
+        closeTo(0.5, 1e-9),
+      );
     });
   });
 }

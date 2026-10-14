@@ -317,4 +317,142 @@ void main() {
       expect(localDayStart(DateTime.utc(2026, 9, 28, 7)), mondayMidnight);
     });
   });
+
+  group('resizing across midnight is not clamped', () {
+    test('the bottom edge of a block ending 23:59 can go to 00:30 next day', () {
+      final r = resizedSchedule(
+        startAt: u(10, 17), // 20:00 local
+        endAt: u(10, 20, 59), // 23:59 local
+        fromTop: false,
+        dayDelta: 0,
+        minuteDelta: 31,
+        legacyEstimatedMinutes: null,
+      );
+      expect(r.endAt, u(10, 21, 30)); // 00:30 local the next day
+      expect(r.startAt, u(10, 17));
+    });
+
+    test('the top edge of a block that starts yesterday can move earlier', () {
+      final r = resizedSchedule(
+        startAt: u(9, 20), // yesterday 23:00 local
+        endAt: u(10, 4),
+        fromTop: true,
+        dayDelta: 0,
+        minuteDelta: -41,
+        legacyEstimatedMinutes: null,
+      );
+      expect(r.startAt, u(9, 20).subtract(const Duration(minutes: 41)));
+    });
+  });
+
+  group('snapToNeighbours (the magnet)', () {
+    CalendarSchedule sched(DateTime s, DateTime e) => (startAt: s, endAt: e);
+    final edges = [u(10, 7), u(10, 8), u(10, 9, 30)]; // 10:00, 11:00, 12:30 local
+
+    test('a move locks the start onto a neighbour end and keeps the length', () {
+      // 11:03 -> 12:03 local: the start is 3 min from the edge at 11:00.
+      final r = snapToNeighbours(
+        schedule: sched(u(10, 8, 3), u(10, 9, 3)),
+        moveWhole: true,
+        neighbourEdges: edges,
+        pxPerMinute: 2,
+      );
+      expect(r.snappedTo, u(10, 8));
+      expect(r.schedule.startAt, u(10, 8));
+      expect(r.schedule.endAt, u(10, 9));
+    });
+
+    test('a move locks the END onto the next event start (the closer edge wins)', () {
+      // ends 12:27 local, 3 min before the edge at 12:30.
+      final r = snapToNeighbours(
+        schedule: sched(u(10, 8, 27), u(10, 9, 27)),
+        moveWhole: true,
+        neighbourEdges: edges,
+        pxPerMinute: 2,
+      );
+      expect(r.snappedTo, u(10, 9, 30));
+      expect(r.schedule.endAt, u(10, 9, 30));
+      expect(r.schedule.startAt, u(10, 8, 30));
+    });
+
+    test('nothing within the threshold: no change', () {
+      final s = sched(u(10, 8, 20), u(10, 8, 50));
+      final r = snapToNeighbours(
+        schedule: s,
+        moveWhole: true,
+        neighbourEdges: edges,
+        pxPerMinute: 2,
+      );
+      expect(r.snappedTo, isNull);
+      expect(r.schedule, s);
+    });
+
+    test('the threshold is constant on screen: wider in minutes when zoomed out', () {
+      // 8 px at 0.5 px/min = 16 min but capped at the 10 min grid step.
+      final far = snapToNeighbours(
+        schedule: sched(u(10, 8, 12), u(10, 8, 40)),
+        moveWhole: true,
+        neighbourEdges: edges,
+        pxPerMinute: 0.5,
+      );
+      expect(far.snappedTo, isNull, reason: '12 min away: beyond the 10 min cap');
+      final near = snapToNeighbours(
+        schedule: sched(u(10, 8, 9), u(10, 8, 40)),
+        moveWhole: true,
+        neighbourEdges: edges,
+        pxPerMinute: 0.5,
+      );
+      expect(near.snappedTo, u(10, 8));
+      // Zoomed in (4 px/min): only 2 minutes count.
+      final tight = snapToNeighbours(
+        schedule: sched(u(10, 8, 3), u(10, 8, 40)),
+        moveWhole: true,
+        neighbourEdges: edges,
+        pxPerMinute: 4,
+      );
+      expect(tight.snappedTo, isNull);
+    });
+
+    test('resize bottom snaps only the end edge', () {
+      final r = snapToNeighbours(
+        schedule: sched(u(10, 5), u(10, 8, 4)),
+        moveWhole: false,
+        movedEdgeIsStart: false,
+        neighbourEdges: edges,
+        pxPerMinute: 2,
+      );
+      expect(r.schedule.startAt, u(10, 5));
+      expect(r.schedule.endAt, u(10, 8));
+    });
+
+    test('resize top snaps only the start edge, and never below the minimum length', () {
+      final ok = snapToNeighbours(
+        schedule: sched(u(10, 7, 4), u(10, 9)),
+        moveWhole: false,
+        movedEdgeIsStart: true,
+        neighbourEdges: edges,
+        pxPerMinute: 2,
+      );
+      expect(ok.schedule.startAt, u(10, 7));
+      // The edge at 11:00 would leave 3 minutes: refused.
+      final tooShort = snapToNeighbours(
+        schedule: sched(u(10, 8, 3), u(10, 8, 13)),
+        moveWhole: false,
+        movedEdgeIsStart: true,
+        neighbourEdges: [u(10, 8, 11)],
+        pxPerMinute: 2,
+      );
+      expect(tooShort.snappedTo, isNull);
+    });
+
+    test('off-grid neighbour times (23:59) are reachable', () {
+      final r = snapToNeighbours(
+        schedule: sched(u(10, 20, 58), u(10, 21, 58)),
+        moveWhole: true,
+        neighbourEdges: [u(10, 20, 59)],
+        pxPerMinute: 2,
+      );
+      expect(r.schedule.startAt, u(10, 20, 59));
+    });
+  });
 }

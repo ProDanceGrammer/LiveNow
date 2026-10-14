@@ -98,11 +98,11 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('swipe right always finishes the action, with an Undo toast', (
+  testWidgets('swipe left always finishes the action, with an Undo toast', (
     tester,
   ) async {
     await pumpPhone(tester);
-    await tester.drag(find.text('Open one'), const Offset(300, 0));
+    await tester.drag(find.text('Open one'), const Offset(-300, 0));
     await settle(tester);
     final occurrences = (await tester.runAsync(
       () => db.select(db.actionOccurrencesTable).get(),
@@ -120,11 +120,11 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('swipe left always starts the action and never deletes it', (
+  testWidgets('swipe right always starts the action and never deletes it', (
     tester,
   ) async {
     await pumpPhone(tester);
-    await tester.drag(find.text('Open one'), const Offset(-300, 0));
+    await tester.drag(find.text('Open one'), const Offset(300, 0));
     await settle(tester);
     final all = (await tester.runAsync(
       () => db.select(db.actionsTable).get(),

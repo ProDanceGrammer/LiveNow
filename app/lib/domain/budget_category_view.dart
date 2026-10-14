@@ -235,24 +235,40 @@ Set<String> collapsedForLevel(List<CategoryInfo> categories, int? level) {
   };
 }
 
-/// The Categories bar under a row, as fractions of the track width: the PLAN
-/// segment is always 1/5 of it (1x plan), the FACT fill is `fact / plan` x 1/5,
-/// capped at 5x plan = the whole track. [over] = spending above the plan (an
-/// expense category over its plan); an income above its plan is good, never
-/// "over". Absolute values are compared (a refund counts by size). No plan but
-/// a fact fills the whole track (capped); neither draws nothing.
-({double plan, double fact, bool over}) barSegments({
+/// The Categories bar under a row: a standard progress bar with a 100 % marker.
+/// Everything is a fraction of the track width.
+///
+/// The bar fills `fact / plan`; once the row is OVER its plan the marker shows
+/// where 100 % is and the bar runs on to the right in proportion, so each row
+/// scales to ITS OWN maximum (`scale = max(1, ratio)`): a row at 320 % has its
+/// marker at 1/3.2 of the width, a row at 120 % at 1/1.2. Within plan the bar
+/// simply fills `ratio` of the track and no marker is drawn.
+///
+/// [over] = spending above the plan (an expense over its plan: the part after
+/// the marker is red); an income above its plan is good, never "over". Absolute
+/// values are compared (a refund counts by size). No plan but a fact fills the
+/// whole track; neither draws nothing.
+({double fill, double marker, bool showMarker, bool over}) barGeometry({
   required double plan,
   required double fact,
   required bool isIncome,
 }) {
-  const unit = 0.2;
-  final hasPlan = plan.abs() >= 0.005;
-  if (!hasPlan) {
+  if (plan.abs() < 0.005) {
     final any = fact.abs() >= 0.005;
-    return (plan: 0.0, fact: any ? 1.0 : 0.0, over: any && !isIncome);
+    return (
+      fill: any ? 1.0 : 0.0,
+      marker: 1.0,
+      showMarker: false,
+      over: any && !isIncome,
+    );
   }
   final ratio = fact.abs() / plan.abs();
-  final frac = (ratio > 5 ? 5.0 : ratio) * unit;
-  return (plan: unit, fact: frac, over: ratio > 1.0001 && !isIncome);
+  final scale = ratio > 1 ? ratio : 1.0;
+  final over = ratio > 1.0001;
+  return (
+    fill: ratio / scale,
+    marker: 1 / scale,
+    showMarker: over,
+    over: over && !isIncome,
+  );
 }

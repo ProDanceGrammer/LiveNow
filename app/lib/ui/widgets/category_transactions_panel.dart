@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/budget_rules.dart';
+import '../../domain/budget_service.dart' show BudgetGroupException;
 import '../../domain/budget_tx_view_rules.dart';
 import '../budget_providers.dart';
+import 'app_toast.dart';
 import 'budget_dialogs.dart';
 import 'budget_format.dart';
 import 'label_icon.dart';
 import 'param_icons.dart';
+import 'transaction_picker_dialog.dart';
 
 /// The transactions of one category (a group: of everything below it), newest
 /// first: date, name, the sum in the counting currency and in the main
@@ -27,6 +30,29 @@ class CategoryTransactionsPanel extends ConsumerWidget {
   final bool scrollable;
 
   static const kPanelPhoneLimit = 30;
+
+  /// "+": an existing transaction moves into this category (it takes the
+  /// category's price, accounts and rates), or a new one is created here - the
+  /// same flow as "Add transaction" in the action editor.
+  Future<void> _add(BuildContext context, WidgetRef ref) async {
+    final pick = await TransactionPickerDialog.show(
+      context,
+      excludeCategoryId: categoryId,
+      title: 'Add a transaction',
+    );
+    if (pick == null || !context.mounted) return;
+    if (pick.createNew) {
+      await BudgetTransactionDialog.show(context, categoryId: categoryId);
+      return;
+    }
+    try {
+      await ref
+          .read(budgetServiceProvider)
+          .updateTransaction(pick.item!.row.id, categoryId: categoryId);
+    } on BudgetGroupException catch (e) {
+      if (context.mounted) showInfoToast(rootOverlayOf(context), e.message);
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -92,9 +118,24 @@ class CategoryTransactionsPanel extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Transactions (${items.length})',
-            style: const TextStyle(fontWeight: FontWeight.w700),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Transactions (${items.length})',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              // Only a category without sub-categories can hold transactions.
+              if (below.length <= 1)
+                IconButton(
+                  key: const ValueKey('category-tx-add'),
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Add or create a transaction',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _add(context, ref),
+                ),
+            ],
           ),
           if (items.isNotEmpty) ...[
             const SizedBox(height: 2),
@@ -103,12 +144,11 @@ class CategoryTransactionsPanel extends ConsumerWidget {
               sums(totals.counting),
               const ValueKey('category-tx-counting'),
             ),
-            if (totals.interact.isNotEmpty)
-              row(
-                const TxValueIcon(TxValue.interactional, size: 16),
-                sums(totals.interact),
-                const ValueKey('category-tx-interact'),
-              ),
+            row(
+              const TxValueIcon(TxValue.interactional, size: 16),
+              totals.interact.isEmpty ? '—' : sums(totals.interact),
+              const ValueKey('category-tx-interact'),
+            ),
             row(
               const TxValueIcon(TxValue.main, size: 16),
               '${budgetMoney(totals.base, sign: true)} $base'

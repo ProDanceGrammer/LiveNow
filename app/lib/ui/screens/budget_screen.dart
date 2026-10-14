@@ -19,11 +19,9 @@ import '../urgency_colors.dart';
 import '../widgets/action_tile.dart' show formatUrgency;
 import '../layout.dart';
 import '../time_format.dart' show formatDateTime, wallFromUtc;
-import '../undo.dart' show offerUndo, undoHistoryProvider;
 import '../open_entity.dart';
 import '../widgets/account_icon.dart';
 import '../widgets/budget_tx_options_panel.dart';
-import '../widgets/app_toast.dart';
 import '../widgets/budget_categories_board.dart';
 import '../widgets/budget_dialogs.dart';
 import '../widgets/budget_format.dart';
@@ -236,24 +234,6 @@ Widget _loading(AsyncValue<BudgetView> v, Widget Function(BudgetView) data) =>
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('Error: $e')),
     );
-
-Future<void> _deleteAccount(
-  BuildContext context,
-  WidgetRef ref,
-  BudgetAccount a,
-) async {
-  final overlay = rootOverlayOf(context);
-  final service = ref.read(budgetServiceProvider);
-  final history = ref.read(undoHistoryProvider.notifier);
-  final undo = await service.deleteAccount(a.id);
-  if (undo == null) return;
-  offerUndo(
-    overlay,
-    history,
-    'Deleted "${a.name}"',
-    () => service.undoDeleteAccount(undo),
-  );
-}
 
 // ---- overview ---------------------------------------------------------------
 
@@ -1136,10 +1116,12 @@ class _TotalsBlock extends StatelessWidget {
         if (showTotals) ...[
           if (cols.counting)
             row(const TxValueIcon(TxValue.counting, size: 16), _sums(totals.counting)),
-          if (cols.interact && totals.interact.isNotEmpty)
+          // Always all the chosen rows: Interactional shows a dash when nothing
+          // in the group went through a use account.
+          if (cols.interact)
             row(
               const TxValueIcon(TxValue.interactional, size: 16),
-              _sums(totals.interact),
+              totals.interact.isEmpty ? '—' : _sums(totals.interact),
             ),
           if (cols.main)
             row(
@@ -1617,13 +1599,6 @@ class _AccountsView extends ConsumerWidget {
                                     ],
                                   ),
                                 ),
-                                IconButton(
-                                  key: ValueKey('budget-delete-account-${a.id}'),
-                                  tooltip: 'Delete',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () =>
-                                      _deleteAccount(context, ref, a),
-                                ),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -1646,27 +1621,77 @@ class _AccountsView extends ConsumerWidget {
                                         ),
                                       ),
                                     ),
-                                  Flexible(
-                                    child: figure(
-                                      'Balance',
-                                      '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
-                                      key: ValueKey('budget-balance-${a.id}'),
-                                      end: true,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 24),
-                                  Flexible(
-                                    child: figure(
-                                      'Main ($base)',
-                                      item.mainBalance == null
-                                          ? '—'
-                                          : '${budgetMoney(item.mainBalance!)} $base',
-                                      key: ValueKey(
-                                        'budget-main-balance-${a.id}',
+                                  if (usePhoneLayout(context))
+                                    // Phone: the MAIN-currency balance (star)
+                                    // over the account's own, right-aligned in
+                                    // the bottom-right corner.
+                                    Flexible(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const TxValueIcon(
+                                                TxValue.main,
+                                                size: 16,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  item.mainBalance == null
+                                                      ? '—'
+                                                      : '${budgetMoney(item.mainBalance!)} $base',
+                                                  key: ValueKey(
+                                                    'budget-main-balance-${a.id}',
+                                                  ),
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w700,
+                                                    fontSize: 16,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
+                                            key: ValueKey(
+                                              'budget-balance-${a.id}',
+                                            ),
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      end: true,
+                                    )
+                                  else ...[
+                                    Flexible(
+                                      child: figure(
+                                        'Balance',
+                                        '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
+                                        key: ValueKey('budget-balance-${a.id}'),
+                                        end: true,
+                                      ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 24),
+                                    Flexible(
+                                      child: figure(
+                                        'Main ($base)',
+                                        item.mainBalance == null
+                                            ? '—'
+                                            : '${budgetMoney(item.mainBalance!)} $base',
+                                        key: ValueKey(
+                                          'budget-main-balance-${a.id}',
+                                        ),
+                                        end: true,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),

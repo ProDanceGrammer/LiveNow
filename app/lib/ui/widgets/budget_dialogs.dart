@@ -246,6 +246,25 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
     super.dispose();
   }
 
+  /// Deletes this account (its transactions and categories keep existing
+  /// without it; Undo restores everything) and closes the dialog.
+  Future<void> _delete() async {
+    final a = widget.existing!;
+    final overlay = rootOverlayOf(context);
+    final navigator = Navigator.of(context);
+    final service = ref.read(budgetServiceProvider);
+    final history = ref.read(undoHistoryProvider.notifier);
+    final undo = await service.deleteAccount(a.id);
+    if (undo == null) return;
+    navigator.pop();
+    offerUndo(
+      overlay,
+      history,
+      'Deleted "${a.name}"',
+      () => service.undoDeleteAccount(undo),
+    );
+  }
+
   Future<void> _pickIcon() async {
     // On a phone the icon may come from the Photo library or from Files; on
     // the desktop there is only the file dialog.
@@ -322,7 +341,25 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
     }
 
     return AlertDialog(
-      title: Text(widget.existing == null ? 'New account' : 'Edit account'),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              widget.existing == null ? 'New account' : 'Edit account',
+            ),
+          ),
+          // The delete lives here (red, top-right, like the other edit menus),
+          // not on the list cards.
+          if (widget.existing != null)
+            IconButton(
+              key: const ValueKey('account-delete'),
+              tooltip: 'Delete',
+              color: Theme.of(context).colorScheme.error,
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: _delete,
+            ),
+        ],
+      ),
       content: Form(
         key: _form,
         child: _dialogBody([

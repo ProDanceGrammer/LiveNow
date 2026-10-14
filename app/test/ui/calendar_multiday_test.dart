@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/local_time.dart';
@@ -275,6 +276,81 @@ void main() {
     await tester.pump();
     expect(find.byKey(const ValueKey('calendar-bulk-bar')), findsNothing);
     await tester.pump(const Duration(seconds: 6));
+    await unmount(tester);
+  });
+
+  testWidgets('a block that started yesterday can be pulled up (it never turns all-day)', (
+    tester,
+  ) async {
+    await pump(tester);
+    // Yesterday 20:00 -> today 04:00: today shows its second slice at the very
+    // top of the grid, right under the all-day strip.
+    final id = await create(tester, 'Night', at(-4), at(4));
+    await useDays(tester, 3);
+    final ppm = pxPerMinute(tester);
+    const up = 35.0; // px: the pointer ends inside the all-day strip
+    await dragBy(
+      tester,
+      find.byKey(ValueKey('event-$id-d0')), // today's slice (a continuation)
+      const Offset(30, 10),
+      const Offset(0, -up),
+    );
+    final r = await row(tester, id);
+    expect(r.isAllDay, isFalse);
+    final minutes = (up / ppm / 10).round() * 10;
+    expect(dateTimeFromDb(r.startAt), at(-4).subtract(Duration(minutes: minutes)));
+    expect(dateTimeFromDb(r.endAt), at(4).subtract(Duration(minutes: minutes)));
+    await unmount(tester);
+  });
+
+  testWidgets('the magnet locks a dragged block onto the edge of another one '
+      '(Alt = grid only)', (tester) async {
+    await pump(tester);
+    final a = await create(tester, 'First', at(10), at(11));
+    await create(tester, 'Second', at(12, 5), at(13)); // off the 10-min grid
+    await useDays(tester, 3);
+    // 61 min down: the grid alone would end at 12:00, the magnet at 12:05.
+    await dragBy(
+      tester,
+      find.byKey(ValueKey('event-$a')),
+      const Offset(30, 10),
+      Offset(0, 61 * pxPerMinute(tester)),
+    );
+    var r = await row(tester, a);
+    expect(dateTimeFromDb(r.startAt), at(11, 5));
+    expect(dateTimeFromDb(r.endAt), at(12, 5));
+
+    // With Alt held the magnet is off: plain 10-minute steps.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await dragBy(
+      tester,
+      find.byKey(ValueKey('event-$a')),
+      const Offset(30, 10),
+      Offset(0, -61 * pxPerMinute(tester)),
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    r = await row(tester, a);
+    expect(dateTimeFromDb(r.startAt), at(10, 5));
+    await unmount(tester);
+  });
+
+  testWidgets('the snap guide shows while the block is locked', (tester) async {
+    await pump(tester);
+    final a = await create(tester, 'First', at(10), at(11));
+    await create(tester, 'Second', at(12, 5), at(13));
+    await useDays(tester, 3);
+    final g = await tester.startGesture(
+      tester.getTopLeft(find.byKey(ValueKey('event-$a'))) + const Offset(30, 10),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.moveBy(const Offset(0, 1));
+    await tester.pump();
+    await g.moveBy(Offset(0, 61 * pxPerMinute(tester)));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('snap-guide')), findsOneWidget);
+    await g.up();
+    await tester.pump();
+    await settle(tester);
     await unmount(tester);
   });
 }

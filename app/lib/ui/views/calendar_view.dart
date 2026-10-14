@@ -216,6 +216,11 @@ bool get _touchPress =>
 /// before the event can be pulled to a new time: twice as long in all.
 const Duration _kArmMoveAfter = Duration(milliseconds: 500);
 
+/// A dragged block this close (px) to the grid's top / bottom scrolls the grid
+/// ([_TimeGridState._scrollTurn]), [_kScrollStep] px every 30 ms.
+const double _kScrollEdge = 36;
+const double _kScrollStep = 9;
+
 /// Phone tap on an event: with a selection (made by long-press) it adds or
 /// removes the event, otherwise it opens the editor.
 void _phoneTap(BuildContext context, WidgetRef ref, String id) {
@@ -1986,6 +1991,16 @@ class _Drag {
   /// The grid's scroll offset when the drag began (see [dragMinuteDelta]).
   final double originScroll;
 
+  /// True when the grabbed slice is the event's FIRST slice. Only then may an
+  /// upward move over the all-day strip turn it into an all-day event: pulling
+  /// the second-day slice of a block that started yesterday upwards moves the
+  /// block, it must never be converted.
+  final bool grabbedIsStart;
+
+  /// The start / end instants of every OTHER timed event, ascending: what the
+  /// magnet locks onto ([snapToNeighbours]). A snapshot taken at drag start.
+  final List<DateTime> neighbours;
+
   const _Drag({
     required this.grabbed,
     required this.grabbedColumn,
@@ -1998,6 +2013,8 @@ class _Drag {
     required this.origin,
     required this.current,
     required this.originScroll,
+    required this.grabbedIsStart,
+    required this.neighbours,
   });
 
   _Drag at(Offset p) => _Drag(
@@ -2012,6 +2029,8 @@ class _Drag {
     origin: origin,
     current: p,
     originScroll: originScroll,
+    grabbedIsStart: grabbedIsStart,
+    neighbours: neighbours,
   );
 }
 
@@ -2107,6 +2126,8 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _cross.onChipDrop = null;
     _cross.stripTarget.value = null;
     _stopEdgeTurn();
+    _stopScrollTurn();
+    HardwareKeyboard.instance.removeHandler(_altHandler);
     _tick?.cancel();
     _settle?.cancel();
     _endMarquee();
@@ -2335,6 +2356,17 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       }
     }
     _draggedIds.value = {for (final m in members) m.id};
+    // The edges of every other timed event, for the magnet.
+    final memberIds = {for (final m in members) m.id};
+    final edges = <DateTime>{};
+    for (final a in widget.items) {
+      if (a.isAllDay || a.startAt == null || memberIds.contains(a.id)) continue;
+      edges
+        ..add(a.startAt!)
+        ..add(_effectiveEnd(a));
+    }
+    final sortedEdges = edges.toList()..sort();
+    HardwareKeyboard.instance.addHandler(_altHandler);
     _dragN.value = _Drag(
       grabbed: grabbed,
       grabbedColumn: p.event.day,
@@ -2347,6 +2379,8 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       origin: pos,
       current: pos,
       originScroll: _scrollOffsetNow,
+      grabbedIsStart: p.event.isStart,
+      neighbours: sortedEdges,
     );
     _cross.gridDragging = true;
     _routePointer();
@@ -2393,12 +2427,72 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _edgeDir = 0;
   }
 
+  Timer? _scrollTimer;
+  int _scrollDir = 0;
+
+  /// Holding a dragged block within [_kScrollEdge] px of the grid's top or
+  /// bottom scrolls the grid, so a block can be carried (or its edge pulled)
+  /// across midnight and further than the screen shows. The preview already
+  /// adds the grid's scroll since the drag began, and [_onScrolled] re-derives
+  /// it, so nothing else is needed.
+  void _scrollTurn(Offset pos) {
+    final box = context.findRenderObject();
+    var dir = 0;
+    if (box is RenderBox && box.attached && box.hasSize) {
+      final y = box.globalToLocal(pos).dy;
+      if (y < _kScrollEdge) {
+        dir = -1;
+      } else if (y > box.size.height - _kScrollEdge) {
+        dir = 1;
+      }
+    }
+    if (dir == _scrollDir) return;
+    _scrollDir = dir;
+    _scrollTimer?.cancel();
+    _scrollTimer = null;
+    if (dir == 0) return;
+    _scrollTimer = Timer.periodic(const Duration(milliseconds: 30), (t) {
+      if (!mounted || _drag == null || _scrollController?.hasClients != true) {
+        t.cancel();
+        return;
+      }
+      final p = _scroll.position;
+      final next = (p.pixels + dir * _kScrollStep).clamp(
+        p.minScrollExtent,
+        p.maxScrollExtent,
+      );
+      if (next != p.pixels) _scroll.jumpTo(next);
+    });
+  }
+
+  void _stopScrollTurn() {
+    _scrollTimer?.cancel();
+    _scrollTimer = null;
+    _scrollDir = 0;
+  }
+
+  /// The neighbour edge the preview locked onto (drawn as a guide line).
+  DateTime? _snapAt;
+
+  /// Holding Alt on a desktop turns the magnet off; a key press does not move
+  /// the pointer, so the preview is nudged by hand.
+  bool _altHandler(KeyEvent e) {
+    if (e.logicalKey == LogicalKeyboardKey.altLeft ||
+        e.logicalKey == LogicalKeyboardKey.altRight) {
+      final d = _drag;
+      if (d != null && !_committing) _dragN.value = d.at(d.current);
+    }
+    return false;
+  }
+
   void _dragUpdate(Offset pos) {
     final d = _drag;
     if (d == null || _committing) return;
     _edgeTurn(pos);
-    // A timed block dragged up over the all-day strip highlights that day.
-    if (d.kind == _DragKind.move) {
+    _scrollTurn(pos);
+    // A timed block dragged up over the all-day strip highlights that day
+    // (only for the event's first slice, see [_Drag.grabbedIsStart]).
+    if (d.kind == _DragKind.move && d.grabbedIsStart) {
       _cross.stripTarget.value = _cross.stripDayAt(
         pos,
         widget.dayWidth,
@@ -2490,6 +2584,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
   void _clearDrag() {
     _stopEdgeTurn();
+    _stopScrollTurn();
+    HardwareKeyboard.instance.removeHandler(_altHandler);
+    _snapAt = null;
     _cross.gridDragging = false;
     _cross.stripTarget.value = null;
     _dragN.value = null;
@@ -2522,6 +2619,16 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     );
     final dayDelta = scrolled + column - d.grabbedColumn;
 
+    // The magnet (a desktop can switch it off with Alt; a phone has no Alt).
+    final magnet =
+        usePhoneLayout(context) || !HardwareKeyboard.instance.isAltPressed;
+    // A one-day block normally stays inside its day; once the grid has been
+    // scrolled by an hour or more during the drag (held at the edge) it may be
+    // carried across midnight.
+    final carried =
+        (_scrollOffsetNow - d.originScroll).abs() >= _pxPerMinute * 60;
+    _snapAt = null;
+
     switch (d.kind) {
       case _DragKind.move:
         // Each member has its OWN limit: a block that fits inside one day stays
@@ -2533,11 +2640,11 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           final s = m.startAt!;
           final dur = _effectiveEnd(m).difference(s).inMinutes;
           final sm = minutesOfDay(s);
-          if (dur > 1440 - sm) return minutes; // crosses midnight
+          if (carried || dur > 1440 - sm) return minutes; // crosses midnight
           return minutes.clamp(-sm, 1440 - sm - dur);
         }
 
-        return [
+        final moved = [
           for (final m in d.members)
             (
               item: m,
@@ -2551,23 +2658,55 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
               ),
             ),
         ];
+        if (!magnet || item.isAllDay || d.neighbours.isEmpty) return moved;
+        // The grabbed block drives the magnet; the others shift with it.
+        final snap = snapToNeighbours(
+          schedule: moved.first.schedule,
+          moveWhole: true,
+          neighbourEdges: d.neighbours,
+          pxPerMinute: _pxPerMinute,
+        );
+        if (snap.snappedTo == null) return moved;
+        _snapAt = snap.snappedTo;
+        final shift = snap.schedule.startAt.difference(
+          moved.first.schedule.startAt,
+        );
+        return [
+          for (final m in moved)
+            m.item.isAllDay
+                ? m
+                : (
+                    item: m.item,
+                    schedule: (
+                      startAt: m.schedule.startAt.add(shift),
+                      endAt: m.schedule.endAt.add(shift),
+                    ),
+                  ),
+        ];
       case _DragKind.resizeTop:
       case _DragKind.resizeBottom:
         // The edge may cross days: the horizontal distance picks the day, the
         // vertical one the minutes; the 10-minute floor is in resizedSchedule.
-        return [
-          (
-            item: item,
-            schedule: resizedSchedule(
-              startAt: start,
-              endAt: item.endAt,
-              fromTop: d.kind == _DragKind.resizeTop,
-              dayDelta: dayDelta,
-              minuteDelta: minutes,
-              legacyEstimatedMinutes: item.estimatedMinutes,
-            ),
-          ),
-        ];
+        var resized = resizedSchedule(
+          startAt: start,
+          endAt: item.endAt,
+          fromTop: d.kind == _DragKind.resizeTop,
+          dayDelta: dayDelta,
+          minuteDelta: minutes,
+          legacyEstimatedMinutes: item.estimatedMinutes,
+        );
+        if (magnet && d.neighbours.isNotEmpty) {
+          final snap = snapToNeighbours(
+            schedule: resized,
+            moveWhole: false,
+            movedEdgeIsStart: d.kind == _DragKind.resizeTop,
+            neighbourEdges: d.neighbours,
+            pxPerMinute: _pxPerMinute,
+          );
+          resized = snap.schedule;
+          _snapAt = snap.snappedTo;
+        }
+        return [(item: item, schedule: resized)];
     }
   }
 
@@ -3118,6 +3257,26 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           ),
         );
         first = false;
+      }
+    }
+    // The magnet locked onto another event's edge: a guide line across its day.
+    final snapAt = _snapAt;
+    if (snapAt != null) {
+      final day = dayIndexOf(snapAt, widget.start);
+      if (day >= 0 && day < widget.dayCount) {
+        final ds = dayStarts[day];
+        ghosts.add(
+          Positioned(
+            key: const ValueKey('snap-guide'),
+            left: day * widget.dayWidth,
+            top: _px(snapAt.difference(ds).inSeconds / 60) - 1,
+            width: widget.dayWidth,
+            height: 2,
+            child: IgnorePointer(
+              child: ColoredBox(color: scheme.tertiary),
+            ),
+          ),
+        );
       }
     }
     return ghosts;

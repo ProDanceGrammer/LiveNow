@@ -243,9 +243,9 @@ class ActionCard extends ConsumerWidget {
     return _swipeable(context, ref, card);
   }
 
-  /// Phone: swipe right = Finish, swipe left = Start - always, whatever the
-  /// action's state; a swipe never deletes. Both go through the undoable helpers; the card itself never leaves by the
-  /// swipe (`confirmDismiss` returns false): the list updates from the data.
+  /// Phone: swipe right = Start, swipe left = Finish - always, whatever the
+  /// action's state; a swipe never deletes. Both go through the undoable helpers;
+  /// the card itself never leaves by the swipe (`confirmDismiss` returns false): the list updates from the data.
   Widget _swipeable(
     BuildContext context,
     WidgetRef ref,
@@ -272,18 +272,18 @@ class ActionCard extends ConsumerWidget {
     return Dismissible(
       key: ValueKey('swipe-${action.id}'),
       direction: DismissDirection.horizontal,
-      // Swiping right is always Finish (also on an action that is not running
-      // or is already finished), never Start.
+      // Swiping right is always Start, swiping left always Finish (whatever the
+      // action's state).
       background: bg(
-        Colors.green.shade700,
-        Icons.check_rounded,
-        'Finish',
-        Alignment.centerLeft,
-      ),
-      secondaryBackground: bg(
         Colors.blue.shade700,
         Icons.play_arrow_rounded,
         'Start',
+        Alignment.centerLeft,
+      ),
+      secondaryBackground: bg(
+        Colors.green.shade700,
+        Icons.check_rounded,
+        'Finish',
         Alignment.centerRight,
       ),
       confirmDismiss: (direction) async {
@@ -293,16 +293,16 @@ class ActionCard extends ConsumerWidget {
             context,
             ref,
             action.id,
-            'Started',
-            () => service.start(action.id),
+            'Finished',
+            () => service.finish(action.id),
           );
         } else {
           runUndoable(
             context,
             ref,
             action.id,
-            'Finished',
-            () => service.finish(action.id),
+            'Started',
+            () => service.start(action.id),
           );
         }
         return false;

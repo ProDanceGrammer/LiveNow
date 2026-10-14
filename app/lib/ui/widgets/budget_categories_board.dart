@@ -57,11 +57,17 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
   /// handed back as the identical instance.
   final _rowCache = <String, _CategoryBoardRow>{};
 
-  _CategoryBoardRow _rowFor(CategoryRowView vm, bool phone, bool showUrgency) {
+  _CategoryBoardRow _rowFor(
+    CategoryRowView vm,
+    bool phone,
+    bool showUrgency,
+    String currency,
+  ) {
     final old = _rowCache[vm.id];
     if (old != null &&
         old.phone == phone &&
         old.showUrgency == showUrgency &&
+        old.currency == currency &&
         old.vm == vm) {
       return old;
     }
@@ -70,6 +76,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
       vm: vm,
       phone: phone,
       showUrgency: showUrgency,
+      currency: currency,
       onOpen: widget.onOpen,
       onToggle: _toggle,
     );
@@ -267,6 +274,9 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
   @override
   Widget build(BuildContext context) {
     final rows = ref.watch(budgetCategoryRowsProvider)?.rows;
+    final currency = ref.watch(
+      budgetSettingsProvider.select((v) => v.value?.baseCurrency ?? 'EUR'),
+    );
     final phone = usePhoneLayout(context);
     final query = ref.watch(budgetCategoryQueryProvider);
     final showUrgency = ref.watch(budgetShowUrgencyProvider);
@@ -292,7 +302,8 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
         itemCount: rows.length,
         findChildIndexCallback: (key) =>
             key is ValueKey<String> ? indexById[key.value] : null,
-        itemBuilder: (context, i) => _rowFor(rows[i], phone, showUrgency),
+        itemBuilder: (context, i) =>
+            _rowFor(rows[i], phone, showUrgency, currency),
       );
       // Rows that left the list are forgotten.
       if (_rowCache.length > rows.length * 2 + 16) {
@@ -396,6 +407,7 @@ class _CategoryBoardRow extends StatelessWidget {
     required this.vm,
     required this.phone,
     required this.showUrgency,
+    required this.currency,
     required this.onOpen,
     required this.onToggle,
   });
@@ -403,6 +415,9 @@ class _CategoryBoardRow extends StatelessWidget {
   final CategoryRowView vm;
   final bool phone;
   final bool showUrgency;
+
+  /// The main currency code shown right of the phone's plan / fact figures.
+  final String currency;
   final void Function(BudgetCategory) onOpen;
   final void Function(String) onToggle;
 
@@ -426,15 +441,14 @@ class _CategoryBoardRow extends StatelessWidget {
       color: (fg ?? scheme.onSurface).withValues(alpha: 0.65),
     );
     final over = vm.overPlan;
-    // The bar: the plan segment (1/5 of the track) and the fact fill over it -
-    // green within the plan, red above it (income above plan is good: green).
-    // A tinted row keeps to its own text colour.
-    final seg = barSegments(plan: vm.plan, fact: vm.fact, isIncome: c.isIncome);
-    final planBarColor = fg == null
-        ? scheme.primary.withValues(alpha: 0.5)
-        : fg.withValues(alpha: 0.35);
-    final factBarColor =
-        fg ?? (seg.over ? scheme.error : Colors.green.shade600);
+    // The bar: a standard progress bar with a 100 % marker; green within the
+    // plan, red beyond the marker (income above plan is good: green). A tinted
+    // row keeps to its own text colour (the part beyond the marker fainter).
+    final geo = barGeometry(plan: vm.plan, fact: vm.fact, isIncome: c.isIncome);
+    final inPlanColor = fg ?? Colors.green.shade600;
+    final overColor = fg == null
+        ? (geo.over ? scheme.error : Colors.green.shade600)
+        : fg.withValues(alpha: 0.5);
 
     final leading = vm.hasChildren
         ? InkResponse(
@@ -531,14 +545,27 @@ class _CategoryBoardRow extends StatelessWidget {
 
     Widget figures;
     if (phone) {
+      // Each figure: its icon on the left, the number, then the currency code
+      // (small) on the right.
+      Widget line(Param param, String text, TextStyle style) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ParamIcon(param, size: 13, tooltip: false, color: fg),
+          const SizedBox(width: 4),
+          Text(text, style: style),
+          const SizedBox(width: 3),
+          Text(currency, style: small),
+        ],
+      );
       figures = Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(vm.planText, style: base),
-          Text(
+          line(Param.plan, vm.planText, base),
+          line(
+            Param.actual,
             vm.factText,
-            style: base.copyWith(
+            base.copyWith(
               fontWeight: FontWeight.w600,
               color: fg ?? (over ? scheme.error : null),
             ),
@@ -616,11 +643,13 @@ class _CategoryBoardRow extends StatelessWidget {
             height: 5,
             child: CustomPaint(
               painter: _PlanBarPainter(
-                seg.plan,
-                seg.fact,
-                planBarColor,
-                factBarColor,
+                geo.fill,
+                geo.marker,
+                geo.showMarker,
+                inPlanColor,
+                overColor,
                 (fg ?? scheme.onSurface).withValues(alpha: 0.16),
+                (fg ?? scheme.onSurface).withValues(alpha: 0.85),
               ),
             ),
           ),
@@ -646,32 +675,70 @@ class _CategoryBoardRow extends StatelessWidget {
 /// How much of the plan is used: a rounded track with a fill (capped at the
 /// full width; spending above the plan is shown by the row's colour).
 class _PlanBarPainter extends CustomPainter {
-  _PlanBarPainter(this.plan, this.fact, this.planColor, this.fill, this.track);
+  _PlanBarPainter(
+    this.fill,
+    this.marker,
+    this.showMarker,
+    this.inPlan,
+    this.over,
+    this.track,
+    this.tick,
+  );
 
-  /// Fractions of the track ([barSegments]): the plan segment and the fact fill.
-  final double plan;
-  final double fact;
-  final Color planColor;
-  final Color fill;
+  /// Fractions of the track ([barGeometry]): the filled part, where 100 % is.
+  final double fill;
+  final double marker;
+  final bool showMarker;
+  final Color inPlan;
+  final Color over;
   final Color track;
+  final Color tick;
 
   @override
   void paint(Canvas canvas, Size size) {
     final r = Radius.circular(size.height / 2);
-    RRect segment(double frac) => RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width * frac.clamp(0.0, 1.0), size.height),
+    RRect segment(double from, double to) => RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        size.width * from.clamp(0.0, 1.0),
+        0,
+        size.width * (to.clamp(0.0, 1.0) - from.clamp(0.0, 1.0)),
+        size.height,
+      ),
       r,
     );
-    canvas.drawRRect(segment(1), Paint()..color = track);
-    if (plan > 0) canvas.drawRRect(segment(plan), Paint()..color = planColor);
-    if (fact > 0) canvas.drawRRect(segment(fact), Paint()..color = fill);
+    canvas.drawRRect(segment(0, 1), Paint()..color = track);
+    if (fill <= 0) return;
+    if (showMarker) {
+      // Up to 100 %: the plan colour; beyond the marker: over.
+      canvas.drawRRect(segment(0, marker), Paint()..color = inPlan);
+      if (fill > marker) {
+        canvas.drawRect(
+          Rect.fromLTWH(
+            size.width * marker,
+            0,
+            size.width * (fill - marker),
+            size.height,
+          ),
+          Paint()..color = over,
+        );
+      }
+      // The 100 % marker.
+      canvas.drawRect(
+        Rect.fromLTWH(size.width * marker - 0.75, -2, 1.5, size.height + 4),
+        Paint()..color = tick,
+      );
+    } else {
+      canvas.drawRRect(segment(0, fill), Paint()..color = over);
+    }
   }
 
   @override
   bool shouldRepaint(_PlanBarPainter old) =>
-      old.plan != plan ||
-      old.fact != fact ||
-      old.planColor != planColor ||
       old.fill != fill ||
-      old.track != track;
+      old.marker != marker ||
+      old.showMarker != showMarker ||
+      old.inPlan != inPlan ||
+      old.over != over ||
+      old.track != track ||
+      old.tick != tick;
 }
