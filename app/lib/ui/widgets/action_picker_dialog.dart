@@ -3,8 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/time_codec.dart';
 import '../../data/queries.dart' show ActionListItem;
+import '../../domain/name_sort.dart' show compareIgnoringEmoji;
 import '../dialog_stack.dart';
 import '../providers.dart';
 import '../time_format.dart';
@@ -12,27 +12,22 @@ import '../time_format.dart';
 /// A searchable "Choose an action" dialog (name search + short schedule
 /// subtitles). Pops the chosen [ActionListItem], or null on Cancel.
 ///
-/// By default only open (not done) actions are listed; [includeDone] lists ALL
-/// actions, finished and past ones too. [excludeIds] are left out.
+/// It lists EVERY action - open, finished, past, all-day, created from a template
+/// or by hand: a previous / next / linked action is very often one that already
+/// happened. [excludeIds] are left out. Without a search the nearest in time come
+/// first (recent and coming ones on top); a search lists matches by name.
 class ActionPickerDialog extends ConsumerStatefulWidget {
   final Set<String> excludeIds;
-  final bool includeDone;
 
-  const ActionPickerDialog({
-    super.key,
-    this.excludeIds = const {},
-    this.includeDone = false,
-  });
+  const ActionPickerDialog({super.key, this.excludeIds = const {}});
 
   static Future<ActionListItem?> show(
     BuildContext context, {
     Set<String> excludeIds = const {},
-    bool includeDone = false,
   }) {
     return showStackedDialog<ActionListItem>(
       context: context,
-      builder: (_) =>
-          ActionPickerDialog(excludeIds: excludeIds, includeDone: includeDone),
+      builder: (_) => ActionPickerDialog(excludeIds: excludeIds),
     );
   }
 
@@ -43,26 +38,6 @@ class ActionPickerDialog extends ConsumerStatefulWidget {
 class _ActionPickerDialogState extends ConsumerState<ActionPickerDialog> {
   String _query = '';
 
-  AsyncValue<List<ActionListItem>> _items() {
-    if (widget.includeDone) return ref.watch(allActionsProvider);
-    return ref
-        .watch(openActionsProvider)
-        .whenData(
-          (rows) => [
-            for (final a in rows)
-              ActionListItem(
-                id: a.id,
-                name: a.name,
-                done: a.done,
-                startAt: dateTimeFromDb(a.startAt),
-                endAt: dateTimeFromDb(a.endAt),
-                isAllDay: a.isAllDay,
-                estimatedMinutes: a.estimatedMinutes,
-              ),
-          ],
-        );
-  }
-
   Widget? _scheduleText(ActionListItem a) {
     final text = formatShortSchedule(a.startAt, a.endAt, isAllDay: a.isAllDay);
     return text == null ? null : Text(text);
@@ -70,7 +45,7 @@ class _ActionPickerDialogState extends ConsumerState<ActionPickerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final actionsAsync = _items();
+    final actionsAsync = ref.watch(allActionsProvider);
 
     return AlertDialog(
       title: const Text('Choose an action'),
@@ -86,13 +61,16 @@ class _ActionPickerDialogState extends ConsumerState<ActionPickerDialog> {
             Expanded(
               child: actionsAsync.when(
                 data: (items) {
-                  final filtered = items
-                      .where(
-                        (a) =>
-                            !widget.excludeIds.contains(a.id) &&
-                            a.name.toLowerCase().contains(_query),
-                      )
-                      .toList();
+                  final filtered = pickerOrder(
+                    [
+                      for (final a in items)
+                        if (!widget.excludeIds.contains(a.id) &&
+                            a.name.toLowerCase().contains(_query))
+                          a,
+                    ],
+                    searching: _query.trim().isNotEmpty,
+                    nowUtc: DateTime.now().toUtc(),
+                  );
                   return ListView.builder(
                     itemCount: filtered.length,
                     itemBuilder: (context, i) => ListTile(
@@ -117,4 +95,26 @@ class _ActionPickerDialogState extends ConsumerState<ActionPickerDialog> {
       ],
     );
   }
+}
+
+/// The picker's order: with a search the matches by name; without one the actions
+/// nearest in time to [nowUtc] first (an action with no date goes last).
+List<ActionListItem> pickerOrder(
+  List<ActionListItem> items, {
+  required bool searching,
+  required DateTime nowUtc,
+}) {
+  final out = [...items];
+  if (searching) {
+    out.sort((a, b) => compareIgnoringEmoji(a.name, b.name));
+  } else {
+    int distance(ActionListItem a) => a.startAt == null
+        ? 1 << 62
+        : a.startAt!.difference(nowUtc).inSeconds.abs();
+    out.sort((a, b) {
+      final c = distance(a).compareTo(distance(b));
+      return c != 0 ? c : compareIgnoringEmoji(a.name, b.name);
+    });
+  }
+  return out;
 }

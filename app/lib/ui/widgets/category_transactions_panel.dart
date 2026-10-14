@@ -6,6 +6,7 @@ import '../../domain/budget_tx_view_rules.dart';
 import '../budget_providers.dart';
 import 'budget_dialogs.dart';
 import 'budget_format.dart';
+import 'label_icon.dart';
 import 'param_icons.dart';
 
 /// The transactions of one category (a group: of everything below it), newest
@@ -66,12 +67,12 @@ class CategoryTransactionsPanel extends ConsumerWidget {
       for (final e in m.entries)
         '${budgetMoney(e.value, sign: true)} ${e.key}'.trim(),
     ].join(', ');
-    Widget row(String label, String value, Key key) => Padding(
+    Widget row(Widget label, String value, Key key) => Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 88, child: Text(label, style: muted)),
+          SizedBox(width: 30, child: label),
           Expanded(child: Text(value, key: key, style: muted)),
         ],
       ),
@@ -98,18 +99,18 @@ class CategoryTransactionsPanel extends ConsumerWidget {
           if (items.isNotEmpty) ...[
             const SizedBox(height: 2),
             row(
-              'Counting',
+              const TxValueIcon(TxValue.counting, size: 16),
               sums(totals.counting),
               const ValueKey('category-tx-counting'),
             ),
             if (totals.interact.isNotEmpty)
               row(
-                'Interactional',
+                const TxValueIcon(TxValue.interactional, size: 16),
                 sums(totals.interact),
                 const ValueKey('category-tx-interact'),
               ),
             row(
-              'Main',
+              const TxValueIcon(TxValue.main, size: 16),
               '${budgetMoney(totals.base, sign: true)} $base'
                   '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
               const ValueKey('category-tx-main'),
@@ -119,7 +120,7 @@ class CategoryTransactionsPanel extends ConsumerWidget {
             const SizedBox(height: 6),
             // Plan first, then Fact, for the budget settings period.
             Wrap(
-              spacing: 16,
+              spacing: 20,
               runSpacing: 2,
               children: [
                 figure(

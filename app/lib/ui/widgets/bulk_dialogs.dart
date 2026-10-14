@@ -166,7 +166,7 @@ class _BulkLinksDialogState extends State<_BulkLinksDialog> {
     final a = await ActionPickerDialog.show(
       context,
       excludeIds: widget.ids.toSet(),
-      includeDone: true,
+      
     );
     if (a != null && mounted) setState(() => _target = a);
   }

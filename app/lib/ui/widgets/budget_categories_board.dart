@@ -57,17 +57,11 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
   /// handed back as the identical instance.
   final _rowCache = <String, _CategoryBoardRow>{};
 
-  _CategoryBoardRow _rowFor(
-    CategoryRowView vm,
-    bool phone,
-    bool showUrgency,
-    double scale,
-  ) {
+  _CategoryBoardRow _rowFor(CategoryRowView vm, bool phone, bool showUrgency) {
     final old = _rowCache[vm.id];
     if (old != null &&
         old.phone == phone &&
         old.showUrgency == showUrgency &&
-        old.scale == scale &&
         old.vm == vm) {
       return old;
     }
@@ -76,7 +70,6 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
       vm: vm,
       phone: phone,
       showUrgency: showUrgency,
-      scale: scale,
       onOpen: widget.onOpen,
       onToggle: _toggle,
     );
@@ -273,9 +266,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
 
   @override
   Widget build(BuildContext context) {
-    final rowsData = ref.watch(budgetCategoryRowsProvider);
-    final rows = rowsData?.rows;
-    final barScale = rowsData?.scale ?? 1.0;
+    final rows = ref.watch(budgetCategoryRowsProvider)?.rows;
     final phone = usePhoneLayout(context);
     final query = ref.watch(budgetCategoryQueryProvider);
     final showUrgency = ref.watch(budgetShowUrgencyProvider);
@@ -301,8 +292,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
         itemCount: rows.length,
         findChildIndexCallback: (key) =>
             key is ValueKey<String> ? indexById[key.value] : null,
-        itemBuilder: (context, i) =>
-            _rowFor(rows[i], phone, showUrgency, barScale),
+        itemBuilder: (context, i) => _rowFor(rows[i], phone, showUrgency),
       );
       // Rows that left the list are forgotten.
       if (_rowCache.length > rows.length * 2 + 16) {
@@ -406,7 +396,6 @@ class _CategoryBoardRow extends StatelessWidget {
     required this.vm,
     required this.phone,
     required this.showUrgency,
-    required this.scale,
     required this.onOpen,
     required this.onToggle,
   });
@@ -414,7 +403,6 @@ class _CategoryBoardRow extends StatelessWidget {
   final CategoryRowView vm;
   final bool phone;
   final bool showUrgency;
-  final double scale;
   final void Function(BudgetCategory) onOpen;
   final void Function(String) onToggle;
 
@@ -438,7 +426,15 @@ class _CategoryBoardRow extends StatelessWidget {
       color: (fg ?? scheme.onSurface).withValues(alpha: 0.65),
     );
     final over = vm.overPlan;
-    final barColor = fg ?? (over ? scheme.error : scheme.primary);
+    // The bar: the plan segment (1/5 of the track) and the fact fill over it -
+    // green within the plan, red above it (income above plan is good: green).
+    // A tinted row keeps to its own text colour.
+    final seg = barSegments(plan: vm.plan, fact: vm.fact, isIncome: c.isIncome);
+    final planBarColor = fg == null
+        ? scheme.primary.withValues(alpha: 0.5)
+        : fg.withValues(alpha: 0.35);
+    final factBarColor =
+        fg ?? (seg.over ? scheme.error : Colors.green.shade600);
 
     final leading = vm.hasChildren
         ? InkResponse(
@@ -620,9 +616,10 @@ class _CategoryBoardRow extends StatelessWidget {
             height: 5,
             child: CustomPaint(
               painter: _PlanBarPainter(
-                vm.ratio,
-                scale,
-                barColor,
+                seg.plan,
+                seg.fact,
+                planBarColor,
+                factBarColor,
                 (fg ?? scheme.onSurface).withValues(alpha: 0.16),
               ),
             ),
@@ -649,41 +646,32 @@ class _CategoryBoardRow extends StatelessWidget {
 /// How much of the plan is used: a rounded track with a fill (capped at the
 /// full width; spending above the plan is shown by the row's colour).
 class _PlanBarPainter extends CustomPainter {
-  _PlanBarPainter(this.ratio, this.scale, this.fill, this.track);
+  _PlanBarPainter(this.plan, this.fact, this.planColor, this.fill, this.track);
 
-  final double? ratio;
-
-  /// The ratio that fills the whole track (>= 1).
-  final double scale;
+  /// Fractions of the track ([barSegments]): the plan segment and the fact fill.
+  final double plan;
+  final double fact;
+  final Color planColor;
   final Color fill;
   final Color track;
 
   @override
   void paint(Canvas canvas, Size size) {
     final r = Radius.circular(size.height / 2);
-    final full = RRect.fromRectAndRadius(Offset.zero & size, r);
-    canvas.drawRRect(full, Paint()..color = track);
-    final v = ratio;
-    if (v == null || v <= 0) return;
-    final w = size.width * (v.clamp(0.0, scale) / scale);
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, size.height), r),
-      Paint()..color = fill,
+    RRect segment(double frac) => RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, 0, size.width * frac.clamp(0.0, 1.0), size.height),
+      r,
     );
-    if (scale > 1.0001) {
-      // 100 % of the plan.
-      final x = size.width / scale;
-      canvas.drawRect(
-        Rect.fromLTWH(x - 0.75, -1, 1.5, size.height + 2),
-        Paint()..color = fill.withValues(alpha: 0.9),
-      );
-    }
+    canvas.drawRRect(segment(1), Paint()..color = track);
+    if (plan > 0) canvas.drawRRect(segment(plan), Paint()..color = planColor);
+    if (fact > 0) canvas.drawRRect(segment(fact), Paint()..color = fill);
   }
 
   @override
   bool shouldRepaint(_PlanBarPainter old) =>
-      old.ratio != ratio ||
-      old.scale != scale ||
+      old.plan != plan ||
+      old.fact != fact ||
+      old.planColor != planColor ||
       old.fill != fill ||
       old.track != track;
 }

@@ -5,49 +5,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/database.dart' show ActionRow, Metric;
+import '../../data/database.dart' show Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
 import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
-import '../open_entity.dart';
 import '../providers.dart';
-import '../time_format.dart';
-import '../../core/time_codec.dart';
 import '../theme/glass_theme.dart';
 import '../undo.dart';
 import 'glass_pill_selector.dart';
-import 'action_editor.dart';
-import 'action_picker_dialog.dart';
+import 'direction_actions_panel.dart';
 import 'metric_picker.dart';
 import 'param_icons.dart';
 import 'section_block.dart';
 
-/// Linked actions ordered by pure distance from now (|start - now|, past and
-/// future interleaved); actions without a start come last, then by name.
-List<ActionRow> sortLinkedActionsByDistance(
-  List<ActionRow> actions,
-  DateTime nowUtc,
-) {
-  final keyed = [
-    for (final a in actions)
-      (a, dateTimeFromDb(a.startAt)?.difference(nowUtc).abs()),
-  ];
-  keyed.sort((x, y) {
-    final dx = x.$2, dy = y.$2;
-    if (dx != null && dy != null) {
-      final c = dx.compareTo(dy);
-      if (c != 0) return c;
-    } else if (dx != null) {
-      return -1;
-    } else if (dy != null) {
-      return 1;
-    }
-    return x.$1.name.toLowerCase().compareTo(y.$1.name.toLowerCase());
-  });
-  return [for (final k in keyed) k.$1];
-}
+export 'direction_actions_panel.dart' show sortLinkedActionsByDistance;
 
 /// The unsaved fields of a growth direction form (kept for Undo after Back).
 class GrowthDirectionDraft {
@@ -253,10 +226,9 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
         title: Text(
           _isEditing ? 'Edit growth direction' : 'New growth direction',
         ),
-        content: SizedBox(
-          width: 720,
-          child: SingleChildScrollView(
-            child: Form(
+        content: _content(
+          context,
+          Form(
               key: _formKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -400,7 +372,6 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
                             ),
                           ),
                   ),
-                  if (_isEditing) _buildLinkedActions(context),
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -414,7 +385,6 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
                 ],
               ),
             ),
-          ),
         ),
         actions: [
           if (_isEditing)
@@ -438,6 +408,44 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
     );
   }
 
+  /// The settings form and, for an existing direction, its linked actions: on a
+  /// wide window (>= 1100 px) as a list to the RIGHT at the same height (each
+  /// scrolls on its own, like a category's transactions), else below the form.
+  Widget _content(BuildContext context, Widget form) {
+    final id = widget.existing?.id;
+    if (id == null) {
+      return SizedBox(width: 720, child: SingleChildScrollView(child: form));
+    }
+    final size = MediaQuery.sizeOf(context);
+    if (!usePhoneLayout(context) && size.width >= 1100) {
+      return SizedBox(
+        width: 560 + 16 + 420,
+        height: (size.height - 220).clamp(420.0, 760.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(width: 560, child: SingleChildScrollView(child: form)),
+            const SizedBox(width: 16),
+            SizedBox(width: 420, child: DirectionActionsPanel(metricId: id)),
+          ],
+        ),
+      );
+    }
+    return SizedBox(
+      width: 720,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            form,
+            const SizedBox(height: 12),
+            DirectionActionsPanel(metricId: id, scrollable: false),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _saveIfReady() {
     if (_relationsLoaded) _save();
   }
@@ -456,144 +464,6 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
             Expanded(child: b),
           ],
         );
-
-  /// The actions linked to this direction; each chip opens that action's
-  /// editor on top of this dialog (every related entity is openable).
-  Widget _buildLinkedActions(BuildContext context) {
-    final phone = usePhoneLayout(context);
-    final id = widget.existing!.id;
-    final linked = [
-      for (final (metricId, action)
-          in ref.watch(metricLinkedActionsProvider).value ??
-              const <(String, ActionRow)>[])
-        if (metricId == id) action,
-    ];
-    final nowUtc = DateTime.now().toUtc();
-    final sorted = sortLinkedActionsByDistance(linked, nowUtc);
-    return _Block(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Flexible(
-                child: Text(
-                  'Linked actions (${sorted.length})',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.add),
-                tooltip: 'Link an action',
-                visualDensity: VisualDensity.compact,
-                onPressed: () =>
-                    _linkAction(id, {for (final a in sorted) a.id}),
-              ),
-              // A brand-new action already linked to this direction. Not when
-              // dialogs are stacked three deep (action -> direction -> action
-              // -> ... must end somewhere).
-              if (openStackedDialogCount < 3)
-                IconButton(
-                  key: const ValueKey('direction-new-action'),
-                  icon: const Icon(Icons.playlist_add),
-                  tooltip: 'New action for this direction',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => ActionEditorDialog.show(
-                    context,
-                    initialMetricIds: {id},
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          if (sorted.isEmpty)
-            Text('None', style: TextStyle(color: context.glass.textSecondary))
-          else
-            ConstrainedBox(
-              // Phone: a taller area (40% of the screen) and roomier rows.
-              constraints: BoxConstraints(
-                maxHeight: phone
-                    ? MediaQuery.sizeOf(context).height * 0.4
-                    : 220,
-              ),
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final a in sorted)
-                    ListTile(
-                      key: ValueKey('linked-action-${a.id}'),
-                      dense: !phone,
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        a.name,
-                        maxLines: phone ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: phone
-                          ? Text(
-                              formatShortSchedule(
-                                    dateTimeFromDb(a.startAt),
-                                    dateTimeFromDb(a.endAt),
-                                    isAllDay: a.isAllDay,
-                                    nowUtc: nowUtc,
-                                  ) ??
-                                  '',
-                            )
-                          : null,
-                      trailing: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: phone ? 48 : 160),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (!phone)
-                              Flexible(
-                                child: Text(
-                                  formatShortSchedule(
-                                        dateTimeFromDb(a.startAt),
-                                        dateTimeFromDb(a.endAt),
-                                        isAllDay: a.isAllDay,
-                                        nowUtc: nowUtc,
-                                      ) ??
-                                      '',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: context.glass.textSecondary,
-                                  ),
-                                ),
-                              ),
-                            IconButton(
-                              key: ValueKey('unlink-action-${a.id}'),
-                              icon: const Icon(Icons.close, size: 16),
-                              tooltip: 'Unlink',
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () => ref
-                                  .read(metricServiceProvider)
-                                  .unlinkAction(a.id, id),
-                            ),
-                          ],
-                        ),
-                      ),
-                      onTap: () => openActionById(context, ref, a.id),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _linkAction(String metricId, Set<String> linkedIds) async {
-    final service = ref.read(metricServiceProvider);
-    final picked = await ActionPickerDialog.show(
-      context,
-      excludeIds: linkedIds,
-      includeDone: true,
-    );
-    if (picked == null) return;
-    await service.linkAction(picked.id, metricId);
-  }
 
   /// Stacked on top (not replacing) so unsaved edits here aren't lost;
   /// closing it returns here (same as the action editor's connected chips).

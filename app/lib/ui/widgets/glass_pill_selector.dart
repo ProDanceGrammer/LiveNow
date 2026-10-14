@@ -12,12 +12,17 @@ class GlassPillSelector<T> extends StatelessWidget {
     required this.options,
     required this.value,
     required this.onChanged,
+    this.icons,
   });
 
   final String label;
 
   /// Value -> pill text, in display order.
   final Map<T, String> options;
+
+  /// Values drawn as an ICON instead of their text (the text becomes the
+  /// tooltip and the semantic label): e.g. the Expense / Income arrows.
+  final Map<T, Widget>? icons;
   final T value;
   final ValueChanged<T> onChanged;
 
@@ -46,6 +51,7 @@ class GlassPillSelector<T> extends StatelessWidget {
               for (final entry in options.entries)
                 _Pill(
                   text: entry.value,
+                  icon: icons?[entry.key],
                   selected: entry.key == value,
                   fill: g.dark
                       ? const Color(0x14FFFFFF)
@@ -68,6 +74,7 @@ class GlassPillSelector<T> extends StatelessWidget {
 class _Pill extends StatelessWidget {
   const _Pill({
     required this.text,
+    this.icon,
     required this.selected,
     required this.fill,
     required this.border,
@@ -79,6 +86,7 @@ class _Pill extends StatelessWidget {
   });
 
   final String text;
+  final Widget? icon;
   final bool selected;
   final Color fill;
   final Color border;
@@ -90,9 +98,10 @@ class _Pill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
+    final pill = Semantics(
       button: true,
       selected: selected,
+      label: icon == null ? null : text,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
@@ -106,16 +115,18 @@ class _Pill extends StatelessWidget {
               width: selected ? 1.6 : 1,
             ),
           ),
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: selected ? selectedText : text0,
-            ),
-          ),
+          child: icon ??
+              Text(
+                text,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? selectedText : text0,
+                ),
+              ),
         ),
       ),
     );
+    return icon == null ? pill : Tooltip(message: text, child: pill);
   }
 }

@@ -28,6 +28,7 @@ import '../widgets/budget_categories_board.dart';
 import '../widgets/budget_dialogs.dart';
 import '../widgets/budget_format.dart';
 import '../widgets/glass.dart';
+import '../widgets/label_icon.dart';
 import '../widgets/param_icons.dart';
 import '../widgets/sort_chips.dart';
 
@@ -1107,12 +1108,13 @@ class _TotalsBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final small = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
-    Widget row(String label, String value) => Padding(
+    // The label is an icon (hover / tap says its name).
+    Widget row(Widget label, String value) => Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 92, child: Text(label, style: small)),
+          SizedBox(width: 30, child: label),
           Expanded(child: Text(value, style: small)),
         ],
       ),
@@ -1132,28 +1134,33 @@ class _TotalsBlock extends StatelessWidget {
             style: small,
           ),
         if (showTotals) ...[
-          if (cols.counting) row('Counting', _sums(totals.counting)),
+          if (cols.counting)
+            row(const TxValueIcon(TxValue.counting, size: 16), _sums(totals.counting)),
           if (cols.interact && totals.interact.isNotEmpty)
-            row('Interactional', _sums(totals.interact)),
+            row(
+              const TxValueIcon(TxValue.interactional, size: 16),
+              _sums(totals.interact),
+            ),
           if (cols.main)
             row(
-              'Main',
+              const TxValueIcon(TxValue.main, size: 16),
               '${budgetMoney(totals.base, sign: true)} $base'
                   '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
             ),
           if (f != null) ...[
             row(
-              'Income',
+              const IncomeExpenseIcon(true),
               '${budgetMoney(totals.income, sign: true)} $base',
             ),
             row(
-              'Expense',
+              const IncomeExpenseIcon(false),
               '${budgetMoney(totals.expense, sign: true)} $base',
             ),
             Padding(
               padding: const EdgeInsets.only(top: 4),
+              // Plan and Fact stand next to each other, plan on the left.
               child: Wrap(
-                spacing: 16,
+                spacing: 20,
                 runSpacing: 2,
                 children: [
                   // Plan first, then Fact (the budget settings period).
@@ -1199,10 +1206,9 @@ class _TxColumnsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.labelMedium;
-    Widget cell(String text) => SizedBox(
+    Widget cell(TxValue v) => SizedBox(
       width: _kTxColW,
-      child: Text(text, textAlign: TextAlign.right, style: style),
+      child: Align(alignment: Alignment.centerRight, child: TxValueIcon(v)),
     );
     return Padding(
       // The tile's card margin (12) + its inner right padding (16).
@@ -1210,9 +1216,9 @@ class _TxColumnsHeader extends StatelessWidget {
       child: Row(
         children: [
           const Spacer(),
-          if (cols.counting) cell('Counting'),
-          if (cols.interact) cell('Interactional'),
-          if (cols.main) cell('Main'),
+          if (cols.counting) cell(TxValue.counting),
+          if (cols.interact) cell(TxValue.interactional),
+          if (cols.main) cell(TxValue.main),
         ],
       ),
     );
@@ -1288,10 +1294,6 @@ class _TransactionTile extends ConsumerWidget {
         : money(amounts.interact, useCurrency!);
     final mainText = money(amounts.base, base);
     final valueStyle = TextStyle(fontWeight: FontWeight.w600, color: fg);
-    final labelStyle = TextStyle(
-      fontSize: 10,
-      color: (fg ?? scheme.onSurface).withValues(alpha: 0.65),
-    );
 
     Widget wideCell(String text, {Color? color, Widget? leading}) => SizedBox(
       width: _kTxColW,
@@ -1311,14 +1313,19 @@ class _TransactionTile extends ConsumerWidget {
       ),
     );
     Widget phoneLine(
-      String label,
+      TxValue label,
       String text, {
       Color? color,
       Widget? leading,
     }) => Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('$label ', style: labelStyle),
+        TxValueIcon(
+          label,
+          size: 14,
+          color: (fg ?? scheme.onSurface).withValues(alpha: 0.65),
+        ),
+        const SizedBox(width: 4),
         if (leading != null) ...[leading, const SizedBox(width: 3)],
         Text(text, style: valueStyle.copyWith(color: color ?? fg, fontSize: 12.5)),
       ],
@@ -1337,14 +1344,18 @@ class _TransactionTile extends ConsumerWidget {
             children: [
               if (cols.counting)
                 phoneLine(
-                  'Counting',
+                  TxValue.counting,
                   countText,
                   color: countColor,
                   leading: accountLeading,
                 ),
               if (cols.interact)
-                phoneLine('Interactional', interactText, leading: useLeading),
-              if (cols.main) phoneLine('Main', mainText),
+                phoneLine(
+                  TxValue.interactional,
+                  interactText,
+                  leading: useLeading,
+                ),
+              if (cols.main) phoneLine(TxValue.main, mainText),
             ],
           )
         : Row(

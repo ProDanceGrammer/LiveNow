@@ -10,6 +10,7 @@ import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/action_editor.dart';
+import 'package:livenow/ui/widgets/direction_actions_panel.dart';
 import 'package:livenow/ui/widgets/growth_direction_dialog.dart';
 import 'package:livenow/ui/widgets/notes_editor.dart';
 import 'package:livenow/ui/widgets/section_block.dart';
@@ -244,7 +245,10 @@ void main() {
     expect(find.byType(ActionEditorDialog), findsOneWidget);
 
     // From the direction back to its action (a second editor on top).
-    final row = find.widgetWithText(ListTile, 'Run');
+    final row = find.descendant(
+      of: find.byType(DirectionActionsPanel),
+      matching: find.text('Run'),
+    );
     expect(find.text('Linked actions (1)'), findsOneWidget);
     await tester.ensureVisible(row);
     await tester.tap(row);
@@ -446,8 +450,7 @@ void main() {
           .read(actionServiceProvider)
           .createAction(
             name: 'Other',
-            // Far in the future so the action is always still open (the
-            // picker lists open actions only) and never in the current year.
+            // Far in the future so the date is never in the current year.
             startAt: DateTime.utc(2099, 10, 3, 10, 0),
             endAt: DateTime.utc(2099, 10, 3, 11, 40),
           ),
@@ -459,6 +462,55 @@ void main() {
     expect(find.text('Choose an action'), findsOneWidget);
     expect(find.text('Other'), findsOneWidget);
     expect(find.textContaining('03-10-2099 13:00 → 14:40'), findsOneWidget);
+    await tester.tap(find.text('Cancel').last);
+    await tester.pump(const Duration(milliseconds: 400));
+    await teardown(tester);
+  });
+
+  testWidgets('the Previous / Next picker lists finished, past and all-day actions '
+      'too, and finds them by search', (tester) async {
+    setup(tester);
+    final id = await seedAction(tester, 'Middle');
+    final now = DateTime.now().toUtc();
+    await tester.runAsync(() async {
+      final svc = seedContainer.read(actionServiceProvider);
+      // Finished long ago (what "Finish" on a template makes) ...
+      await svc.createAction(
+        name: 'Yesterday finished',
+        startAt: now.subtract(const Duration(days: 1, hours: 2)),
+        endAt: now.subtract(const Duration(days: 1, hours: 1)),
+      );
+      // ... marked done without a schedule ...
+      final doneId = await svc.createAction(name: 'Done unscheduled');
+      await svc.finish(doneId);
+      // ... and an all-day one that is done.
+      final allDay = await svc.createAction(
+        name: 'All day done',
+        isAllDay: true,
+        startAt: DateTime.utc(now.year, now.month, now.day),
+      );
+      await svc.toggleDone(allDay);
+    });
+    await open(tester, existing: await rowOf(tester, id));
+    await tester.tap(find.byTooltip('Add next action'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await settle(tester);
+    expect(find.text('Yesterday finished'), findsOneWidget);
+    expect(find.text('Done unscheduled'), findsOneWidget);
+    expect(find.text('All day done'), findsOneWidget);
+    // The action being edited is never offered to itself.
+    expect(
+      find.descendant(
+        of: find.byType(ListTile),
+        matching: find.text('Middle'),
+      ),
+      findsNothing,
+    );
+    // A search finds them too.
+    await tester.enterText(find.byType(TextField).last, 'yester');
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Yesterday finished'), findsOneWidget);
+    expect(find.text('All day done'), findsNothing);
     await tester.tap(find.text('Cancel').last);
     await tester.pump(const Duration(milliseconds: 400));
     await teardown(tester);

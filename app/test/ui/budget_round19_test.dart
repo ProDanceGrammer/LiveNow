@@ -336,9 +336,11 @@ void main() {
   group('transactions tab', () {
     testWidgets('column names and all three values per tile', (tester) async {
       await pump(tester, tab: 'Transactions');
-      expect(find.text('Counting'), findsWidgets);
-      expect(find.text('Interactional'), findsWidgets);
-      expect(find.text('Main'), findsWidgets);
+      // The column names are icons (tooltips name them).
+      expect(find.byTooltip('Counting'), findsWidgets);
+      expect(find.byTooltip('Interactional'), findsWidgets);
+      expect(find.byTooltip('Main'), findsWidgets);
+      expect(find.text('Counting'), findsNothing);
       final tile = find.byKey(ValueKey('budget-tx-$txBread'));
       expect(
         find.descendant(of: tile, matching: find.textContaining('TRY')),

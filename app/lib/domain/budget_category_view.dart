@@ -234,3 +234,25 @@ Set<String> collapsedForLevel(List<CategoryInfo> categories, int? level) {
       if (groups.contains(c.id) && depthOf(c) >= level - 1) c.id,
   };
 }
+
+/// The Categories bar under a row, as fractions of the track width: the PLAN
+/// segment is always 1/5 of it (1x plan), the FACT fill is `fact / plan` x 1/5,
+/// capped at 5x plan = the whole track. [over] = spending above the plan (an
+/// expense category over its plan); an income above its plan is good, never
+/// "over". Absolute values are compared (a refund counts by size). No plan but
+/// a fact fills the whole track (capped); neither draws nothing.
+({double plan, double fact, bool over}) barSegments({
+  required double plan,
+  required double fact,
+  required bool isIncome,
+}) {
+  const unit = 0.2;
+  final hasPlan = plan.abs() >= 0.005;
+  if (!hasPlan) {
+    final any = fact.abs() >= 0.005;
+    return (plan: 0.0, fact: any ? 1.0 : 0.0, over: any && !isIncome);
+  }
+  final ratio = fact.abs() / plan.abs();
+  final frac = (ratio > 5 ? 5.0 : ratio) * unit;
+  return (plan: unit, fact: frac, over: ratio > 1.0001 && !isIncome);
+}

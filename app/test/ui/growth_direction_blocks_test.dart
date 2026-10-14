@@ -102,7 +102,9 @@ void main() {
     });
     await openDialog(tester, metricId);
 
-    expect(find.byType(SectionBlock), findsNWidgets(3));
+    // Two blocks: the settings and the relations. The linked actions are a
+    // list of their own to the right (like a category's transactions).
+    expect(find.byType(SectionBlock), findsNWidgets(2));
     final dialog = tester.getSize(find.byType(AlertDialog));
     expect(dialog.width, greaterThanOrEqualTo(720));
 
@@ -119,8 +121,11 @@ void main() {
     expect(p1.left, greaterThan(p0.right));
     expect(find.text('Add…'), findsNothing); // no text button below the chips
 
-    // Linked actions: pure distance from now, no-time last.
+    // Linked actions: a list to the RIGHT of the settings, at the same height.
     expect(find.text('Linked actions (5)'), findsOneWidget);
+    final panelLeft = tester.getTopLeft(find.text('Linked actions (5)')).dx;
+    expect(panelLeft, greaterThan(tester.getRect(find.text('Leads to')).right));
+    // Pure distance from now, no-time last.
     final names = [
       'Near past',
       'Mid future',
@@ -135,14 +140,16 @@ void main() {
     // Rows show a short schedule such as "03-10-2026 13:00 → 14:00".
     expect(
       find.descendant(
-        of: find.widgetWithText(ListTile, 'Near past'),
+        of: find
+            .ancestor(of: find.text('Near past'), matching: find.byType(InkWell))
+            .first,
         matching: find.textContaining(RegExp(r'\d\d-\d\d-\d{4} \d\d:\d\d')),
       ),
       findsOneWidget,
     );
 
     // Tap opens the action's editor on top.
-    await tester.tap(find.widgetWithText(ListTile, 'Mid future'));
+    await tester.tap(find.text('Mid future'));
     await tester.pump(const Duration(milliseconds: 500));
     await settle(tester);
     expect(find.byType(ActionEditorDialog), findsOneWidget);
@@ -289,6 +296,70 @@ void main() {
     expect(find.byType(ParamIcon), findsNWidgets(4));
     expect(find.byKey(const ValueKey('dialogFact')), findsNothing);
     expect(find.byTooltip('Fact: reached so far'), findsNothing);
+    await teardown(tester);
+  });
+
+  testWidgets('on a narrower window the linked actions sit BELOW the settings', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    addTearDown(resetStackedDialogsForTest);
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    seed = ProviderContainer(
+      overrides: [databaseProvider.overrideWithValue(db)],
+    );
+    addTearDown(seed.dispose);
+    late String metricId;
+    await tester.runAsync(() async {
+      metricId = await seed
+          .read(metricServiceProvider)
+          .saveMetric(
+            name: 'Stay fit',
+            kind: MetricKind.count,
+            window: MetricWindow.week,
+          );
+      await seed
+          .read(actionServiceProvider)
+          .createAction(name: 'Only one', metricIds: [metricId]);
+    });
+    await openDialog(tester, metricId);
+    expect(find.text('Linked actions (1)'), findsOneWidget);
+    final leads = tester.getRect(find.text('Leads to'));
+    final panel = tester.getRect(find.text('Linked actions (1)'));
+    expect(panel.top, greaterThan(leads.bottom));
+    expect(find.byKey(const ValueKey('direction-new-action')), findsOneWidget);
+    await teardown(tester);
+  });
+
+  testWidgets('a new direction has no linked actions panel', (tester) async {
+    tester.view.physicalSize = const Size(1400, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    addTearDown(resetStackedDialogsForTest);
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => GrowthDirectionDialog.show(context),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await settle(tester);
+    expect(find.textContaining('Linked actions'), findsNothing);
     await teardown(tester);
   });
 }

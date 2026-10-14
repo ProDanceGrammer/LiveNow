@@ -25,6 +25,7 @@ import 'param_icons.dart';
 import '../theme/glass_theme.dart';
 import '../time_format.dart' show formatUtcDateTime;
 import 'glass_pill_selector.dart';
+import 'label_icon.dart';
 import 'section_block.dart';
 
 const _dialogWidth = 440.0;
@@ -932,6 +933,20 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                 child: GlassPillSelector<bool>(
                   label: 'Type',
                   options: const {false: 'Expense', true: 'Income'},
+                  // Icons only: the red arrow out, the green arrow in (as on the
+                  // Categories rows); hover / long-press names them.
+                  icons: {
+                    false: Icon(
+                      Icons.north_east,
+                      size: 20,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    true: const Icon(
+                      Icons.south_west,
+                      size: 20,
+                      color: Colors.green,
+                    ),
+                  },
                   value: _isIncome,
                   onChanged: (v) => setState(() => _isIncome = v),
                 ),
@@ -1313,7 +1328,7 @@ class _BudgetTransactionDialogState
   }
 
   Future<void> _pickAction() async {
-    final picked = await ActionPickerDialog.show(context, includeDone: true);
+    final picked = await ActionPickerDialog.show(context);
     if (picked == null || !mounted) return;
     setState(() {
       _actionId = picked.id;
@@ -1453,16 +1468,18 @@ class _BudgetTransactionDialogState
         {for (final a in accounts) a.id: budgetAcctFromRow(a)},
       );
     }
-    Widget amountLine(Widget? icon, String label, double? v, String cur) =>
+    // The label is an icon (hover / tap names it), then the account's picture.
+    Widget amountLine(Widget? icon, TxValue value, double? v, String cur) =>
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Row(
             children: [
+              TxValueIcon(value, size: 20),
+              const SizedBox(width: 8),
               if (icon != null) ...[icon, const SizedBox(width: 6)],
               Flexible(
                 child: Text(
-                  '$label: ${v == null ? '—' : budgetMoney(v, sign: true)} $cur'
-                      .trim(),
+                  '${v == null ? '—' : budgetMoney(v, sign: true)} $cur'.trim(),
                 ),
               ),
             ],
@@ -1643,23 +1660,23 @@ class _BudgetTransactionDialogState
           ),
           if (cat != null && amounts != null) ...[
             _gap,
-            Text(cat.isIncome ? 'Income' : 'Expense'),
+            IncomeExpenseIcon(cat.isIncome, size: 22),
             amountLine(
               countAccount == null
                   ? null
                   : AccountIcon(icon: countAccount.icon, size: 20),
-              'Counting',
+              TxValue.counting,
               amounts.count,
               countAccount?.currency ?? '',
             ),
             if (useAccount != null)
               amountLine(
                 AccountIcon(icon: useAccount.icon, size: 20),
-                'Interactional',
+                TxValue.interactional,
                 amounts.interact,
                 useAccount.currency,
               ),
-            amountLine(null, 'Main', amounts.base, base),
+            amountLine(null, TxValue.main, amounts.base, base),
           ],
           if (countAccount != null || useAccount != null) ...[
             _gap,

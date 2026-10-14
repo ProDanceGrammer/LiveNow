@@ -14,6 +14,7 @@ import '../saved_views_bar.dart';
 import 'account_icon.dart';
 import 'date_range_fields.dart';
 import 'glass.dart';
+import 'label_icon.dart';
 import 'param_icons.dart';
 import 'sort_chips.dart';
 import 'sort_icons.dart';
@@ -413,9 +414,13 @@ class _ValuesRow extends ConsumerWidget {
       kTxInteractPref: ref.watch(devicePrefBoolProvider((kTxInteractPref, true))),
       kTxMainPref: ref.watch(devicePrefBoolProvider((kTxMainPref, true))),
     };
-    Widget chip(String key, String label, bool on, String id) => FilterChip(
+    // The three values are ICONS (the chip's own tooltip names them; an inner
+    // tap-tooltip would steal the chip's tap).
+    Widget chip(String key, String label, bool on, String id, [TxValue? v]) =>
+        FilterChip(
       key: ValueKey(id),
-      label: Text(label),
+      tooltip: label,
+      label: v == null ? Text(label) : Icon(v.icon, size: 18),
       selected: on,
       onSelected: (v) {
         // Never switch the last value off: the list would show no amounts.
@@ -431,9 +436,9 @@ class _ValuesRow extends ConsumerWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Text('Values', style: theme.textTheme.titleSmall),
-        chip(kTxCountingPref, 'Counting', cols[kTxCountingPref]!, 'tx-col-counting'),
-        chip(kTxInteractPref, 'Interactional', cols[kTxInteractPref]!, 'tx-col-interact'),
-        chip(kTxMainPref, 'Main', cols[kTxMainPref]!, 'tx-col-main'),
+        chip(kTxCountingPref, 'Counting', cols[kTxCountingPref]!, 'tx-col-counting', TxValue.counting),
+        chip(kTxInteractPref, 'Interactional', cols[kTxInteractPref]!, 'tx-col-interact', TxValue.interactional),
+        chip(kTxMainPref, 'Main', cols[kTxMainPref]!, 'tx-col-main', TxValue.main),
         chip(kTxTotalsPref, 'Show totals', totals, 'tx-totals-show'),
       ],
     );

@@ -178,8 +178,14 @@ void main() {
       of: find.byType(AlertDialog),
       matching: find.textContaining(text),
     );
-    expect(inDialog('Counting:'), findsOneWidget);
-    expect(inDialog('Main:'), findsOneWidget);
+    // The labels are icons now (tooltips name them).
+    Finder tip(String name) => find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byTooltip(name),
+    );
+    expect(tip('Counting'), findsOneWidget);
+    expect(tip('Main'), findsOneWidget);
+    expect(tip('Expense'), findsOneWidget);
     expect(inDialog('1.00 EUR'), findsOneWidget); // 40 TRY / 40
 
     // An empty name can take the category's name.
