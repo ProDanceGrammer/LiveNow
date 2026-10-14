@@ -486,6 +486,28 @@ class $ActionsTableTable extends ActionsTable
           'REFERENCES countable_activities (id) ON DELETE SET NULL',
         ),
       );
+  static const VerificationMeta _planItemIdMeta = const VerificationMeta(
+    'planItemId',
+  );
+  @override
+  late final GeneratedColumn<String> planItemId = GeneratedColumn<String>(
+    'plan_item_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _planKeyMeta = const VerificationMeta(
+    'planKey',
+  );
+  @override
+  late final GeneratedColumn<String> planKey = GeneratedColumn<String>(
+    'plan_key',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -525,6 +547,8 @@ class $ActionsTableTable extends ActionsTable
     completedAt,
     sequenceNumber,
     countableActivityId,
+    planItemId,
+    planKey,
     createdAt,
     updatedAt,
   ];
@@ -646,6 +670,21 @@ class $ActionsTableTable extends ActionsTable
         ),
       );
     }
+    if (data.containsKey('plan_item_id')) {
+      context.handle(
+        _planItemIdMeta,
+        planItemId.isAcceptableOrUnknown(
+          data['plan_item_id']!,
+          _planItemIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('plan_key')) {
+      context.handle(
+        _planKeyMeta,
+        planKey.isAcceptableOrUnknown(data['plan_key']!, _planKeyMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -731,6 +770,14 @@ class $ActionsTableTable extends ActionsTable
         DriftSqlType.string,
         data['${effectivePrefix}countable_activity_id'],
       ),
+      planItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}plan_item_id'],
+      ),
+      planKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}plan_key'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_at'],
@@ -782,6 +829,13 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
   /// The repeatable activity type this action is an instance of; its past
   /// durations feed the predicted duration of a continuation.
   final String? countableActivityId;
+
+  /// The plan item this action was generated from (schema v14; null = made by
+  /// hand) and the occurrence it was (`YYYY-MM-DD#index`). A soft reference
+  /// (the plan item may be deleted later); it makes a re-confirmation
+  /// idempotent and lets "remove future actions" find what a plan made.
+  final String? planItemId;
+  final String? planKey;
   final String createdAt;
   final String updatedAt;
   const ActionRow({
@@ -800,6 +854,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     this.completedAt,
     this.sequenceNumber,
     this.countableActivityId,
+    this.planItemId,
+    this.planKey,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -840,6 +896,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     }
     if (!nullToAbsent || countableActivityId != null) {
       map['countable_activity_id'] = Variable<String>(countableActivityId);
+    }
+    if (!nullToAbsent || planItemId != null) {
+      map['plan_item_id'] = Variable<String>(planItemId);
+    }
+    if (!nullToAbsent || planKey != null) {
+      map['plan_key'] = Variable<String>(planKey);
     }
     map['created_at'] = Variable<String>(createdAt);
     map['updated_at'] = Variable<String>(updatedAt);
@@ -883,6 +945,12 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       countableActivityId: countableActivityId == null && nullToAbsent
           ? const Value.absent()
           : Value(countableActivityId),
+      planItemId: planItemId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(planItemId),
+      planKey: planKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(planKey),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -911,6 +979,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       countableActivityId: serializer.fromJson<String?>(
         json['countableActivityId'],
       ),
+      planItemId: serializer.fromJson<String?>(json['planItemId']),
+      planKey: serializer.fromJson<String?>(json['planKey']),
       createdAt: serializer.fromJson<String>(json['createdAt']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
     );
@@ -934,6 +1004,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       'completedAt': serializer.toJson<String?>(completedAt),
       'sequenceNumber': serializer.toJson<int?>(sequenceNumber),
       'countableActivityId': serializer.toJson<String?>(countableActivityId),
+      'planItemId': serializer.toJson<String?>(planItemId),
+      'planKey': serializer.toJson<String?>(planKey),
       'createdAt': serializer.toJson<String>(createdAt),
       'updatedAt': serializer.toJson<String>(updatedAt),
     };
@@ -955,6 +1027,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     Value<String?> completedAt = const Value.absent(),
     Value<int?> sequenceNumber = const Value.absent(),
     Value<String?> countableActivityId = const Value.absent(),
+    Value<String?> planItemId = const Value.absent(),
+    Value<String?> planKey = const Value.absent(),
     String? createdAt,
     String? updatedAt,
   }) => ActionRow(
@@ -979,6 +1053,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     countableActivityId: countableActivityId.present
         ? countableActivityId.value
         : this.countableActivityId,
+    planItemId: planItemId.present ? planItemId.value : this.planItemId,
+    planKey: planKey.present ? planKey.value : this.planKey,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -1013,6 +1089,10 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
       countableActivityId: data.countableActivityId.present
           ? data.countableActivityId.value
           : this.countableActivityId,
+      planItemId: data.planItemId.present
+          ? data.planItemId.value
+          : this.planItemId,
+      planKey: data.planKey.present ? data.planKey.value : this.planKey,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -1036,6 +1116,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           ..write('completedAt: $completedAt, ')
           ..write('sequenceNumber: $sequenceNumber, ')
           ..write('countableActivityId: $countableActivityId, ')
+          ..write('planItemId: $planItemId, ')
+          ..write('planKey: $planKey, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -1059,6 +1141,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
     completedAt,
     sequenceNumber,
     countableActivityId,
+    planItemId,
+    planKey,
     createdAt,
     updatedAt,
   );
@@ -1081,6 +1165,8 @@ class ActionRow extends DataClass implements Insertable<ActionRow> {
           other.completedAt == this.completedAt &&
           other.sequenceNumber == this.sequenceNumber &&
           other.countableActivityId == this.countableActivityId &&
+          other.planItemId == this.planItemId &&
+          other.planKey == this.planKey &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -1101,6 +1187,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
   final Value<String?> completedAt;
   final Value<int?> sequenceNumber;
   final Value<String?> countableActivityId;
+  final Value<String?> planItemId;
+  final Value<String?> planKey;
   final Value<String> createdAt;
   final Value<String> updatedAt;
   final Value<int> rowid;
@@ -1120,6 +1208,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.completedAt = const Value.absent(),
     this.sequenceNumber = const Value.absent(),
     this.countableActivityId = const Value.absent(),
+    this.planItemId = const Value.absent(),
+    this.planKey = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -1140,6 +1230,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     this.completedAt = const Value.absent(),
     this.sequenceNumber = const Value.absent(),
     this.countableActivityId = const Value.absent(),
+    this.planItemId = const Value.absent(),
+    this.planKey = const Value.absent(),
     required String createdAt,
     required String updatedAt,
     this.rowid = const Value.absent(),
@@ -1163,6 +1255,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Expression<String>? completedAt,
     Expression<int>? sequenceNumber,
     Expression<String>? countableActivityId,
+    Expression<String>? planItemId,
+    Expression<String>? planKey,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<int>? rowid,
@@ -1184,6 +1278,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       if (sequenceNumber != null) 'sequence_number': sequenceNumber,
       if (countableActivityId != null)
         'countable_activity_id': countableActivityId,
+      if (planItemId != null) 'plan_item_id': planItemId,
+      if (planKey != null) 'plan_key': planKey,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -1206,6 +1302,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
     Value<String?>? completedAt,
     Value<int?>? sequenceNumber,
     Value<String?>? countableActivityId,
+    Value<String?>? planItemId,
+    Value<String?>? planKey,
     Value<String>? createdAt,
     Value<String>? updatedAt,
     Value<int>? rowid,
@@ -1226,6 +1324,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
       completedAt: completedAt ?? this.completedAt,
       sequenceNumber: sequenceNumber ?? this.sequenceNumber,
       countableActivityId: countableActivityId ?? this.countableActivityId,
+      planItemId: planItemId ?? this.planItemId,
+      planKey: planKey ?? this.planKey,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -1282,6 +1382,12 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
         countableActivityId.value,
       );
     }
+    if (planItemId.present) {
+      map['plan_item_id'] = Variable<String>(planItemId.value);
+    }
+    if (planKey.present) {
+      map['plan_key'] = Variable<String>(planKey.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
     }
@@ -1312,6 +1418,8 @@ class ActionsTableCompanion extends UpdateCompanion<ActionRow> {
           ..write('completedAt: $completedAt, ')
           ..write('sequenceNumber: $sequenceNumber, ')
           ..write('countableActivityId: $countableActivityId, ')
+          ..write('planItemId: $planItemId, ')
+          ..write('planKey: $planKey, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -6532,6 +6640,1278 @@ class SavedViewsTableCompanion extends UpdateCompanion<SavedView> {
   }
 }
 
+class $PlanItemsTableTable extends PlanItemsTable
+    with TableInfo<$PlanItemsTableTable, PlanItem> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PlanItemsTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _templateIdMeta = const VerificationMeta(
+    'templateId',
+  );
+  @override
+  late final GeneratedColumn<String> templateId = GeneratedColumn<String>(
+    'template_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('cycle'),
+  );
+  static const VerificationMeta _startDateMeta = const VerificationMeta(
+    'startDate',
+  );
+  @override
+  late final GeneratedColumn<String> startDate = GeneratedColumn<String>(
+    'start_date',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _endDateMeta = const VerificationMeta(
+    'endDate',
+  );
+  @override
+  late final GeneratedColumn<String> endDate = GeneratedColumn<String>(
+    'end_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _foreverMeta = const VerificationMeta(
+    'forever',
+  );
+  @override
+  late final GeneratedColumn<bool> forever = GeneratedColumn<bool>(
+    'forever',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("forever" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _pausedMeta = const VerificationMeta('paused');
+  @override
+  late final GeneratedColumn<bool> paused = GeneratedColumn<bool>(
+    'paused',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("paused" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _ruleMeta = const VerificationMeta('rule');
+  @override
+  late final GeneratedColumn<String> rule = GeneratedColumn<String>(
+    'rule',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('{}'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    templateId,
+    kind,
+    startDate,
+    endDate,
+    forever,
+    paused,
+    rule,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'plan_items';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PlanItem> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('template_id')) {
+      context.handle(
+        _templateIdMeta,
+        templateId.isAcceptableOrUnknown(data['template_id']!, _templateIdMeta),
+      );
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    }
+    if (data.containsKey('start_date')) {
+      context.handle(
+        _startDateMeta,
+        startDate.isAcceptableOrUnknown(data['start_date']!, _startDateMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_startDateMeta);
+    }
+    if (data.containsKey('end_date')) {
+      context.handle(
+        _endDateMeta,
+        endDate.isAcceptableOrUnknown(data['end_date']!, _endDateMeta),
+      );
+    }
+    if (data.containsKey('forever')) {
+      context.handle(
+        _foreverMeta,
+        forever.isAcceptableOrUnknown(data['forever']!, _foreverMeta),
+      );
+    }
+    if (data.containsKey('paused')) {
+      context.handle(
+        _pausedMeta,
+        paused.isAcceptableOrUnknown(data['paused']!, _pausedMeta),
+      );
+    }
+    if (data.containsKey('rule')) {
+      context.handle(
+        _ruleMeta,
+        rule.isAcceptableOrUnknown(data['rule']!, _ruleMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PlanItem map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PlanItem(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      templateId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}template_id'],
+      ),
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      startDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}start_date'],
+      )!,
+      endDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}end_date'],
+      ),
+      forever: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}forever'],
+      )!,
+      paused: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}paused'],
+      )!,
+      rule: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}rule'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $PlanItemsTableTable createAlias(String alias) {
+    return $PlanItemsTableTable(attachedDatabase, alias);
+  }
+}
+
+class PlanItem extends DataClass implements Insertable<PlanItem> {
+  final String id;
+  final String name;
+  final String? templateId;
+  final String kind;
+  final String startDate;
+  final String? endDate;
+  final bool forever;
+  final bool paused;
+  final String rule;
+  final String createdAt;
+  final String updatedAt;
+  const PlanItem({
+    required this.id,
+    required this.name,
+    this.templateId,
+    required this.kind,
+    required this.startDate,
+    this.endDate,
+    required this.forever,
+    required this.paused,
+    required this.rule,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    if (!nullToAbsent || templateId != null) {
+      map['template_id'] = Variable<String>(templateId);
+    }
+    map['kind'] = Variable<String>(kind);
+    map['start_date'] = Variable<String>(startDate);
+    if (!nullToAbsent || endDate != null) {
+      map['end_date'] = Variable<String>(endDate);
+    }
+    map['forever'] = Variable<bool>(forever);
+    map['paused'] = Variable<bool>(paused);
+    map['rule'] = Variable<String>(rule);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  PlanItemsTableCompanion toCompanion(bool nullToAbsent) {
+    return PlanItemsTableCompanion(
+      id: Value(id),
+      name: Value(name),
+      templateId: templateId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(templateId),
+      kind: Value(kind),
+      startDate: Value(startDate),
+      endDate: endDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(endDate),
+      forever: Value(forever),
+      paused: Value(paused),
+      rule: Value(rule),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory PlanItem.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PlanItem(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      templateId: serializer.fromJson<String?>(json['templateId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      startDate: serializer.fromJson<String>(json['startDate']),
+      endDate: serializer.fromJson<String?>(json['endDate']),
+      forever: serializer.fromJson<bool>(json['forever']),
+      paused: serializer.fromJson<bool>(json['paused']),
+      rule: serializer.fromJson<String>(json['rule']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'templateId': serializer.toJson<String?>(templateId),
+      'kind': serializer.toJson<String>(kind),
+      'startDate': serializer.toJson<String>(startDate),
+      'endDate': serializer.toJson<String?>(endDate),
+      'forever': serializer.toJson<bool>(forever),
+      'paused': serializer.toJson<bool>(paused),
+      'rule': serializer.toJson<String>(rule),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  PlanItem copyWith({
+    String? id,
+    String? name,
+    Value<String?> templateId = const Value.absent(),
+    String? kind,
+    String? startDate,
+    Value<String?> endDate = const Value.absent(),
+    bool? forever,
+    bool? paused,
+    String? rule,
+    String? createdAt,
+    String? updatedAt,
+  }) => PlanItem(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    templateId: templateId.present ? templateId.value : this.templateId,
+    kind: kind ?? this.kind,
+    startDate: startDate ?? this.startDate,
+    endDate: endDate.present ? endDate.value : this.endDate,
+    forever: forever ?? this.forever,
+    paused: paused ?? this.paused,
+    rule: rule ?? this.rule,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  PlanItem copyWithCompanion(PlanItemsTableCompanion data) {
+    return PlanItem(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      templateId: data.templateId.present
+          ? data.templateId.value
+          : this.templateId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      startDate: data.startDate.present ? data.startDate.value : this.startDate,
+      endDate: data.endDate.present ? data.endDate.value : this.endDate,
+      forever: data.forever.present ? data.forever.value : this.forever,
+      paused: data.paused.present ? data.paused.value : this.paused,
+      rule: data.rule.present ? data.rule.value : this.rule,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanItem(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('templateId: $templateId, ')
+          ..write('kind: $kind, ')
+          ..write('startDate: $startDate, ')
+          ..write('endDate: $endDate, ')
+          ..write('forever: $forever, ')
+          ..write('paused: $paused, ')
+          ..write('rule: $rule, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    templateId,
+    kind,
+    startDate,
+    endDate,
+    forever,
+    paused,
+    rule,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PlanItem &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.templateId == this.templateId &&
+          other.kind == this.kind &&
+          other.startDate == this.startDate &&
+          other.endDate == this.endDate &&
+          other.forever == this.forever &&
+          other.paused == this.paused &&
+          other.rule == this.rule &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String?> templateId;
+  final Value<String> kind;
+  final Value<String> startDate;
+  final Value<String?> endDate;
+  final Value<bool> forever;
+  final Value<bool> paused;
+  final Value<String> rule;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const PlanItemsTableCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.templateId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.startDate = const Value.absent(),
+    this.endDate = const Value.absent(),
+    this.forever = const Value.absent(),
+    this.paused = const Value.absent(),
+    this.rule = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PlanItemsTableCompanion.insert({
+    required String id,
+    required String name,
+    this.templateId = const Value.absent(),
+    this.kind = const Value.absent(),
+    required String startDate,
+    this.endDate = const Value.absent(),
+    this.forever = const Value.absent(),
+    this.paused = const Value.absent(),
+    this.rule = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       startDate = Value(startDate),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<PlanItem> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? templateId,
+    Expression<String>? kind,
+    Expression<String>? startDate,
+    Expression<String>? endDate,
+    Expression<bool>? forever,
+    Expression<bool>? paused,
+    Expression<String>? rule,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (templateId != null) 'template_id': templateId,
+      if (kind != null) 'kind': kind,
+      if (startDate != null) 'start_date': startDate,
+      if (endDate != null) 'end_date': endDate,
+      if (forever != null) 'forever': forever,
+      if (paused != null) 'paused': paused,
+      if (rule != null) 'rule': rule,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PlanItemsTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String?>? templateId,
+    Value<String>? kind,
+    Value<String>? startDate,
+    Value<String?>? endDate,
+    Value<bool>? forever,
+    Value<bool>? paused,
+    Value<String>? rule,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return PlanItemsTableCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      templateId: templateId ?? this.templateId,
+      kind: kind ?? this.kind,
+      startDate: startDate ?? this.startDate,
+      endDate: endDate ?? this.endDate,
+      forever: forever ?? this.forever,
+      paused: paused ?? this.paused,
+      rule: rule ?? this.rule,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (templateId.present) {
+      map['template_id'] = Variable<String>(templateId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (startDate.present) {
+      map['start_date'] = Variable<String>(startDate.value);
+    }
+    if (endDate.present) {
+      map['end_date'] = Variable<String>(endDate.value);
+    }
+    if (forever.present) {
+      map['forever'] = Variable<bool>(forever.value);
+    }
+    if (paused.present) {
+      map['paused'] = Variable<bool>(paused.value);
+    }
+    if (rule.present) {
+      map['rule'] = Variable<String>(rule.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanItemsTableCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('templateId: $templateId, ')
+          ..write('kind: $kind, ')
+          ..write('startDate: $startDate, ')
+          ..write('endDate: $endDate, ')
+          ..write('forever: $forever, ')
+          ..write('paused: $paused, ')
+          ..write('rule: $rule, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $PlanOverridesTableTable extends PlanOverridesTable
+    with TableInfo<$PlanOverridesTableTable, PlanOverride> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PlanOverridesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _planItemIdMeta = const VerificationMeta(
+    'planItemId',
+  );
+  @override
+  late final GeneratedColumn<String> planItemId = GeneratedColumn<String>(
+    'plan_item_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES plan_items (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _dateMeta = const VerificationMeta('date');
+  @override
+  late final GeneratedColumn<String> date = GeneratedColumn<String>(
+    'date',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _occurrenceIndexMeta = const VerificationMeta(
+    'occurrenceIndex',
+  );
+  @override
+  late final GeneratedColumn<int> occurrenceIndex = GeneratedColumn<int>(
+    'occurrence_index',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _startMinMeta = const VerificationMeta(
+    'startMin',
+  );
+  @override
+  late final GeneratedColumn<int> startMin = GeneratedColumn<int>(
+    'start_min',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _durationMinMeta = const VerificationMeta(
+    'durationMin',
+  );
+  @override
+  late final GeneratedColumn<int> durationMin = GeneratedColumn<int>(
+    'duration_min',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _skippedMeta = const VerificationMeta(
+    'skipped',
+  );
+  @override
+  late final GeneratedColumn<bool> skipped = GeneratedColumn<bool>(
+    'skipped',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("skipped" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    planItemId,
+    date,
+    occurrenceIndex,
+    startMin,
+    durationMin,
+    name,
+    skipped,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'plan_overrides';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PlanOverride> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('plan_item_id')) {
+      context.handle(
+        _planItemIdMeta,
+        planItemId.isAcceptableOrUnknown(
+          data['plan_item_id']!,
+          _planItemIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_planItemIdMeta);
+    }
+    if (data.containsKey('date')) {
+      context.handle(
+        _dateMeta,
+        date.isAcceptableOrUnknown(data['date']!, _dateMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_dateMeta);
+    }
+    if (data.containsKey('occurrence_index')) {
+      context.handle(
+        _occurrenceIndexMeta,
+        occurrenceIndex.isAcceptableOrUnknown(
+          data['occurrence_index']!,
+          _occurrenceIndexMeta,
+        ),
+      );
+    }
+    if (data.containsKey('start_min')) {
+      context.handle(
+        _startMinMeta,
+        startMin.isAcceptableOrUnknown(data['start_min']!, _startMinMeta),
+      );
+    }
+    if (data.containsKey('duration_min')) {
+      context.handle(
+        _durationMinMeta,
+        durationMin.isAcceptableOrUnknown(
+          data['duration_min']!,
+          _durationMinMeta,
+        ),
+      );
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    }
+    if (data.containsKey('skipped')) {
+      context.handle(
+        _skippedMeta,
+        skipped.isAcceptableOrUnknown(data['skipped']!, _skippedMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PlanOverride map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PlanOverride(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      planItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}plan_item_id'],
+      )!,
+      date: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}date'],
+      )!,
+      occurrenceIndex: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}occurrence_index'],
+      )!,
+      startMin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}start_min'],
+      ),
+      durationMin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}duration_min'],
+      ),
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      ),
+      skipped: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}skipped'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $PlanOverridesTableTable createAlias(String alias) {
+    return $PlanOverridesTableTable(attachedDatabase, alias);
+  }
+}
+
+class PlanOverride extends DataClass implements Insertable<PlanOverride> {
+  final String id;
+  final String planItemId;
+  final String date;
+  final int occurrenceIndex;
+  final int? startMin;
+  final int? durationMin;
+  final String? name;
+  final bool skipped;
+  final String createdAt;
+  final String updatedAt;
+  const PlanOverride({
+    required this.id,
+    required this.planItemId,
+    required this.date,
+    required this.occurrenceIndex,
+    this.startMin,
+    this.durationMin,
+    this.name,
+    required this.skipped,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['plan_item_id'] = Variable<String>(planItemId);
+    map['date'] = Variable<String>(date);
+    map['occurrence_index'] = Variable<int>(occurrenceIndex);
+    if (!nullToAbsent || startMin != null) {
+      map['start_min'] = Variable<int>(startMin);
+    }
+    if (!nullToAbsent || durationMin != null) {
+      map['duration_min'] = Variable<int>(durationMin);
+    }
+    if (!nullToAbsent || name != null) {
+      map['name'] = Variable<String>(name);
+    }
+    map['skipped'] = Variable<bool>(skipped);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  PlanOverridesTableCompanion toCompanion(bool nullToAbsent) {
+    return PlanOverridesTableCompanion(
+      id: Value(id),
+      planItemId: Value(planItemId),
+      date: Value(date),
+      occurrenceIndex: Value(occurrenceIndex),
+      startMin: startMin == null && nullToAbsent
+          ? const Value.absent()
+          : Value(startMin),
+      durationMin: durationMin == null && nullToAbsent
+          ? const Value.absent()
+          : Value(durationMin),
+      name: name == null && nullToAbsent ? const Value.absent() : Value(name),
+      skipped: Value(skipped),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory PlanOverride.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PlanOverride(
+      id: serializer.fromJson<String>(json['id']),
+      planItemId: serializer.fromJson<String>(json['planItemId']),
+      date: serializer.fromJson<String>(json['date']),
+      occurrenceIndex: serializer.fromJson<int>(json['occurrenceIndex']),
+      startMin: serializer.fromJson<int?>(json['startMin']),
+      durationMin: serializer.fromJson<int?>(json['durationMin']),
+      name: serializer.fromJson<String?>(json['name']),
+      skipped: serializer.fromJson<bool>(json['skipped']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'planItemId': serializer.toJson<String>(planItemId),
+      'date': serializer.toJson<String>(date),
+      'occurrenceIndex': serializer.toJson<int>(occurrenceIndex),
+      'startMin': serializer.toJson<int?>(startMin),
+      'durationMin': serializer.toJson<int?>(durationMin),
+      'name': serializer.toJson<String?>(name),
+      'skipped': serializer.toJson<bool>(skipped),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  PlanOverride copyWith({
+    String? id,
+    String? planItemId,
+    String? date,
+    int? occurrenceIndex,
+    Value<int?> startMin = const Value.absent(),
+    Value<int?> durationMin = const Value.absent(),
+    Value<String?> name = const Value.absent(),
+    bool? skipped,
+    String? createdAt,
+    String? updatedAt,
+  }) => PlanOverride(
+    id: id ?? this.id,
+    planItemId: planItemId ?? this.planItemId,
+    date: date ?? this.date,
+    occurrenceIndex: occurrenceIndex ?? this.occurrenceIndex,
+    startMin: startMin.present ? startMin.value : this.startMin,
+    durationMin: durationMin.present ? durationMin.value : this.durationMin,
+    name: name.present ? name.value : this.name,
+    skipped: skipped ?? this.skipped,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  PlanOverride copyWithCompanion(PlanOverridesTableCompanion data) {
+    return PlanOverride(
+      id: data.id.present ? data.id.value : this.id,
+      planItemId: data.planItemId.present
+          ? data.planItemId.value
+          : this.planItemId,
+      date: data.date.present ? data.date.value : this.date,
+      occurrenceIndex: data.occurrenceIndex.present
+          ? data.occurrenceIndex.value
+          : this.occurrenceIndex,
+      startMin: data.startMin.present ? data.startMin.value : this.startMin,
+      durationMin: data.durationMin.present
+          ? data.durationMin.value
+          : this.durationMin,
+      name: data.name.present ? data.name.value : this.name,
+      skipped: data.skipped.present ? data.skipped.value : this.skipped,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanOverride(')
+          ..write('id: $id, ')
+          ..write('planItemId: $planItemId, ')
+          ..write('date: $date, ')
+          ..write('occurrenceIndex: $occurrenceIndex, ')
+          ..write('startMin: $startMin, ')
+          ..write('durationMin: $durationMin, ')
+          ..write('name: $name, ')
+          ..write('skipped: $skipped, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    planItemId,
+    date,
+    occurrenceIndex,
+    startMin,
+    durationMin,
+    name,
+    skipped,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PlanOverride &&
+          other.id == this.id &&
+          other.planItemId == this.planItemId &&
+          other.date == this.date &&
+          other.occurrenceIndex == this.occurrenceIndex &&
+          other.startMin == this.startMin &&
+          other.durationMin == this.durationMin &&
+          other.name == this.name &&
+          other.skipped == this.skipped &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class PlanOverridesTableCompanion extends UpdateCompanion<PlanOverride> {
+  final Value<String> id;
+  final Value<String> planItemId;
+  final Value<String> date;
+  final Value<int> occurrenceIndex;
+  final Value<int?> startMin;
+  final Value<int?> durationMin;
+  final Value<String?> name;
+  final Value<bool> skipped;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const PlanOverridesTableCompanion({
+    this.id = const Value.absent(),
+    this.planItemId = const Value.absent(),
+    this.date = const Value.absent(),
+    this.occurrenceIndex = const Value.absent(),
+    this.startMin = const Value.absent(),
+    this.durationMin = const Value.absent(),
+    this.name = const Value.absent(),
+    this.skipped = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PlanOverridesTableCompanion.insert({
+    required String id,
+    required String planItemId,
+    required String date,
+    this.occurrenceIndex = const Value.absent(),
+    this.startMin = const Value.absent(),
+    this.durationMin = const Value.absent(),
+    this.name = const Value.absent(),
+    this.skipped = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       planItemId = Value(planItemId),
+       date = Value(date),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<PlanOverride> custom({
+    Expression<String>? id,
+    Expression<String>? planItemId,
+    Expression<String>? date,
+    Expression<int>? occurrenceIndex,
+    Expression<int>? startMin,
+    Expression<int>? durationMin,
+    Expression<String>? name,
+    Expression<bool>? skipped,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (planItemId != null) 'plan_item_id': planItemId,
+      if (date != null) 'date': date,
+      if (occurrenceIndex != null) 'occurrence_index': occurrenceIndex,
+      if (startMin != null) 'start_min': startMin,
+      if (durationMin != null) 'duration_min': durationMin,
+      if (name != null) 'name': name,
+      if (skipped != null) 'skipped': skipped,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PlanOverridesTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? planItemId,
+    Value<String>? date,
+    Value<int>? occurrenceIndex,
+    Value<int?>? startMin,
+    Value<int?>? durationMin,
+    Value<String?>? name,
+    Value<bool>? skipped,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return PlanOverridesTableCompanion(
+      id: id ?? this.id,
+      planItemId: planItemId ?? this.planItemId,
+      date: date ?? this.date,
+      occurrenceIndex: occurrenceIndex ?? this.occurrenceIndex,
+      startMin: startMin ?? this.startMin,
+      durationMin: durationMin ?? this.durationMin,
+      name: name ?? this.name,
+      skipped: skipped ?? this.skipped,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (planItemId.present) {
+      map['plan_item_id'] = Variable<String>(planItemId.value);
+    }
+    if (date.present) {
+      map['date'] = Variable<String>(date.value);
+    }
+    if (occurrenceIndex.present) {
+      map['occurrence_index'] = Variable<int>(occurrenceIndex.value);
+    }
+    if (startMin.present) {
+      map['start_min'] = Variable<int>(startMin.value);
+    }
+    if (durationMin.present) {
+      map['duration_min'] = Variable<int>(durationMin.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (skipped.present) {
+      map['skipped'] = Variable<bool>(skipped.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanOverridesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('planItemId: $planItemId, ')
+          ..write('date: $date, ')
+          ..write('occurrenceIndex: $occurrenceIndex, ')
+          ..write('startMin: $startMin, ')
+          ..write('durationMin: $durationMin, ')
+          ..write('name: $name, ')
+          ..write('skipped: $skipped, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -6560,6 +7940,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SavedViewsTableTable savedViewsTable = $SavedViewsTableTable(
     this,
   );
+  late final $PlanItemsTableTable planItemsTable = $PlanItemsTableTable(this);
+  late final $PlanOverridesTableTable planOverridesTable =
+      $PlanOverridesTableTable(this);
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -6571,6 +7954,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final Index idxActionsStart = Index(
     'idx_actions_start',
     'CREATE INDEX idx_actions_start ON actions (start_at)',
+  );
+  late final Index idxActionsPlan = Index(
+    'idx_actions_plan',
+    'CREATE INDEX idx_actions_plan ON actions (plan_item_id, plan_key)',
   );
   late final Index idxDepSuccessor = Index(
     'idx_dep_successor',
@@ -6600,6 +7987,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_budget_tx_action',
     'CREATE INDEX idx_budget_tx_action ON budget_transactions (action_id)',
   );
+  late final Index idxPlanOverridesItem = Index(
+    'idx_plan_overrides_item',
+    'CREATE INDEX idx_plan_overrides_item ON plan_overrides (plan_item_id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -6618,9 +8009,12 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     budgetTransactionsTable,
     budgetSettingsTable,
     savedViewsTable,
+    planItemsTable,
+    planOverridesTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxActionsStart,
+    idxActionsPlan,
     idxDepSuccessor,
     idxOccurrenceAction,
     idxActionMetricsMetric,
@@ -6628,6 +8022,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     idxBudgetCategoriesParent,
     idxBudgetTxCategory,
     idxBudgetTxAction,
+    idxPlanOverridesItem,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -6742,6 +8137,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('budget_transactions', kind: UpdateKind.update)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'plan_items',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('plan_overrides', kind: UpdateKind.delete)],
     ),
   ]);
 }
@@ -7071,6 +8473,8 @@ typedef $$ActionsTableTableCreateCompanionBuilder =
       Value<String?> completedAt,
       Value<int?> sequenceNumber,
       Value<String?> countableActivityId,
+      Value<String?> planItemId,
+      Value<String?> planKey,
       required String createdAt,
       required String updatedAt,
       Value<int> rowid,
@@ -7092,6 +8496,8 @@ typedef $$ActionsTableTableUpdateCompanionBuilder =
       Value<String?> completedAt,
       Value<int?> sequenceNumber,
       Value<String?> countableActivityId,
+      Value<String?> planItemId,
+      Value<String?> planKey,
       Value<String> createdAt,
       Value<String> updatedAt,
       Value<int> rowid,
@@ -7320,6 +8726,16 @@ class $$ActionsTableTableFilterComposer
 
   ColumnFilters<int> get sequenceNumber => $composableBuilder(
     column: $table.sequenceNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get planItemId => $composableBuilder(
+    column: $table.planItemId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get planKey => $composableBuilder(
+    column: $table.planKey,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7566,6 +8982,16 @@ class $$ActionsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get planItemId => $composableBuilder(
+    column: $table.planItemId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get planKey => $composableBuilder(
+    column: $table.planKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -7663,6 +9089,14 @@ class $$ActionsTableTableAnnotationComposer
     column: $table.sequenceNumber,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get planItemId => $composableBuilder(
+    column: $table.planItemId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get planKey =>
+      $composableBuilder(column: $table.planKey, builder: (column) => column);
 
   GeneratedColumn<String> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -7878,6 +9312,8 @@ class $$ActionsTableTableTableManager
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> sequenceNumber = const Value.absent(),
                 Value<String?> countableActivityId = const Value.absent(),
+                Value<String?> planItemId = const Value.absent(),
+                Value<String?> planKey = const Value.absent(),
                 Value<String> createdAt = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -7897,6 +9333,8 @@ class $$ActionsTableTableTableManager
                 completedAt: completedAt,
                 sequenceNumber: sequenceNumber,
                 countableActivityId: countableActivityId,
+                planItemId: planItemId,
+                planKey: planKey,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -7918,6 +9356,8 @@ class $$ActionsTableTableTableManager
                 Value<String?> completedAt = const Value.absent(),
                 Value<int?> sequenceNumber = const Value.absent(),
                 Value<String?> countableActivityId = const Value.absent(),
+                Value<String?> planItemId = const Value.absent(),
+                Value<String?> planKey = const Value.absent(),
                 required String createdAt,
                 required String updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -7937,6 +9377,8 @@ class $$ActionsTableTableTableManager
                 completedAt: completedAt,
                 sequenceNumber: sequenceNumber,
                 countableActivityId: countableActivityId,
+                planItemId: planItemId,
+                planKey: planKey,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -13352,6 +14794,860 @@ typedef $$SavedViewsTableTableProcessedTableManager =
       SavedView,
       PrefetchHooks Function()
     >;
+typedef $$PlanItemsTableTableCreateCompanionBuilder =
+    PlanItemsTableCompanion Function({
+      required String id,
+      required String name,
+      Value<String?> templateId,
+      Value<String> kind,
+      required String startDate,
+      Value<String?> endDate,
+      Value<bool> forever,
+      Value<bool> paused,
+      Value<String> rule,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$PlanItemsTableTableUpdateCompanionBuilder =
+    PlanItemsTableCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String?> templateId,
+      Value<String> kind,
+      Value<String> startDate,
+      Value<String?> endDate,
+      Value<bool> forever,
+      Value<bool> paused,
+      Value<String> rule,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$PlanItemsTableTableReferences
+    extends BaseReferences<_$AppDatabase, $PlanItemsTableTable, PlanItem> {
+  $$PlanItemsTableTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static MultiTypedResultKey<$PlanOverridesTableTable, List<PlanOverride>>
+  _planOverridesTableRefsTable(_$AppDatabase db) =>
+      MultiTypedResultKey.fromTable(
+        db.planOverridesTable,
+        aliasName: 'plan_items__id__plan_overrides__plan_item_id',
+      );
+
+  $$PlanOverridesTableTableProcessedTableManager get planOverridesTableRefs {
+    final manager = $$PlanOverridesTableTableTableManager(
+      $_db,
+      $_db.planOverridesTable,
+    ).filter((f) => f.planItemId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _planOverridesTableRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$PlanItemsTableTableFilterComposer
+    extends Composer<_$AppDatabase, $PlanItemsTableTable> {
+  $$PlanItemsTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get templateId => $composableBuilder(
+    column: $table.templateId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get startDate => $composableBuilder(
+    column: $table.startDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get endDate => $composableBuilder(
+    column: $table.endDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get forever => $composableBuilder(
+    column: $table.forever,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get paused => $composableBuilder(
+    column: $table.paused,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rule => $composableBuilder(
+    column: $table.rule,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  Expression<bool> planOverridesTableRefs(
+    Expression<bool> Function($$PlanOverridesTableTableFilterComposer f) f,
+  ) {
+    final $$PlanOverridesTableTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.planOverridesTable,
+      getReferencedColumn: (t) => t.planItemId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PlanOverridesTableTableFilterComposer(
+            $db: $db,
+            $table: $db.planOverridesTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$PlanItemsTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $PlanItemsTableTable> {
+  $$PlanItemsTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get templateId => $composableBuilder(
+    column: $table.templateId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get startDate => $composableBuilder(
+    column: $table.startDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get endDate => $composableBuilder(
+    column: $table.endDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get forever => $composableBuilder(
+    column: $table.forever,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get paused => $composableBuilder(
+    column: $table.paused,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rule => $composableBuilder(
+    column: $table.rule,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$PlanItemsTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PlanItemsTableTable> {
+  $$PlanItemsTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get templateId => $composableBuilder(
+    column: $table.templateId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get startDate =>
+      $composableBuilder(column: $table.startDate, builder: (column) => column);
+
+  GeneratedColumn<String> get endDate =>
+      $composableBuilder(column: $table.endDate, builder: (column) => column);
+
+  GeneratedColumn<bool> get forever =>
+      $composableBuilder(column: $table.forever, builder: (column) => column);
+
+  GeneratedColumn<bool> get paused =>
+      $composableBuilder(column: $table.paused, builder: (column) => column);
+
+  GeneratedColumn<String> get rule =>
+      $composableBuilder(column: $table.rule, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  Expression<T> planOverridesTableRefs<T extends Object>(
+    Expression<T> Function($$PlanOverridesTableTableAnnotationComposer a) f,
+  ) {
+    final $$PlanOverridesTableTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.planOverridesTable,
+          getReferencedColumn: (t) => t.planItemId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$PlanOverridesTableTableAnnotationComposer(
+                $db: $db,
+                $table: $db.planOverridesTable,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
+}
+
+class $$PlanItemsTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PlanItemsTableTable,
+          PlanItem,
+          $$PlanItemsTableTableFilterComposer,
+          $$PlanItemsTableTableOrderingComposer,
+          $$PlanItemsTableTableAnnotationComposer,
+          $$PlanItemsTableTableCreateCompanionBuilder,
+          $$PlanItemsTableTableUpdateCompanionBuilder,
+          (PlanItem, $$PlanItemsTableTableReferences),
+          PlanItem,
+          PrefetchHooks Function({bool planOverridesTableRefs})
+        > {
+  $$PlanItemsTableTableTableManager(
+    _$AppDatabase db,
+    $PlanItemsTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PlanItemsTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PlanItemsTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PlanItemsTableTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String?> templateId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> startDate = const Value.absent(),
+                Value<String?> endDate = const Value.absent(),
+                Value<bool> forever = const Value.absent(),
+                Value<bool> paused = const Value.absent(),
+                Value<String> rule = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PlanItemsTableCompanion(
+                id: id,
+                name: name,
+                templateId: templateId,
+                kind: kind,
+                startDate: startDate,
+                endDate: endDate,
+                forever: forever,
+                paused: paused,
+                rule: rule,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<String?> templateId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                required String startDate,
+                Value<String?> endDate = const Value.absent(),
+                Value<bool> forever = const Value.absent(),
+                Value<bool> paused = const Value.absent(),
+                Value<String> rule = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => PlanItemsTableCompanion.insert(
+                id: id,
+                name: name,
+                templateId: templateId,
+                kind: kind,
+                startDate: startDate,
+                endDate: endDate,
+                forever: forever,
+                paused: paused,
+                rule: rule,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$PlanItemsTableTable, PlanItem>(table),
+                  $$PlanItemsTableTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({planOverridesTableRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [
+                if (planOverridesTableRefs) db.planOverridesTable,
+              ],
+              addJoins: null,
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (planOverridesTableRefs)
+                    await $_getPrefetchedData<
+                      PlanItem,
+                      $PlanItemsTableTable,
+                      PlanOverride
+                    >(
+                      currentTable: table,
+                      referencedTable: $$PlanItemsTableTableReferences
+                          ._planOverridesTableRefsTable(db),
+                      managerFromTypedResult: (p0) =>
+                          $$PlanItemsTableTableReferences(
+                            db,
+                            table,
+                            p0,
+                          ).planOverridesTableRefs,
+                      referencedItemsForCurrentItem: (item, referencedItems) =>
+                          referencedItems.where((e) => e.planItemId == item.id),
+                      typedResults: items,
+                    ),
+                ];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$PlanItemsTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PlanItemsTableTable,
+      PlanItem,
+      $$PlanItemsTableTableFilterComposer,
+      $$PlanItemsTableTableOrderingComposer,
+      $$PlanItemsTableTableAnnotationComposer,
+      $$PlanItemsTableTableCreateCompanionBuilder,
+      $$PlanItemsTableTableUpdateCompanionBuilder,
+      (PlanItem, $$PlanItemsTableTableReferences),
+      PlanItem,
+      PrefetchHooks Function({bool planOverridesTableRefs})
+    >;
+typedef $$PlanOverridesTableTableCreateCompanionBuilder =
+    PlanOverridesTableCompanion Function({
+      required String id,
+      required String planItemId,
+      required String date,
+      Value<int> occurrenceIndex,
+      Value<int?> startMin,
+      Value<int?> durationMin,
+      Value<String?> name,
+      Value<bool> skipped,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$PlanOverridesTableTableUpdateCompanionBuilder =
+    PlanOverridesTableCompanion Function({
+      Value<String> id,
+      Value<String> planItemId,
+      Value<String> date,
+      Value<int> occurrenceIndex,
+      Value<int?> startMin,
+      Value<int?> durationMin,
+      Value<String?> name,
+      Value<bool> skipped,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$PlanOverridesTableTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $PlanOverridesTableTable, PlanOverride> {
+  $$PlanOverridesTableTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $PlanItemsTableTable _planItemIdTable(_$AppDatabase db) => db
+      .planItemsTable
+      .createAlias('plan_overrides__plan_item_id__plan_items__id');
+
+  $$PlanItemsTableTableProcessedTableManager get planItemId {
+    final $_column = $_itemColumn<String>('plan_item_id')!;
+
+    final manager = $$PlanItemsTableTableTableManager(
+      $_db,
+      $_db.planItemsTable,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_planItemIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$PlanOverridesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $PlanOverridesTableTable> {
+  $$PlanOverridesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get date => $composableBuilder(
+    column: $table.date,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get occurrenceIndex => $composableBuilder(
+    column: $table.occurrenceIndex,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get startMin => $composableBuilder(
+    column: $table.startMin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get durationMin => $composableBuilder(
+    column: $table.durationMin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get skipped => $composableBuilder(
+    column: $table.skipped,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$PlanItemsTableTableFilterComposer get planItemId {
+    final $$PlanItemsTableTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.planItemId,
+      referencedTable: $db.planItemsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PlanItemsTableTableFilterComposer(
+            $db: $db,
+            $table: $db.planItemsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PlanOverridesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $PlanOverridesTableTable> {
+  $$PlanOverridesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get date => $composableBuilder(
+    column: $table.date,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get occurrenceIndex => $composableBuilder(
+    column: $table.occurrenceIndex,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get startMin => $composableBuilder(
+    column: $table.startMin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get durationMin => $composableBuilder(
+    column: $table.durationMin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get skipped => $composableBuilder(
+    column: $table.skipped,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$PlanItemsTableTableOrderingComposer get planItemId {
+    final $$PlanItemsTableTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.planItemId,
+      referencedTable: $db.planItemsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PlanItemsTableTableOrderingComposer(
+            $db: $db,
+            $table: $db.planItemsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PlanOverridesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PlanOverridesTableTable> {
+  $$PlanOverridesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get date =>
+      $composableBuilder(column: $table.date, builder: (column) => column);
+
+  GeneratedColumn<int> get occurrenceIndex => $composableBuilder(
+    column: $table.occurrenceIndex,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get startMin =>
+      $composableBuilder(column: $table.startMin, builder: (column) => column);
+
+  GeneratedColumn<int> get durationMin => $composableBuilder(
+    column: $table.durationMin,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<bool> get skipped =>
+      $composableBuilder(column: $table.skipped, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$PlanItemsTableTableAnnotationComposer get planItemId {
+    final $$PlanItemsTableTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.planItemId,
+      referencedTable: $db.planItemsTable,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$PlanItemsTableTableAnnotationComposer(
+            $db: $db,
+            $table: $db.planItemsTable,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$PlanOverridesTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PlanOverridesTableTable,
+          PlanOverride,
+          $$PlanOverridesTableTableFilterComposer,
+          $$PlanOverridesTableTableOrderingComposer,
+          $$PlanOverridesTableTableAnnotationComposer,
+          $$PlanOverridesTableTableCreateCompanionBuilder,
+          $$PlanOverridesTableTableUpdateCompanionBuilder,
+          (PlanOverride, $$PlanOverridesTableTableReferences),
+          PlanOverride,
+          PrefetchHooks Function({bool planItemId})
+        > {
+  $$PlanOverridesTableTableTableManager(
+    _$AppDatabase db,
+    $PlanOverridesTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PlanOverridesTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PlanOverridesTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$PlanOverridesTableTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> planItemId = const Value.absent(),
+                Value<String> date = const Value.absent(),
+                Value<int> occurrenceIndex = const Value.absent(),
+                Value<int?> startMin = const Value.absent(),
+                Value<int?> durationMin = const Value.absent(),
+                Value<String?> name = const Value.absent(),
+                Value<bool> skipped = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PlanOverridesTableCompanion(
+                id: id,
+                planItemId: planItemId,
+                date: date,
+                occurrenceIndex: occurrenceIndex,
+                startMin: startMin,
+                durationMin: durationMin,
+                name: name,
+                skipped: skipped,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String planItemId,
+                required String date,
+                Value<int> occurrenceIndex = const Value.absent(),
+                Value<int?> startMin = const Value.absent(),
+                Value<int?> durationMin = const Value.absent(),
+                Value<String?> name = const Value.absent(),
+                Value<bool> skipped = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => PlanOverridesTableCompanion.insert(
+                id: id,
+                planItemId: planItemId,
+                date: date,
+                occurrenceIndex: occurrenceIndex,
+                startMin: startMin,
+                durationMin: durationMin,
+                name: name,
+                skipped: skipped,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$PlanOverridesTableTable, PlanOverride>(table),
+                  $$PlanOverridesTableTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({planItemId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (planItemId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.planItemId,
+                        referencedTable: $$PlanOverridesTableTableReferences
+                            ._planItemIdTable(db),
+                        referencedColumn: $$PlanOverridesTableTableReferences
+                            ._planItemIdTable(db)
+                            .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$PlanOverridesTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PlanOverridesTableTable,
+      PlanOverride,
+      $$PlanOverridesTableTableFilterComposer,
+      $$PlanOverridesTableTableOrderingComposer,
+      $$PlanOverridesTableTableAnnotationComposer,
+      $$PlanOverridesTableTableCreateCompanionBuilder,
+      $$PlanOverridesTableTableUpdateCompanionBuilder,
+      (PlanOverride, $$PlanOverridesTableTableReferences),
+      PlanOverride,
+      PrefetchHooks Function({bool planItemId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -13397,4 +15693,8 @@ class $AppDatabaseManager {
       $$BudgetSettingsTableTableTableManager(_db, _db.budgetSettingsTable);
   $$SavedViewsTableTableTableManager get savedViewsTable =>
       $$SavedViewsTableTableTableManager(_db, _db.savedViewsTable);
+  $$PlanItemsTableTableTableManager get planItemsTable =>
+      $$PlanItemsTableTableTableManager(_db, _db.planItemsTable);
+  $$PlanOverridesTableTableTableManager get planOverridesTable =>
+      $$PlanOverridesTableTableTableManager(_db, _db.planOverridesTable);
 }

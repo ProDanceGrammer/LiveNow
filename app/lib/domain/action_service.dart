@@ -161,6 +161,8 @@ class ActionService {
     String? countableActivityId,
     String? notes,
     List<String> metricIds = const [],
+    String? planItemId,
+    String? planKey,
   }) async {
     final id = newId();
     final nowText = dateTimeToDb(DateTime.now())!;
@@ -181,6 +183,8 @@ class ActionService {
               countableActivityId: Value(countableActivityId),
               notes: Value(notes),
               notesText: Value(notesPlainText(notes)),
+              planItemId: Value(planItemId),
+              planKey: Value(planKey),
               createdAt: nowText,
               updatedAt: nowText,
             ),
@@ -1317,6 +1321,87 @@ class ActionService {
       }
       return id;
     });
+  }
+
+  /// How long a template's action lasts: its manual minutes or the 30-day
+  /// average of its finished runs - whichever the template's switch prefers,
+  /// the other as the fallback, else [defaultActionDuration]. Null when the
+  /// template does not exist. (All-day templates have no length: 1 h here.)
+  Future<Duration?> templateDuration(String templateId, {DateTime? nowUtc}) async {
+    final Map<String, dynamic> payload;
+    try {
+      payload = await _templatePayload(templateId);
+    } catch (_) {
+      return null;
+    }
+    final minutes = payload['estimatedMinutes'] as int?;
+    final manual = (minutes != null && minutes > 0)
+        ? Duration(minutes: minutes)
+        : null;
+    final average = await templateAverage(
+      payload['name'] as String,
+      nowUtc: nowUtc,
+    );
+    return payload['useAverage'] != false
+        ? (average ?? manual ?? defaultActionDuration)
+        : (manual ?? average ?? defaultActionDuration);
+  }
+
+  /// A new action from a template at a GIVEN time (planning): [startUtc], lasting
+  /// [duration] (default [templateDuration]), with the template's notes, growth
+  /// directions and "What is done?" blocks; [name] overrides the template's
+  /// name. An all-day template gives an all-day action on that local day. Never
+  /// opens an occurrence (it has not happened yet). [planItemId] / [planKey] tie
+  /// the action back to the plan that made it.
+  Future<String> createFromTemplateAt(
+    String templateId,
+    DateTime startUtc, {
+    Duration? duration,
+    String? name,
+    String? planItemId,
+    String? planKey,
+  }) async {
+    final payload = await _templatePayload(templateId);
+    final a = await _templateArgs(payload);
+    final wanted = a.name.trim().toLowerCase();
+    String? activityId;
+    for (final c in await db.select(db.countableActivitiesTable).get()) {
+      if (c.name.trim().toLowerCase() == wanted) {
+        activityId = c.id;
+        break;
+      }
+    }
+    final dur =
+        duration ??
+        await templateDuration(templateId) ??
+        defaultActionDuration;
+    final DateTime start;
+    final DateTime? end;
+    if (a.isAllDay) {
+      final local = tz.TZDateTime.from(startUtc, _location());
+      start = tz.TZDateTime(_location(), local.year, local.month, local.day)
+          .toUtc();
+      end = null;
+    } else {
+      start = startUtc;
+      end = startUtc.add(dur);
+    }
+    final id = await createAction(
+      name: name ?? a.name,
+      postponeFlex: a.postponeFlex,
+      depthLevel: a.depthLevel,
+      startAt: start,
+      endAt: end,
+      isAllDay: a.isAllDay,
+      estimatedMinutes: a.estimatedMinutes,
+      countableActivityId: activityId,
+      notes: a.notes,
+      metricIds: a.metricIds,
+      planItemId: planItemId,
+      planKey: planKey,
+    );
+    await _applyTemplateBlocks(id, payload);
+    return id;
   }
 
   Future<Map<String, dynamic>> _templatePayload(String templateId) async {

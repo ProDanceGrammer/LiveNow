@@ -16,6 +16,7 @@ import 'package:drift/drift.dart';
 @TableIndex(name: 'idx_actions_done_start', columns: {#done, #startAt})
 @TableIndex(name: 'idx_actions_allday_start', columns: {#isAllDay, #startAt})
 @TableIndex(name: 'idx_actions_start', columns: {#startAt})
+@TableIndex(name: 'idx_actions_plan', columns: {#planItemId, #planKey})
 class ActionsTable extends Table {
   @override
   String get tableName => 'actions';
@@ -58,6 +59,13 @@ class ActionsTable extends Table {
     #id,
     onDelete: KeyAction.setNull,
   )();
+
+  /// The plan item this action was generated from (schema v14; null = made by
+  /// hand) and the occurrence it was (`YYYY-MM-DD#index`). A soft reference
+  /// (the plan item may be deleted later); it makes a re-confirmation
+  /// idempotent and lets "remove future actions" find what a plan made.
+  TextColumn get planItemId => text().nullable()();
+  TextColumn get planKey => text().nullable()();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
 
@@ -267,6 +275,59 @@ class SavedViewsTable extends Table {
   TextColumn get kind => text().withDefault(const Constant('both'))();
   TextColumn get payload => text().withDefault(const Constant('{}'))();
   BoolColumn get isDefault => boolean().withDefault(const Constant(false))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// A recurring plan (schema v14): what the calendar's planning mode shows as
+/// translucent blocks and what "confirm" turns into real actions.
+/// `kind` is `cycle` (every N days, occurrences per cycle day) or `monthly`;
+/// `rule` is the JSON of `domain/plan_rules.dart` (`CycleRule` / `MonthlyRule`);
+/// `start_date` / `end_date` are Istanbul local dates `YYYY-MM-DD`; `forever`
+/// keeps a rolling window of real actions topped up; `template_id` is a soft
+/// reference to the template it was made from.
+@DataClassName('PlanItem')
+class PlanItemsTable extends Table {
+  @override
+  String get tableName => 'plan_items';
+
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get templateId => text().nullable()();
+  TextColumn get kind => text().withDefault(const Constant('cycle'))();
+  TextColumn get startDate => text()();
+  TextColumn get endDate => text().nullable()();
+  BoolColumn get forever => boolean().withDefault(const Constant(false))();
+  BoolColumn get paused => boolean().withDefault(const Constant(false))();
+  TextColumn get rule => text().withDefault(const Constant('{}'))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// "This day only" edit of one occurrence of a plan item (or its removal). The
+/// id is `<planItemId>|<date>|<index>`, so two devices editing the same
+/// occurrence merge as one row.
+@DataClassName('PlanOverride')
+@TableIndex(name: 'idx_plan_overrides_item', columns: {#planItemId})
+class PlanOverridesTable extends Table {
+  @override
+  String get tableName => 'plan_overrides';
+
+  TextColumn get id => text()();
+  TextColumn get planItemId =>
+      text().references(PlanItemsTable, #id, onDelete: KeyAction.cascade)();
+  TextColumn get date => text()();
+  IntColumn get occurrenceIndex => integer().withDefault(const Constant(0))();
+  IntColumn get startMin => integer().nullable()();
+  IntColumn get durationMin => integer().nullable()();
+  TextColumn get name => text().nullable()();
+  BoolColumn get skipped => boolean().withDefault(const Constant(false))();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
 

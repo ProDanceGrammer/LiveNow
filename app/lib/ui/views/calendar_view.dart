@@ -31,6 +31,7 @@ import '../../core/settings.dart';
 import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
+import '../../domain/plan_rules.dart' show planDateOf;
 import '../../domain/postpone_rules.dart';
 import '../calendar_fullscreen.dart';
 import '../calendar_allday.dart';
@@ -38,6 +39,7 @@ import '../calendar_icons.dart';
 import '../calendar_selection.dart';
 import '../edit_action.dart';
 import '../layout.dart';
+import '../plan_providers.dart';
 import '../providers.dart';
 import '../undo.dart';
 import '../theme/glass_theme.dart';
@@ -50,6 +52,8 @@ import '../widgets/direction_badge.dart';
 import '../widgets/glass.dart';
 import '../widgets/continue_icon.dart';
 import '../widgets/glass_icon_tile.dart';
+import '../widgets/plan_dialogs.dart';
+import 'plan_ghost_layer.dart';
 import 'calendar_layout.dart';
 
 const double _kGutter = 56;
@@ -502,6 +506,12 @@ class CalendarView extends ConsumerWidget {
                         right: 0,
                         child: Center(child: _CalendarBulkBar(items: items)),
                       ),
+                    if (ref.watch(calendarPlanningProvider))
+                      Positioned(
+                        top: phone ? 44 : 6,
+                        right: 14,
+                        child: const _CalendarPlanBar(),
+                      ),
                     if (phone)
                       // Over the time column: Now, full screen, options.
                       Positioned(
@@ -914,6 +924,16 @@ class _Header extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 12),
+          toggle(
+            const ValueKey('calendar-planning-toggle'),
+            ref.watch(calendarPlanningProvider),
+            Icons.event_repeat,
+            'Plan ahead',
+            'Leave planning',
+            () => ref.read(calendarPlanningProvider.notifier).state =
+                !ref.read(calendarPlanningProvider),
+          ),
+          const SizedBox(width: 12),
           // The same icon as the 'Growth directions' item in the rail.
           toggle(
             const ValueKey('calendar-icons-toggle'),
@@ -996,6 +1016,10 @@ class _CalendarMenu extends ConsumerWidget {
           ref.read(calendarAllDayProvider.notifier).toggle();
         } else if (v == 'icons') {
           ref.read(calendarIconsProvider.notifier).toggle();
+        } else if (v == 'planning') {
+          ref.read(calendarPlanningProvider.notifier).state = !ref.read(
+            calendarPlanningProvider,
+          );
         }
       },
       itemBuilder: (_) => [
@@ -1019,7 +1043,75 @@ class _CalendarMenu extends ConsumerWidget {
           checked: iconsOn,
           child: const Text('Growth direction icons'),
         ),
+        CheckedPopupMenuItem(
+          key: const ValueKey('calendar-menu-planning'),
+          value: 'planning',
+          checked: ref.read(calendarPlanningProvider),
+          child: const Text('Planning'),
+        ),
       ],
+    );
+  }
+}
+
+/// Planning mode's floating bar: confirm the plan (turn it into real actions)
+/// and the list of plan items.
+class _CalendarPlanBar extends ConsumerWidget {
+  const _CalendarPlanBar();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final g = context.glass;
+    final phone = usePhoneLayout(context);
+    Widget action(String key, IconData icon, String label, VoidCallback onTap) =>
+        phone
+        ? IconButton(
+            key: ValueKey(key),
+            tooltip: label,
+            icon: Icon(icon),
+            onPressed: onTap,
+          )
+        : TextButton.icon(
+            key: ValueKey(key),
+            icon: Icon(icon, size: 18),
+            label: Text(label),
+            onPressed: onTap,
+          );
+    return Material(
+      key: const ValueKey('calendar-plan-bar'),
+      color: g.fillDialog,
+      elevation: 6,
+      shadowColor: Colors.black54,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: g.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            action(
+              'plan-bar-add',
+              Icons.add,
+              'New plan item',
+              () => PlanItemEditorDialog.show(context),
+            ),
+            action(
+              'plan-bar-items',
+              Icons.list_alt,
+              'Plan items',
+              () => PlanItemsDialog.show(context),
+            ),
+            action(
+              'plan-bar-confirm',
+              Icons.check_circle_outline,
+              'Confirm plan...',
+              () => PlanConfirmDialog.show(context),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2900,6 +2992,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final now = DateTime.now().toUtc();
     final todayIdx = dayIndexOf(now, widget.start);
     final gridHeight = _hourHeight * 24;
+    final planned = ref.watch(planOccurrencesProvider).value ?? const [];
     if (_columnGeometry != (dayW, gridHeight)) {
       _columnCache.clear();
       _columnGeometry = (dayW, gridHeight);
@@ -2941,6 +3034,23 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           ),
         ),
       ),
+      // Planning mode: the plan's occurrences as translucent blocks UNDER the
+      // real events (the provider is empty, and costs nothing, while it is off).
+      if (planned.isNotEmpty)
+        Positioned.fill(
+          child: PlanGhostLayer(
+            firstDay: planDateOf(widget.start),
+            dayCount: widget.dayCount,
+            dayWidth: dayW,
+            hourHeight: _hourHeight,
+            phone: usePhoneLayout(context),
+            occurrences: planned,
+            onEdit: (o) =>
+                PlanItemEditorDialog.show(context, itemId: o.planItemId),
+            onChanged: (o, start, dur) =>
+                applyGhostChange(context, ref, o, start, dur),
+          ),
+        ),
       for (var d = 0; d < widget.dayCount; d++) _column(d, gridHeight),
       if (todayIdx >= 0 && todayIdx < widget.dayCount)
         Positioned(
@@ -3481,6 +3591,14 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       widget.dayCount - 1,
     );
     final (start, _) = _newRangeTimes(_NewRange(day, local.dy, local.dy));
+    if (ref.read(calendarPlanningProvider)) {
+      await PlanItemEditorDialog.show(
+        context,
+        initialStart: start,
+        initialMinutes: 60,
+      );
+      return;
+    }
     await ActionEditorDialog.show(
       context,
       initialStart: start,
@@ -3506,6 +3624,14 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _newRangeN.value = null;
     if (r == null) return;
     final (start, end) = _newRangeTimes(r);
+    if (ref.read(calendarPlanningProvider)) {
+      await PlanItemEditorDialog.show(
+        context,
+        initialStart: start,
+        initialMinutes: end.difference(start).inMinutes,
+      );
+      return;
+    }
     await ActionEditorDialog.show(
       context,
       initialStart: start,

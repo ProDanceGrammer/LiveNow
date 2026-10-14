@@ -398,6 +398,7 @@ void main() {
           )
           .get();
       expect(idx.map((r) => r.read<String>('name')).toSet(), {
+        'idx_actions_plan', // v14
         'idx_actions_done_start',
         'idx_actions_allday_start',
         'idx_actions_start',
@@ -629,5 +630,43 @@ void main() {
         )
         .getSingle();
     expect(n.read<int>('n'), 1);
+  });
+
+  test('an old database gets the v14 plan tables, the action link columns and sync triggers', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db
+        .into(db.planItemsTable)
+        .insert(
+          PlanItemsTableCompanion.insert(
+            id: 'p1',
+            name: 'Breakfast',
+            startDate: '2026-10-19',
+            createdAt: 't',
+            updatedAt: 't',
+          ),
+        );
+    final p = (await db.select(db.planItemsTable).get()).single;
+    expect((p.kind, p.rule, p.forever, p.paused), ('cycle', '{}', false, false));
+    // The action rows carry the link to a plan.
+    await db.customStatement(
+      "UPDATE actions SET plan_item_id = 'p1', plan_key = '2026-10-19#0' WHERE id = 'a1'",
+    );
+    final a = (await db.select(db.actionsTable).get()).single;
+    expect((a.planItemId, a.planKey), ('p1', '2026-10-19#0'));
+    final n = await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = 'plan_items' AND row_id = 'p1'",
+        )
+        .getSingle();
+    expect(n.read<int>('n'), 1);
+    // Deleting the plan removes its overrides (cascade), not the actions.
+    await db.customStatement('PRAGMA foreign_keys = ON');
+    await db.customStatement(
+      "INSERT INTO plan_overrides (id, plan_item_id, date, created_at, updated_at) VALUES ('o1', 'p1', '2026-10-20', 't', 't')",
+    );
+    await db.customStatement("DELETE FROM plan_items WHERE id = 'p1'");
+    expect(await db.select(db.planOverridesTable).get(), isEmpty);
+    expect((await db.select(db.actionsTable).get()).length, 1);
   });
 }

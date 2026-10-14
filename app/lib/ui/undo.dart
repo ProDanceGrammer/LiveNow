@@ -1,3 +1,5 @@
+import '../domain/plan_service.dart' show PlanConfirmResult;
+import 'plan_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart'
@@ -428,4 +430,48 @@ Future<bool> _undoEntry(
     showInfoToast(overlay, 'Undone: ${entry.description}');
   }
   return true;
+}
+
+/// Turns plan occurrences into real actions (ONE transaction) and offers ONE Undo
+/// that deletes them again. Returns what was created.
+Future<PlanConfirmResult> runUndoableConfirmPlan(
+  BuildContext context,
+  WidgetRef ref, {
+  Set<String>? itemIds,
+  required DateTime from,
+  required DateTime to,
+}) async {
+  final plans = ref.read(planServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final history = ref.read(undoHistoryProvider.notifier);
+  final result = await plans.confirm(itemIds: itemIds, from: from, to: to);
+  if (result.createdIds.isNotEmpty) {
+    offerUndo(
+      overlay,
+      history,
+      'Created ${result.createdIds.length} planned actions',
+      () => plans.undoConfirm(result.createdIds),
+    );
+  }
+  return result;
+}
+
+/// Deletes a plan item (optionally with its still-future actions) with one Undo.
+Future<void> runUndoableDeletePlanItem(
+  BuildContext context,
+  WidgetRef ref,
+  String id, {
+  required bool removeFuture,
+}) async {
+  final plans = ref.read(planServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final history = ref.read(undoHistoryProvider.notifier);
+  final undo = await plans.deleteItem(id, removeFuture: removeFuture);
+  if (undo == null) return;
+  offerUndo(
+    overlay,
+    history,
+    'Deleted plan "${undo.item.name}"',
+    () => plans.undoDeleteItem(undo),
+  );
 }

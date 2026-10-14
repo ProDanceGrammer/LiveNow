@@ -11,6 +11,8 @@ import '../backup_providers.dart';
 import '../calendar_fullscreen.dart';
 import '../current_selection.dart';
 import '../layout.dart';
+import '../../domain/plan_service.dart' show PlanConfirmResult;
+import '../plan_providers.dart' show planServiceProvider;
 import '../providers.dart' show setCalendarDayCount;
 import '../notch_side.dart';
 import '../rail_collapsed.dart';
@@ -64,6 +66,16 @@ class _HomeShellState extends ConsumerState<HomeShell>
       if (autoBackupSupported) {
         Future<void>.microtask(
           () => ref.read(autoBackupSchedulerProvider).reschedule(),
+        );
+      }
+      // Plan items marked "forever" keep the next 8 weeks filled in. Desktop
+      // only, so a PC and a phone do not both generate the same occurrences
+      // before they have synced.
+      if (autoBackupSupported) {
+        Future<void>.microtask(
+          () => ref.read(planServiceProvider).refillForever().catchError(
+            (Object _) => const PlanConfirmResult([], 0),
+          ),
         );
       }
       WidgetsBinding.instance.addObserver(this);

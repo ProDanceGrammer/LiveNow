@@ -25,6 +25,8 @@ part 'database.g.dart';
     BudgetTransactionsTable,
     BudgetSettingsTable,
     SavedViewsTable,
+    PlanItemsTable,
+    PlanOverridesTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -34,7 +36,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -96,7 +98,12 @@ class AppDatabase extends _$AppDatabase {
         await m.alterTable(
           TableMigration(
             actionsTable,
-            newColumns: from < 9 ? [actionsTable.notesText] : const [],
+            // plan_item_id / plan_key (v14) are new to the rebuilt table too.
+            newColumns: [
+              if (from < 9) actionsTable.notesText,
+              actionsTable.planItemId,
+              actionsTable.planKey,
+            ],
           ),
         );
       }
@@ -138,6 +145,27 @@ class AppDatabase extends _$AppDatabase {
       if (from < 13) {
         // Saved sort / filter views (purely additive).
         await m.createTable(savedViewsTable);
+      }
+      if (from < 14) {
+        // Planning: plan items, their per-day overrides, and the link from a
+        // generated action back to its plan. (A database older than v8 got the
+        // two action columns with the v8 rebuild above.)
+        await m.createTable(planItemsTable);
+        await m.createTable(planOverridesTable);
+        final cols = await customSelect('PRAGMA table_info(actions)').get();
+        final names = {for (final r in cols) r.read<String>('name')};
+        if (!names.contains('plan_item_id')) {
+          await m.addColumn(actionsTable, actionsTable.planItemId);
+        }
+        if (!names.contains('plan_key')) {
+          await m.addColumn(actionsTable, actionsTable.planKey);
+        }
+        // (IF NOT EXISTS: the v8 rebuild above already recreates every index
+        // the table declares.)
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_actions_plan '
+          'ON actions (plan_item_id, plan_key)',
+        );
       }
     },
     // Runs after onCreate/onUpgrade on EVERY open: a TableMigration rebuild

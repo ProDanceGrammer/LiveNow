@@ -20,6 +20,8 @@ const _kinds = {
   'budget_transactions': 'Transaction',
   'budget_settings': 'Budget setting',
   'saved_views': 'Saved view',
+  'plan_items': 'Plan item',
+  'plan_overrides': 'Plan edit',
 };
 
 final _deviceIdProvider = FutureProvider<String>(
