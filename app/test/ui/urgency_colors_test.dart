@@ -29,16 +29,37 @@ void main() {
     expect(urgencyColors(61, dark: false), urgencyColors(62, dark: false));
   });
 
-  test('the band centres are the colours chosen by the user', () {
-    expect(urgencyBackgroundAt(-300, dark: false), const Color(0xFF14C5EB));
-    expect(urgencyBackgroundAt(-100, dark: false), const Color(0xFF1FE045));
-    expect(urgencyBackgroundAt(25, dark: false), const Color(0xFFBDE21D));
-    expect(urgencyBackgroundAt(125, dark: false), const Color(0xFFF8D407));
-    expect(urgencyBackgroundAt(350, dark: false), const Color(0xFFDE7E21));
-    expect(urgencyBackgroundAt(600, dark: false), const Color(0xFFD9263C));
+  test('the light scale is the chosen anchors, frosted 58 % toward white', () {
+    Color frost(int anchor) =>
+        Color.lerp(Color(anchor), const Color(0xFFFFFFFF), 0.58)!;
+    expect(urgencyBackgroundAt(-300, dark: false), frost(0xFF14C5EB));
+    expect(urgencyBackgroundAt(-100, dark: false), frost(0xFF1FE045));
+    expect(urgencyBackgroundAt(25, dark: false), frost(0xFFBDE21D));
+    expect(urgencyBackgroundAt(125, dark: false), frost(0xFFF8D407));
+    expect(urgencyBackgroundAt(350, dark: false), frost(0xFFDE7E21));
+    expect(urgencyBackgroundAt(600, dark: false), frost(0xFFD9263C));
     // Beyond the ends: the end colours.
-    expect(urgencyBackgroundAt(5000, dark: false), const Color(0xFFD9263C));
-    expect(urgencyBackgroundAt(-5000, dark: false), const Color(0xFF14C5EB));
+    expect(urgencyBackgroundAt(5000, dark: false), frost(0xFFD9263C));
+    expect(urgencyBackgroundAt(-5000, dark: false), frost(0xFF14C5EB));
+  });
+
+  test('every dark style keeps text readable and the scale smooth', () {
+    for (final style in UrgencyDarkStyle.values) {
+      urgencyDarkStyle = style;
+      var prev = urgencyBackgroundAt(kUrgencyMin, dark: true);
+      for (var u = kUrgencyMin; u <= kUrgencyMax; u += 5) {
+        final c = urgencyColors(u, dark: true);
+        expect(_contrast(c.fg, c.bg), greaterThanOrEqualTo(4.5),
+            reason: '$style u=$u');
+        final bg = urgencyBackgroundAt(u, dark: true);
+        expect(_distance(prev, bg), lessThan(35 * 35 * 1.0),
+            reason: '$style u=$u');
+        prev = bg;
+      }
+      final run = runningColors(dark: true);
+      expect(_contrast(run.fg, run.bg), greaterThanOrEqualTo(4.5));
+    }
+    urgencyDarkStyle = UrgencyDarkStyle.current;
   });
 
   test('it is a smooth gradient: neighbouring steps differ only a little', () {
@@ -79,7 +100,7 @@ void main() {
     }
   });
 
-  test('running blue is clearly different from every urgency colour', () {
+  test('running indigo is clearly different from every urgency colour', () {
     for (final dark in [false, true]) {
       final run = runningColors(dark: dark);
       expect(_contrast(run.fg, run.bg), greaterThanOrEqualTo(4.5));

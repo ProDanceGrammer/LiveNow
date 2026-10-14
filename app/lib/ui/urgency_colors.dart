@@ -25,25 +25,30 @@ const List<(double, int)> _anchors = [
   (600, 0xFFD9263C), // red, "> 500"
 ];
 
-/// PREVIEW (round 19): how the LIGHT theme's scale is drawn. The Settings page
-/// switches it so the variants can be compared on real screens; the chosen one
-/// becomes the only one afterwards. `current` = the saturated anchors as they
-/// were; `soft` = softened toward a lavender white; `frosted` = pastel; `deep` =
-/// the dark theme's tones used on the light page.
-enum UrgencyLightStyle {
+/// The light theme's scale is the saturated anchors blended this far toward
+/// white ("Frosted", chosen by the user): pastel cards that sit on the glass page
+/// like the dark theme's deep ones do.
+const double _lightFrost = 0.58;
+
+/// PREVIEW (round 19): how the DARK theme's scale is drawn; Settings switches it
+/// so the variants can be compared on real screens, the chosen one becomes the
+/// only one afterwards. `current` = the anchors pushed 45 % toward the page;
+/// `vivid` = pushed less (brighter); `deep` = pushed more; `slate` = pushed
+/// toward a blue slate (cooler, less brown on the yellows and oranges).
+enum UrgencyDarkStyle {
   current('Current'),
-  soft('Soft'),
-  frosted('Frosted'),
-  deep('Like dark');
+  vivid('Vivid'),
+  deep('Deep'),
+  slate('Slate');
 
   final String label;
-  const UrgencyLightStyle(this.label);
+  const UrgencyDarkStyle(this.label);
 }
 
-UrgencyLightStyle urgencyLightStyle = UrgencyLightStyle.current;
+UrgencyDarkStyle urgencyDarkStyle = UrgencyDarkStyle.current;
 
 int _ck(int key, bool dark) =>
-    ((urgencyLightStyle.index * 4096) + key + 2048) * 2 + (dark ? 1 : 0);
+    ((urgencyDarkStyle.index * 4096) + key + 2048) * 2 + (dark ? 1 : 0);
 
 const Color _navy = Color(0xFF1E293B);
 const Color _white = Color(0xFFFFFFFF);
@@ -69,13 +74,13 @@ Color _lightColorAt(double u) {
 /// The scale's background at [u] (before the legibility nudge).
 Color urgencyBackgroundAt(double u, {required bool dark}) {
   final light = _lightColorAt(u);
+  if (!dark) return Color.lerp(light, _white, _lightFrost)!;
   // Dark theme: the same hue, pushed deep.
-  if (dark) return Color.lerp(light, _darkPage, 0.45)!;
-  return switch (urgencyLightStyle) {
-    UrgencyLightStyle.current => light,
-    UrgencyLightStyle.soft => Color.lerp(light, const Color(0xFFF1EEFF), 0.32)!,
-    UrgencyLightStyle.frosted => Color.lerp(light, _white, 0.58)!,
-    UrgencyLightStyle.deep => Color.lerp(light, _darkPage, 0.45)!,
+  return switch (urgencyDarkStyle) {
+    UrgencyDarkStyle.current => Color.lerp(light, _darkPage, 0.45)!,
+    UrgencyDarkStyle.vivid => Color.lerp(light, _darkPage, 0.28)!,
+    UrgencyDarkStyle.deep => Color.lerp(light, _darkPage, 0.62)!,
+    UrgencyDarkStyle.slate => Color.lerp(light, const Color(0xFF26325A), 0.55)!,
   };
 }
 
@@ -153,10 +158,12 @@ final _cacheMuted = <int, ({Color bg, Color fg})>{};
   surface: surface,
 );
 
-/// A RUNNING action: the deepest blue of the picture's top-left corner, more
-/// saturated than the 0..50 band, so "running" is never mistaken for an urgency.
-({Color bg, Color fg}) runningColors({required bool dark}) =>
-    (bg: Color(dark ? 0xFF4B44F0 : 0xFF352DE5), fg: _white);
+/// A RUNNING action: indigo, the one hue the scale does not use, drawn like the
+/// scale itself (frosted on the light theme, pushed toward the page on the dark
+/// one) so it belongs to the palette but is never mistaken for an urgency.
+({Color bg, Color fg}) runningColors({required bool dark}) => dark
+    ? _readable(Color.lerp(const Color(0xFF6A63FF), _darkPage, 0.30)!)
+    : _readable(Color.lerp(const Color(0xFF4B44F0), _white, 0.50)!);
 
 /// A 1 px outline for a block filled with [bg]: its own colour, darker on the
 /// light theme and lighter on the dark one, so it separates the block from the

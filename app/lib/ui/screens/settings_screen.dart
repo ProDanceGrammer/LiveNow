@@ -97,7 +97,7 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-              title('Urgency colours (preview)'),
+              title('Dark theme colours (preview)'),
               const _UrgencyStyleBlock(),
               if (LocalNotificationsSink.supported) ...[
                 title('Notifications'),
@@ -377,7 +377,7 @@ class SettingsScreen extends ConsumerWidget {
 /// A rounded glass-tinted panel that is itself a Material, so the ListTiles
 /// inside paint their ink on it (a decorated Container around them would hide
 /// it).
-/// PREVIEW (round 19): picks how the light theme draws the urgency scale and
+/// PREVIEW (round 19): picks how the dark theme draws the urgency scale and
 /// shows the scale itself; every list takes the choice at once.
 class _UrgencyStyleBlock extends ConsumerWidget {
   const _UrgencyStyleBlock();
@@ -395,7 +395,7 @@ class _UrgencyStyleBlock extends ConsumerWidget {
             spacing: 8,
             runSpacing: 4,
             children: [
-              for (final s in UrgencyLightStyle.values)
+              for (final s in UrgencyDarkStyle.values)
                 ChoiceChip(
                   key: ValueKey('urgency-style-${s.name}'),
                   label: Text(s.label),
@@ -407,8 +407,8 @@ class _UrgencyStyleBlock extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             dark
-                ? 'The dark theme is not affected: switch to Light to compare.'
-                : 'Applies to Current, All, Templates, Calendar and the Budget.',
+                ? 'Applies to Current, All, Templates, Calendar and the Budget.'
+                : 'Only the dark theme changes: switch to Dark above to compare.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 10),
