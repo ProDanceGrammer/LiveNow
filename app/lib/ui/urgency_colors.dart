@@ -30,25 +30,10 @@ const List<(double, int)> _anchors = [
 /// like the dark theme's deep ones do.
 const double _lightFrost = 0.58;
 
-/// PREVIEW (round 19): how the DARK theme's scale is drawn; Settings switches it
-/// so the variants can be compared on real screens, the chosen one becomes the
-/// only one afterwards. `current` = the anchors pushed 45 % toward the page;
-/// `vivid` = pushed less (brighter); `deep` = pushed more; `slate` = pushed
-/// toward a blue slate (cooler, less brown on the yellows and oranges).
-enum UrgencyDarkStyle {
-  current('Current'),
-  vivid('Vivid'),
-  deep('Deep'),
-  slate('Slate');
-
-  final String label;
-  const UrgencyDarkStyle(this.label);
-}
-
-UrgencyDarkStyle urgencyDarkStyle = UrgencyDarkStyle.current;
-
-int _ck(int key, bool dark) =>
-    ((urgencyDarkStyle.index * 4096) + key + 2048) * 2 + (dark ? 1 : 0);
+/// The dark theme's scale: the anchors pushed 55 % toward a blue slate ("Slate",
+/// chosen by the user) - cooler, with less brown in the yellows and oranges.
+const Color _darkSlate = Color(0xFF26325A);
+const double _darkMix = 0.55;
 
 const Color _navy = Color(0xFF1E293B);
 const Color _white = Color(0xFFFFFFFF);
@@ -75,13 +60,8 @@ Color _lightColorAt(double u) {
 Color urgencyBackgroundAt(double u, {required bool dark}) {
   final light = _lightColorAt(u);
   if (!dark) return Color.lerp(light, _white, _lightFrost)!;
-  // Dark theme: the same hue, pushed deep.
-  return switch (urgencyDarkStyle) {
-    UrgencyDarkStyle.current => Color.lerp(light, _darkPage, 0.45)!,
-    UrgencyDarkStyle.vivid => Color.lerp(light, _darkPage, 0.28)!,
-    UrgencyDarkStyle.deep => Color.lerp(light, _darkPage, 0.62)!,
-    UrgencyDarkStyle.slate => Color.lerp(light, const Color(0xFF26325A), 0.55)!,
-  };
+  // Dark theme: the same hue, pushed toward the slate.
+  return Color.lerp(light, _darkSlate, _darkMix)!;
 }
 
 double _contrast(Color a, Color b) {
@@ -115,7 +95,7 @@ final _cacheMuted = <int, ({Color bg, Color fg})>{};
 
 /// Background and text colours for the quantised position [key] on the scale.
 ({Color bg, Color fg}) urgencyColorsForKey(int key, {required bool dark}) =>
-    _cache[_ck(key, dark)] ??= _readable(
+    _cache[key * 2 + (dark ? 1 : 0)] ??= _readable(
       urgencyBackgroundAt(key * kUrgencyStep, dark: dark),
     );
 
@@ -145,7 +125,7 @@ final _cacheMuted = <int, ({Color bg, Color fg})>{};
   }
 
   if (surface != null) return _readable(blended());
-  return _cacheMuted[_ck(key, dark)] ??= _readable(blended());
+  return _cacheMuted[key * 2 + (dark ? 1 : 0)] ??= _readable(blended());
 }
 
 ({Color bg, Color fg}) urgencyColorsMuted(

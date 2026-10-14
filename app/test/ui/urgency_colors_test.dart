@@ -43,23 +43,12 @@ void main() {
     expect(urgencyBackgroundAt(-5000, dark: false), frost(0xFF14C5EB));
   });
 
-  test('every dark style keeps text readable and the scale smooth', () {
-    for (final style in UrgencyDarkStyle.values) {
-      urgencyDarkStyle = style;
-      var prev = urgencyBackgroundAt(kUrgencyMin, dark: true);
-      for (var u = kUrgencyMin; u <= kUrgencyMax; u += 5) {
-        final c = urgencyColors(u, dark: true);
-        expect(_contrast(c.fg, c.bg), greaterThanOrEqualTo(4.5),
-            reason: '$style u=$u');
-        final bg = urgencyBackgroundAt(u, dark: true);
-        expect(_distance(prev, bg), lessThan(35 * 35 * 1.0),
-            reason: '$style u=$u');
-        prev = bg;
-      }
-      final run = runningColors(dark: true);
-      expect(_contrast(run.fg, run.bg), greaterThanOrEqualTo(4.5));
-    }
-    urgencyDarkStyle = UrgencyDarkStyle.current;
+  test('the dark scale is the anchors pushed 55 % toward the slate', () {
+    Color slate(int anchor) =>
+        Color.lerp(Color(anchor), const Color(0xFF26325A), 0.55)!;
+    expect(urgencyBackgroundAt(-300, dark: true), slate(0xFF14C5EB));
+    expect(urgencyBackgroundAt(125, dark: true), slate(0xFFF8D407));
+    expect(urgencyBackgroundAt(600, dark: true), slate(0xFFD9263C));
   });
 
   test('it is a smooth gradient: neighbouring steps differ only a little', () {
