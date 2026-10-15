@@ -36,7 +36,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   }
 
-  Future<String> mount(WidgetTester tester) async {
+  Future<String> mount(
+    WidgetTester tester, {
+    Future<void> Function(PlanService plans)? seed,
+  }) async {
     tester.view.physicalSize = const Size(1400, 1700);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -60,6 +63,7 @@ void main() {
         ),
       ),
     ))!;
+    if (seed != null) await tester.runAsync(() => seed(plans));
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -285,6 +289,63 @@ void main() {
           .text,
       '45',
     );
+    await unmount(tester);
+  });
+
+  testWidgets('a plan item that crosses midnight shows on the next day too', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      seed: (plans) async {
+        await plans.saveItem(
+          PlanItemInput(
+            name: 'Sleep',
+            kind: PlanKind.cycle,
+            startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+            cycle: const CycleRule(
+              cycleDays: 1,
+              occurrences: [
+                CycleOccurrence(day: 0, startMin: 22 * 60, durationMin: 9 * 60),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+
+    Finder sleep(String suffix) => find.byWidgetPredicate((w) {
+      final k = w.key;
+      return k is ValueKey<String> &&
+          k.value.startsWith('plan-ghost-') &&
+          !k.value.contains('handle') &&
+          k.value.contains(suffix);
+    });
+    // 7 days: a first slice on each (22:00-24:00) and, from the night before the
+    // range too, a continuation at the top of each (00:00-07:00).
+    final continuations = find.byWidgetPredicate((w) {
+      final k = w.key;
+      return k is ValueKey<String> &&
+          k.value.startsWith('plan-ghost-') &&
+          k.value.endsWith('~1');
+    });
+    expect(continuations, findsNWidgets(7));
+    expect(ghosts(), findsNWidgets(7 * 3)); // Run + Sleep first slices, 7 tails
+    expect(sleep('~1'), findsNWidgets(7));
+
+    // The tail on the FIRST visible day starts at the top and is 7 hours tall.
+    final tails = continuations.evaluate().toList()
+      ..sort((a, b) => tester
+          .getTopLeft(find.byWidget(a.widget))
+          .dx
+          .compareTo(tester.getTopLeft(find.byWidget(b.widget)).dx));
+    final first = find.byWidget(tails.first.widget);
+    final gridTop = tester.getTopLeft(find.byKey(const ValueKey('day-column-0'))).dy;
+    expect(tester.getTopLeft(first).dy, closeTo(gridTop, 0.5));
+    final hour = tester.getSize(find.byKey(const ValueKey('day-column-0'))).height / 24;
+    expect(tester.getSize(first).height, closeTo(hour * 7, 1));
     await unmount(tester);
   });
 }

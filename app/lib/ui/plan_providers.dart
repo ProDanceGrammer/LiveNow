@@ -40,7 +40,10 @@ final planOccurrencesProvider =
       ref.watch(planOverridesProvider);
       final start = ref.watch(calendarRangeStartProvider);
       final days = ref.watch(calendarDayCountProvider);
-      final from = planDateOf(start);
+      // Occurrences that STARTED up to a week before the first visible day may
+      // still run into it (a sleep 22:00-07:00): the ghost layer draws only the
+      // slices that fall on visible days.
+      final from = planDateOf(start).subtract(const Duration(days: 7));
       final to = planDateOf(calendarAddDays(start, days - 1));
       final plans = ref.read(planServiceProvider);
       // Only the items of visible collections (and of none) are drawn.
