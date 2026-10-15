@@ -205,7 +205,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
         command: 'ctrl+v',
         macOSCommand: 'cmd+v',
         handler: (state) {
-          if (_lastCopy == null) return KeyEventResult.ignored;
+          if (NotesCopyMemory.last == null) return KeyEventResult.ignored;
           _pasteInApp(state);
           return KeyEventResult.handled;
         },
@@ -324,6 +324,12 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (!mounted || text == null || text.trim().isEmpty) return;
+    // What was copied here as a code block is pasted as plain TEXT: converting
+    // it would turn indented code back into a code block.
+    if (NotesCopyMemory.isCodeBlock && NotesCopyMemory.last!.text == text) {
+      pasteTextWithoutFormattingCommand.handler(_editorState);
+      return;
+    }
     final nodes = markdownToNotesDocument(text).root.children.toList();
     if (nodes.isEmpty) return;
     await _insertBlocks(nodes);
@@ -440,11 +446,6 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     return true;
   }
 
-  /// What THIS editor last copied: the exact text it put on the clipboard and
-  /// the blocks as JSON. A later paste whose clipboard text is still that text
-  /// restores the blocks with every attribute (the clipboard itself can only
-  /// carry the Markdown). Shared by every notes editor of the app.
-  static ({String text, List<Map<String, Object>> nodes})? _lastCopy;
 
   /// Puts the selection on the clipboard as Markdown text (and remembers its
   /// blocks for an exact paste here). A selection inside ONE code block copies
@@ -455,8 +456,16 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     if (listEquals(selection.start.path, selection.end.path) &&
         _editorState.getNodeAtPath(selection.start.path)?.type ==
             codeBlockType) {
-      _lastCopy = null;
+      final node = _editorState.getNodeAtPath(selection.start.path)!;
       final raw = _editorState.getTextInSelection(selection).join('\n');
+      // The WHOLE text of the block: remember the block, so Ctrl+V sets the
+      // same code block again (a part of its text stays plain text).
+      final whole =
+          selection.start.offset == 0 &&
+          selection.end.offset >= (node.delta?.length ?? 0);
+      NotesCopyMemory.last = whole && raw.isNotEmpty
+          ? (text: raw, nodes: [node.toJson()])
+          : null;
       await AppFlowyClipboard.setData(text: raw.isEmpty ? null : raw);
       return;
     }
@@ -469,7 +478,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     if (markdown.isEmpty) {
       markdown = _editorState.getTextInSelection(selection).join('\n');
     }
-    _lastCopy = markdown.isEmpty
+    NotesCopyMemory.last = markdown.isEmpty
         ? null
         : (text: markdown, nodes: [for (final n in nodes) n.toJson()]);
     await AppFlowyClipboard.setData(text: markdown.isEmpty ? null : markdown);
@@ -479,7 +488,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
   /// was copied here, otherwise the clipboard text converted from Markdown.
   Future<void> pasteSmart() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final stored = _lastCopy;
+    final stored = NotesCopyMemory.last;
     if (!mounted) return;
     if (stored != null && data?.text == stored.text) {
       await _pasteNodes([for (final j in stored.nodes) Node.fromJson(j)]);
@@ -503,9 +512,17 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
   /// still holds their text, else the package's own paste.
   Future<void> _pasteInApp(EditorState state) async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final stored = _lastCopy;
+    final stored = NotesCopyMemory.last;
     if (!mounted) return;
     if (stored == null || data?.text != stored.text) {
+      pasteCommand.handler(state);
+      return;
+    }
+    // A code block pasted while the caret is inside a code block is its text.
+    final at = state.selection == null
+        ? null
+        : state.getNodeAtPath(state.selection!.start.path);
+    if (NotesCopyMemory.isCodeBlock && at?.type == codeBlockType) {
       pasteCommand.handler(state);
       return;
     }

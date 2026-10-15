@@ -251,6 +251,127 @@ void main() {
       expect(clip, isNot(contains('```')));
       await unmount(tester);
     });
+
+    Future<void> shiftCtrl(WidgetTester tester, LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    // The code is INDENTED: Markdown would read it as a code block.
+    const code = '    a = 1\n    b = 2';
+
+    Future<NotesEditorState> copyWholeBlock(WidgetTester tester) async {
+      final state = await pumpEditor(tester, [
+        codeBlockNode(code),
+        paragraphNode(text: ''),
+      ]);
+      final ed = state.editorState;
+      ed.selection = Selection(
+        start: Position(path: [0], offset: 0),
+        end: Position(path: [0], offset: code.length),
+      );
+      await tester.pump();
+      await ctrl(tester, LogicalKeyboardKey.keyC);
+      expect(clip, code);
+      ed.selection = Selection.collapsed(Position(path: [1], offset: 0));
+      await tester.pump();
+      return state;
+    }
+
+    testWidgets('Ctrl+V sets the same code block that was copied', (tester) async {
+      final state = await copyWholeBlock(tester);
+      await ctrl(tester, LogicalKeyboardKey.keyV);
+      final types = [for (final n in state.editorState.document.root.children) n.type];
+      expect(types, contains(codeBlockType));
+      expect(
+        state.editorState.document.root.children
+            .where((n) => n.type == codeBlockType)
+            .length,
+        2,
+      );
+      await unmount(tester);
+    });
+
+    testWidgets('Ctrl+Shift+V enters it as text, not as a code block', (
+      tester,
+    ) async {
+      final state = await copyWholeBlock(tester);
+      await shiftCtrl(tester, LogicalKeyboardKey.keyV);
+      final blocks = state.editorState.document.root.children;
+      expect(blocks.where((n) => n.type == codeBlockType).length, 1);
+      expect(
+        blocks.map((n) => n.delta?.toPlainText() ?? '').join('\n'),
+        contains('b = 2'),
+      );
+      await unmount(tester);
+    });
+
+    testWidgets('the Copy button also remembers the block for Ctrl+V', (
+      tester,
+    ) async {
+      final state = await pumpEditor(tester, [
+        codeBlockNode(code),
+        paragraphNode(text: ''),
+      ]);
+      await tester.tap(
+        find.byWidgetPredicate(
+          (w) =>
+              w.key is ValueKey<String> &&
+              (w.key as ValueKey<String>).value.startsWith('code-copy-'),
+        ),
+      );
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      await tester.pump();
+      state.editorState.selection = Selection.collapsed(
+        Position(path: [1], offset: 0),
+      );
+      await tester.pump();
+      await ctrl(tester, LogicalKeyboardKey.keyV);
+      expect(
+        state.editorState.document.root.children
+            .where((n) => n.type == codeBlockType)
+            .length,
+        2,
+      );
+      await tester.pump(const Duration(seconds: 6));
+      await unmount(tester);
+    });
+
+    testWidgets('a part of the code is still pasted as plain text', (
+      tester,
+    ) async {
+      final state = await pumpEditor(tester, [
+        codeBlockNode(code),
+        paragraphNode(text: ''),
+      ]);
+      state.editorState.selection = Selection(
+        start: Position(path: [0], offset: 0),
+        end: Position(path: [0], offset: 8),
+      );
+      await tester.pump();
+      await ctrl(tester, LogicalKeyboardKey.keyC);
+      state.editorState.selection = Selection.collapsed(
+        Position(path: [1], offset: 0),
+      );
+      await tester.pump();
+      await ctrl(tester, LogicalKeyboardKey.keyV);
+      expect(
+        state.editorState.document.root.children
+            .where((n) => n.type == codeBlockType)
+            .length,
+        1,
+      );
+      await unmount(tester);
+    });
   });
 
   group('checkboxes with a selection', () {

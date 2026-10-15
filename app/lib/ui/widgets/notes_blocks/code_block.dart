@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_toast.dart';
+import 'notes_copy_memory.dart';
 import 'toggle_list_block.dart' show convertToParagraph;
 
 /// Block type string of the code block.
@@ -150,9 +151,12 @@ class _CodeBlockComponentWidgetState extends State<CodeBlockComponentWidget>
             ),
             onPressed: () async {
               final overlay = rootOverlayOf(context);
-              await Clipboard.setData(
-                ClipboardData(text: widget.node.delta?.toPlainText() ?? ''),
-              );
+              final text = widget.node.delta?.toPlainText() ?? '';
+              await Clipboard.setData(ClipboardData(text: text));
+              // Ctrl+V pastes the same code block back; Ctrl+Shift+V the text.
+              NotesCopyMemory.last = text.isEmpty
+                  ? null
+                  : (text: text, nodes: [widget.node.toJson()]);
               showInfoToast(overlay, 'Copied');
             },
           ),

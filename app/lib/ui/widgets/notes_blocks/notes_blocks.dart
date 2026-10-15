@@ -3,6 +3,7 @@ import 'package:appflowy_editor/appflowy_editor.dart';
 import 'code_block.dart';
 import 'toggle_list_block.dart';
 
+export 'notes_copy_memory.dart';
 export 'code_block.dart'
     show
         CodeBlockComponentBuilder,

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/ui/widgets/notes_document.dart';
+import 'package:livenow/ui/widgets/notes_blocks/notes_blocks.dart';
 import 'package:livenow/ui/widgets/notes_editor.dart';
 
 String dump(Node n) {
@@ -402,5 +403,43 @@ void main() {
       expect(ed.editorState.selection, isNull);
       await unmount(tester);
     }, variant: windows);
+  });
+
+  group('double click in a toggle', () {
+    Future<void> doubleTapAt(WidgetTester tester, Offset at) async {
+      await tester.tapAt(at);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(at);
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    for (final collapsed in [false, true]) {
+      testWidgets(
+        'selects the word in the title of a ${collapsed ? 'closed' : 'open'} toggle',
+        (tester) async {
+          final ed = await pumpEditor(
+            tester,
+            json: jsonOf([
+              toggleListNode(
+                text: 'Hello world',
+                collapsed: collapsed,
+                children: [paragraphNode(text: 'inside the toggle')],
+              ),
+            ]),
+          );
+          final box = tester.getRect(find.byType(AppFlowyEditor));
+          // The first word, right of the chevron.
+          await doubleTapAt(tester, Offset(box.left + 52, box.top + 14));
+          final sel = ed.editorState.selection;
+          expect(sel, isNotNull, reason: 'the word is selected');
+          expect(sel!.isCollapsed, isFalse);
+          expect(
+            ed.editorState.getTextInSelection(sel.normalized).join(),
+            'Hello',
+          );
+          await unmount(tester);
+        },
+      );
+    }
   });
 }

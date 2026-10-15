@@ -95,14 +95,31 @@ class _ToggleListBlockComponentWidgetState
   bool get collapsed => widget.node.attributes[toggleListCollapsedKey] == true;
 
   /// Children stay in the document while collapsed; they are just not built.
+  /// Each one is represented by an Offstage placeholder carrying its node key:
+  /// the editor's hit test (double click, drag) lists a node's children as
+  /// candidates unless their key's context sits under an Offstage, and an
+  /// UNMOUNTED child looked visible to it, so a double click on the title of a
+  /// closed toggle landed on a child with nothing to select and cleared the
+  /// selection.
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: configuration.margin(node),
-      child: (node.children.isEmpty || collapsed)
-          ? buildComponent(context)
-          : buildComponentWithChildren(context),
-    );
+    final Widget content;
+    if (node.children.isEmpty) {
+      content = buildComponent(context);
+    } else if (collapsed) {
+      content = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          buildComponent(context),
+          for (final child in node.children)
+            Offstage(child: SizedBox.shrink(key: child.key)),
+        ],
+      );
+    } else {
+      content = buildComponentWithChildren(context);
+    }
+    return Padding(padding: configuration.margin(node), child: content);
   }
 
   @override
