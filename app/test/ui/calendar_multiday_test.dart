@@ -404,4 +404,29 @@ void main() {
     }
     await unmount(tester);
   });
+
+  testWidgets('a block grabbed next to the border does not turn the page', (
+    tester,
+  ) async {
+    await pump(tester);
+    final id = await create(tester, 'Walk', at(10), at(11));
+    await tester.tap(find.byTooltip('1 day'));
+    await settle(tester);
+    final before = container.read(calendarRangeStartProvider);
+    final block = find.byKey(ValueKey('event-$id'));
+    // The only column spans the whole width: grab 6 px from its right border.
+    final g = await tester.startGesture(
+      tester.getTopRight(block) + const Offset(-6, 10),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.moveBy(const Offset(0, 1));
+    await tester.pump();
+    await g.moveBy(const Offset(0, 20));
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(container.read(calendarRangeStartProvider), before);
+    await g.up();
+    await tester.pump();
+    await settle(tester);
+    await unmount(tester);
+  });
 }

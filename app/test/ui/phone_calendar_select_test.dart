@@ -12,8 +12,9 @@ import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/sync_providers.dart';
 
 /// Phone calendar (touch): a plain tap never selects (it opens the editor), a
-/// long-press selects, holding twice as long arms the move, and once something is
-/// selected a tap adds / removes events.
+/// 0.5 s long-press arms the move at once (nothing is selected), keeping the
+/// finger still for 3 s selects, and once something is selected a tap adds /
+/// removes events.
 void main() {
   setUpAll(initPostponeTimeZoneData);
 
@@ -108,10 +109,10 @@ void main() {
     tester,
   ) async {
     await pumpPhone(tester);
-    await longPress(tester, find.textContaining('Alpha block'), 650);
+    await longPress(tester, find.textContaining('Alpha block'), 3100);
     expect(selection(tester), {idA});
     expect(find.byKey(const ValueKey('calendar-bulk-bar')), findsOneWidget);
-    // Held 650 ms only: selected, but it was not pulled anywhere.
+    // Held still: selected, not pulled anywhere.
     expect(find.text('Edit action'), findsNothing);
     await unmount(tester);
   });
@@ -120,7 +121,7 @@ void main() {
     tester,
   ) async {
     await pumpPhone(tester);
-    await longPress(tester, find.textContaining('Alpha block'), 650);
+    await longPress(tester, find.textContaining('Alpha block'), 3100);
     expect(selection(tester), {idA});
 
     await tester.tap(find.textContaining('Beta block'));
@@ -135,28 +136,7 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('holding twice as long arms the move: the block follows the finger', (
-    tester,
-  ) async {
-    await pumpPhone(tester);
-    final before = await startOf(tester, idA);
-    final g = await tester.startGesture(
-      tester.getCenter(find.textContaining('Alpha block')),
-    );
-    await tester.pump(const Duration(milliseconds: 1100));
-    await g.moveBy(const Offset(0, 80));
-    await tester.pump(const Duration(milliseconds: 100));
-    await g.moveBy(const Offset(0, 40));
-    await tester.pump(const Duration(milliseconds: 100));
-    await g.up();
-    await settle(tester, 400);
-    final after = await startOf(tester, idA);
-    expect(after.isAfter(before), isTrue, reason: 'pulled down = later');
-    expect(selection(tester), contains(idA));
-    await unmount(tester);
-  });
-
-  testWidgets('moving the finger after only a long-press does not move the block', (
+  testWidgets('a long-press arms the move at once: the block follows the finger', (
     tester,
   ) async {
     await pumpPhone(tester);
@@ -167,10 +147,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 650));
     await g.moveBy(const Offset(0, 80));
     await tester.pump(const Duration(milliseconds: 100));
+    await g.moveBy(const Offset(0, 40));
+    await tester.pump(const Duration(milliseconds: 100));
     await g.up();
     await settle(tester, 400);
+    final after = await startOf(tester, idA);
+    expect(after.isAfter(before), isTrue, reason: 'pulled down = later');
+    // Moving it is not selecting it.
+    expect(selection(tester), isEmpty);
+    await unmount(tester);
+  });
+
+  testWidgets('a 0.5 s hold without moving selects nothing', (tester) async {
+    await pumpPhone(tester);
+    final before = await startOf(tester, idA);
+    await longPress(tester, find.textContaining('Alpha block'), 650);
+    expect(selection(tester), isEmpty);
     expect(await startOf(tester, idA), before);
-    expect(selection(tester), {idA});
+    await unmount(tester);
+  });
+
+  testWidgets('moving after the long-press cancels the 3 s selection', (
+    tester,
+  ) async {
+    await pumpPhone(tester);
+    final g = await tester.startGesture(
+      tester.getCenter(find.textContaining('Alpha block')),
+    );
+    await tester.pump(const Duration(milliseconds: 650));
+    await g.moveBy(const Offset(0, 40));
+    await tester.pump(const Duration(milliseconds: 3200));
+    await g.up();
+    await settle(tester, 400);
+    expect(selection(tester), isEmpty);
     await unmount(tester);
   });
 }

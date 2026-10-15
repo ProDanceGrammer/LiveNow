@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart'
     show
         DragStartBehavior,
         GestureBinding,
+        LongPressGestureRecognizer,
         PointerCancelEvent,
         PointerDeviceKind,
         PointerDownEvent,
@@ -60,7 +61,12 @@ const double _kGutter = 56;
 
 /// Dragging a block within this many px of the grid's left/right edge, for
 /// [_kEdgeHold], turns the visible range by a day.
-const double _kEdgeZone = 40;
+const double _kEdgeZone = 16;
+
+/// The pointer must also have travelled this far (px) from where the drag began
+/// before the edge can turn the page: grabbing a block that already sits at the
+/// border must not flip days.
+const double _kEdgeTravel = 30;
 const Duration _kEdgeHold = Duration(milliseconds: 600);
 const double _kHandle = 6;
 
@@ -216,9 +222,17 @@ bool get _touchPress =>
     _pressKind == PointerDeviceKind.touch ||
     _pressKind == PointerDeviceKind.stylus;
 
-/// How long a touch must stay down after the selecting long-press (500 ms)
-/// before the event can be pulled to a new time: twice as long in all.
-const Duration _kArmMoveAfter = Duration(milliseconds: 500);
+/// Touch: the plain long-press (500 ms) arms the move at once (a buzz, then the
+/// block follows the finger); holding on WITHOUT moving for this much longer
+/// (3 s in all) selects the event instead.
+const Duration _kSelectAfterArm = Duration(milliseconds: 2500);
+
+/// How long a touch holds an all-day chip to select it.
+const Duration _kChipSelectHold = Duration(seconds: 3);
+
+/// A finger that travelled further than this (px) after the long-press is
+/// dragging, not holding: no selection comes out of it.
+const double _kHoldSlop = 10;
 
 /// A dragged block this close (px) to the grid's top / bottom scrolls the grid
 /// ([_TimeGridState._scrollTurn]), [_kScrollStep] px every 30 ms.
@@ -1613,7 +1627,10 @@ class _AllDayChip extends ConsumerWidget {
                   ? BorderSide(color: scheme.onSurface, width: 2)
                   : BorderSide(color: urgencyOutline(bg, dark: dark)),
             ),
-            child: InkWell(
+            child: _HoldToSelect(
+              enabled: usePhoneLayout(context),
+              onSelect: () => _phoneSelect(ref, item.id),
+              child: InkWell(
               borderRadius: BorderRadius.circular(10),
               // Selection happens on press (see [_onPress]); double-click edits.
               // On a phone a tap opens the editor.
@@ -1623,10 +1640,6 @@ class _AllDayChip extends ConsumerWidget {
               onDoubleTap: usePhoneLayout(context)
                   ? null
                   : () => openActionEditor(context, ref, item.id),
-              // A long-press selects the chip, like a timed block.
-              onLongPress: usePhoneLayout(context)
-                  ? () => _phoneSelect(ref, item.id)
-                  : null,
               child: Container(
                 height: 18,
                 width: double.infinity,
@@ -1669,6 +1682,7 @@ class _AllDayChip extends ConsumerWidget {
                   ],
                 ),
               ),
+            ),
             ),
           ),
         ),
@@ -2487,7 +2501,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   void _edgeTurn(Offset pos) {
     final box = context.findRenderObject();
     var dir = 0;
-    if (box is RenderBox && box.attached && box.hasSize) {
+    final d = _drag;
+    final travelled = d != null && (pos - d.origin).distance >= _kEdgeTravel;
+    if (travelled && box is RenderBox && box.attached && box.hasSize) {
       final x = box.globalToLocal(pos).dx;
       if (x < _kGutter + _kEdgeZone) {
         dir = -1;
@@ -3800,10 +3816,12 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
   /// changes only (no per-band widgets).
   bool _inBand = false;
 
-  /// Touch: the long-press selected the event; holding on for [_kArmMoveAfter]
-  /// more arms the move (a buzz tells the user it can be pulled).
+  /// Touch: the long-press arms the move at once (a buzz tells the user it can
+  /// be pulled); holding on without moving for [_kSelectAfterArm] more selects
+  /// the event.
   Timer? _armTimer;
   bool _armed = false;
+  bool _heldStill = true;
   Offset _pressPos = Offset.zero;
 
   void _disarm() {
@@ -4039,24 +4057,28 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         onDoubleTap: usePhoneLayout(context)
             ? null
             : () => openActionEditor(context, ref, item.id),
-        // Phone: a long-press SELECTS; keeping the finger down for as long
-        // again arms the move, then the block follows the finger.
+        // Phone: a long-press arms the move at once (the block follows the
+        // finger); keeping the finger still for 3 s in all SELECTS instead.
         onLongPressStart: usePhoneLayout(context)
             ? (d) {
                 _disarm();
                 _pressPos = d.globalPosition;
-                _phoneSelect(ref, item.id);
-                _armTimer = Timer(_kArmMoveAfter, () {
-                  if (!mounted) return;
-                  _armed = true;
-                  HapticFeedback.mediumImpact();
-                  widget.onDragStart(_DragKind.move, _pressPos);
+                _heldStill = true;
+                _armed = true;
+                HapticFeedback.mediumImpact();
+                widget.onDragStart(_DragKind.move, _pressPos);
+                _armTimer = Timer(_kSelectAfterArm, () {
+                  if (!mounted || !_heldStill) return;
+                  _phoneSelect(ref, item.id);
                 });
               }
             : null,
         onLongPressMoveUpdate: usePhoneLayout(context)
             ? (d) {
                 _pressPos = d.globalPosition;
+                if (d.offsetFromOrigin.distance > _kHoldSlop) {
+                  _heldStill = false;
+                }
                 if (_armed) widget.onDragUpdate(d.globalPosition);
               }
             : null,
@@ -4081,6 +4103,36 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
           child: box,
         ),
       ),
+    );
+  }
+}
+
+/// Touch: holding a chip for [_kChipSelectHold] selects it (a plain tap opens
+/// the editor). The recognizer is raw because `InkWell.onLongPress` is fixed at
+/// 500 ms.
+class _HoldToSelect extends StatelessWidget {
+  const _HoldToSelect({
+    required this.enabled,
+    required this.onSelect,
+    required this.child,
+  });
+
+  final bool enabled;
+  final VoidCallback onSelect;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return RawGestureDetector(
+      gestures: {
+        LongPressGestureRecognizer:
+            GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+              () => LongPressGestureRecognizer(duration: _kChipSelectHold),
+              (r) => r.onLongPress = onSelect,
+            ),
+      },
+      child: child,
     );
   }
 }
