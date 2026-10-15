@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show DragStartBehavior;
@@ -61,11 +62,17 @@ class PlanGhostLayer extends StatefulWidget {
 }
 
 class _GhostDrag {
-  _GhostDrag(this.key, this.resize, this.startY);
+  _GhostDrag(this.key, this.resize, this.startY, this.originScroll)
+    : lastY = startY;
   final String key;
   final bool resize;
+
+  /// Where the pointer went down (global y) and where the grid was scrolled to.
   final double startY;
-  double dy = 0;
+  final double originScroll;
+
+  /// The pointer's latest global y (the auto-scroll watches it).
+  double lastY;
 }
 
 enum _Kind { main, prev, next }
@@ -115,8 +122,75 @@ int _floorDiv(int a, int b) => (a / b).floor();
 /// of them together.
 String _idOf(PlanOccurrence o) => '${o.planItemId}|${o.key}';
 
+/// A dragged block this close (px) to the top / bottom of the grid's viewport
+/// scrolls it, [_kScrollStep] px every 30 ms (like a real event's drag).
+const _kScrollEdge = 36.0;
+const _kScrollStep = 9.0;
+
 class _PlanGhostLayerState extends State<PlanGhostLayer> {
   _GhostDrag? _drag;
+  ScrollPosition? _position;
+  Timer? _scrollTimer;
+
+  @override
+  void dispose() {
+    _stopDrag();
+    super.dispose();
+  }
+
+  /// The drag's vertical distance: the pointer's travel PLUS how far the grid has
+  /// scrolled since it began (a wheel turning, or the auto-scroll, moves the
+  /// content under a pointer that did not move - the block must follow it).
+  double _dyOf(_GhostDrag d) =>
+      d.lastY - d.startY + ((_position?.pixels ?? d.originScroll) - d.originScroll);
+
+  void _beginDrag(String id, bool resize, double globalY) {
+    _position = Scrollable.maybeOf(context)?.position;
+    _position?.addListener(_onScroll);
+    _scrollTimer?.cancel();
+    _scrollTimer = Timer.periodic(const Duration(milliseconds: 30), (_) {
+      final d = _drag;
+      final pos = _position;
+      if (d == null || pos == null || !pos.hasPixels) return;
+      final box = Scrollable.maybeOf(context)?.context.findRenderObject();
+      if (box is! RenderBox || !box.attached) return;
+      final top = box.localToGlobal(Offset.zero).dy;
+      final bottom = top + box.size.height;
+      var step = 0.0;
+      if (d.lastY < top + _kScrollEdge) {
+        step = -_kScrollStep;
+      } else if (d.lastY > bottom - _kScrollEdge) {
+        step = _kScrollStep;
+      }
+      if (step == 0) return;
+      final target = (pos.pixels + step).clamp(
+        pos.minScrollExtent,
+        pos.maxScrollExtent,
+      );
+      if (target != pos.pixels) pos.jumpTo(target);
+    });
+    setState(
+      () => _drag = _GhostDrag(id, resize, globalY, _position?.pixels ?? 0),
+    );
+  }
+
+  void _moveDrag(double globalY) => setState(() => _drag?.lastY = globalY);
+
+  void _onScroll() {
+    if (mounted && _drag != null) setState(() {});
+  }
+
+  void _stopDrag() {
+    _scrollTimer?.cancel();
+    _scrollTimer = null;
+    _position?.removeListener(_onScroll);
+    _position = null;
+  }
+
+  void _cancelDrag() {
+    _stopDrag();
+    if (mounted) setState(() => _drag = null);
+  }
 
   double get _pxPerMin => widget.hourHeight / 60;
 
@@ -217,9 +291,11 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
 
   void _finish(_Slot s) {
     final d = _drag;
+    final dy = d == null ? 0.0 : _dyOf(d);
+    _stopDrag();
     setState(() => _drag = null);
     if (d == null) return;
-    final delta = _deltaMin(d.dy);
+    final delta = _deltaMin(dy);
     if (delta == 0) return;
     if (d.resize) {
       final len = math.max(_kMinLen, s.occ.durationMin + delta);
@@ -263,7 +339,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     var mainStart = s.occ.startMin;
     var mainEnd = s.occ.startMin + s.occ.durationMin;
     if (drag != null) {
-      final delta = _deltaMin(drag.dy);
+      final delta = _deltaMin(_dyOf(drag));
       if (drag.resize) {
         mainEnd = math.max(mainStart + _kMinLen, mainEnd + delta);
       } else {
@@ -337,11 +413,9 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
 
     // The drag starts at the pointer DOWN (so the first pixels count) and is
     // measured against that point, not summed from deltas.
-    void start(DragStartDetails d, bool resize) => setState(
-      () => _drag = _GhostDrag(_idOf(s.occ), resize, d.globalPosition.dy),
-    );
-    void update(DragUpdateDetails u) =>
-        setState(() => _drag?.dy = u.globalPosition.dy - _drag!.startY);
+    void start(DragStartDetails d, bool resize) =>
+        _beginDrag(_idOf(s.occ), resize, d.globalPosition.dy);
+    void update(DragUpdateDetails u) => _moveDrag(u.globalPosition.dy);
 
     if (!isMain) {
       // A Previous / Next action is changed in the plan item, not dragged.
@@ -355,11 +429,11 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
       body = GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => widget.onEdit(s.occ),
-        onLongPressStart: (_) => setState(() => _drag = _GhostDrag(_idOf(s.occ), false, 0)),
-        onLongPressMoveUpdate: (u) =>
-            setState(() => _drag?.dy = u.offsetFromOrigin.dy),
+        onLongPressStart: (d) =>
+            _beginDrag(_idOf(s.occ), false, d.globalPosition.dy),
+        onLongPressMoveUpdate: (u) => _moveDrag(u.globalPosition.dy),
         onLongPressEnd: (_) => _finish(s),
-        onLongPressCancel: () => setState(() => _drag = null),
+        onLongPressCancel: _cancelDrag,
         child: body,
       );
     } else {
@@ -373,7 +447,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
               onVerticalDragStart: (d) => start(d, false),
               onVerticalDragUpdate: update,
               onVerticalDragEnd: (_) => _finish(s),
-              onVerticalDragCancel: () => setState(() => _drag = null),
+              onVerticalDragCancel: _cancelDrag,
               child: body,
             ),
           ),
@@ -393,7 +467,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
                   onVerticalDragStart: (d) => start(d, true),
                   onVerticalDragUpdate: update,
                   onVerticalDragEnd: (_) => _finish(s),
-                  onVerticalDragCancel: () => setState(() => _drag = null),
+                  onVerticalDragCancel: _cancelDrag,
                 ),
               ),
             ),

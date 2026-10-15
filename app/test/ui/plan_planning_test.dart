@@ -40,6 +40,7 @@ void main() {
   Future<String> mount(
     WidgetTester tester, {
     Future<void> Function(PlanService plans)? seed,
+    int hours = 24,
   }) async {
     tester.view.physicalSize = const Size(1400, 1700);
     tester.view.devicePixelRatio = 1;
@@ -69,7 +70,7 @@ void main() {
       ProviderScope(
         overrides: [
           databaseProvider.overrideWithValue(db),
-          calendarVisibleHoursProvider.overrideWith((ref) => 24),
+          calendarVisibleHoursProvider.overrideWith((ref) => hours),
         ],
         child: const MaterialApp(home: Scaffold(body: CalendarView())),
       ),
@@ -224,8 +225,8 @@ void main() {
       () => db.select(db.actionTemplatesTable).get(),
     ))!;
     expect(templates.any((t) => t.id == swim.templateId), isTrue);
-    // A weekly item is anchored to a Monday.
-    expect(planDateFromKey(swim.startDate).weekday, DateTime.monday);
+    // The pattern starts on the date chosen (today), not on a Monday.
+    expect(planDateFromKey(swim.startDate), planDateOf(DateTime.now()));
     await unmount(tester);
   });
 
@@ -531,6 +532,93 @@ void main() {
     expect(find.text('Rest day'), findsNWidgets(7));
     // The timed ghosts (Run) are untouched and the all-day ones are not blocks.
     expect(ghosts(), findsNWidgets(7 + 7)); // Run blocks + the chips' keys
+    await unmount(tester);
+  });
+
+  testWidgets('the ghost follows the grid while it scrolls under the pointer', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      hours: 6,
+      seed: (plans) async {
+        await plans.saveItem(
+          PlanItemInput(
+            name: 'Early',
+            kind: PlanKind.cycle,
+            startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+            cycle: const CycleRule(
+              cycleDays: 1,
+              occurrences: [
+                CycleOccurrence(day: 0, startMin: 120, durationMin: 30),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    final scrollable = Scrollable.of(
+      tester.element(find.byKey(const ValueKey('day-column-0'))),
+    );
+    scrollable.position.jumpTo(0);
+    await tester.pump();
+
+    final ghost = find.text('Early\n02:00-02:30').first;
+    final hour = tester.getSize(find.byKey(const ValueKey('day-column-0'))).height / 24;
+    final g = await tester.startGesture(
+      tester.getCenter(ghost),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.moveBy(const Offset(0, 20)); // past the drag slop: the drag runs
+    await tester.pump();
+    // The wheel (or the auto-scroll) moves the grid by three hours while the
+    // pointer stays: the dragged block goes with the content.
+    scrollable.position.jumpTo(3 * hour);
+    await tester.pump();
+    final minutes = 120 + ((20 / (hour / 60) + 180) / 10).round() * 10;
+    final hh = (minutes ~/ 60).toString().padLeft(2, '0');
+    final mm = (minutes % 60).toString().padLeft(2, '0');
+    final end = minutes + 30;
+    final eh = (end ~/ 60).toString().padLeft(2, '0');
+    final em = (end % 60).toString().padLeft(2, '0');
+    expect(find.text('Early\n$hh:$mm-$eh:$em'), findsOneWidget);
+    await g.cancel();
+    await tester.pump(const Duration(milliseconds: 500));
+    await unmount(tester);
+  });
+
+  testWidgets('dragging a ghost: "this weekday only" splits the pattern by weekday', (
+    tester,
+  ) async {
+    final id = await mount(tester);
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    final first = ghosts().first;
+    final hour = tester.getSize(first).height;
+    final g = await tester.startGesture(
+      tester.getCenter(first),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.moveBy(const Offset(0, 1));
+    await tester.pump();
+    await g.moveBy(Offset(0, -hour));
+    await tester.pump();
+    await g.up();
+    await tester.pump();
+    expect(find.byKey(const ValueKey('plan-scope-weekday')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('plan-scope-weekday')));
+    await settle(tester);
+
+    final item = (await tester.runAsync(
+      () => PlanService(db, ActionService(db)).items(),
+    ))!.firstWhere((r) => r.id == id);
+    final data = PlanService(db, ActionService(db)).decode(item);
+    // The daily item became a weekly one; exactly one weekday has 21:00.
+    expect(data.cycle!.cycleDays, 7);
+    expect(data.cycle!.occurrences.where((o) => o.startMin == 21 * 60), hasLength(1));
+    expect(data.cycle!.occurrences.where((o) => o.startMin == 22 * 60), hasLength(6));
     await unmount(tester);
   });
 }

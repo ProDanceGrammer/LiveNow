@@ -11,6 +11,7 @@ import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/budget_service.dart';
 import 'package:livenow/domain/plan_rules.dart';
+import 'package:livenow/domain/plan_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/plan_providers.dart';
@@ -381,6 +382,54 @@ void main() {
       Map<String, Object?>.from(jsonDecode(row.rule) as Map),
     ).occurrences.single;
     expect(occ.allDay, isTrue);
+    await unmount(tester);
+  });
+
+  testWidgets('a weekly item keeps its start date and weekdays when saved again', (
+    tester,
+  ) async {
+    await mount(tester);
+    // Starts on a WEDNESDAY (21 Oct 2026): Wed 09:00 and Fri 10:00.
+    final id = (await tester.runAsync(
+      () => PlanService(db, ActionService(db)).saveItem(
+        PlanItemInput(
+          name: 'Gym',
+          kind: PlanKind.cycle,
+          startDate: planDate(2026, 10, 21),
+          cycle: const CycleRule(
+            cycleDays: 7,
+            occurrences: [
+              CycleOccurrence(day: 0, startMin: 540, durationMin: 30),
+              CycleOccurrence(day: 2, startMin: 600, durationMin: 30),
+            ],
+          ),
+        ),
+      ),
+    ))!;
+    await pumpCalendar(tester);
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('plan-bar-items')));
+    await settle(tester);
+    await tester.tap(find.byKey(ValueKey('plan-item-$id')));
+    await settle(tester);
+
+    // The rows show weekdays, not "days after the start".
+    final weekdayOfRow0 = tester.widget<DropdownButton<int>>(
+      find.byKey(const ValueKey('plan-row-day-0')),
+    );
+    expect(weekdayOfRow0.value, 2); // Wed
+    await tester.tap(find.byKey(const ValueKey('plan-save')));
+    await settle(tester);
+
+    final row = (await tester.runAsync(
+      () => db.select(db.planItemsTable).getSingle(),
+    ))!;
+    expect(row.startDate, '2026-10-21'); // not moved to the Monday
+    final occ = CycleRule.fromJson(
+      Map<String, Object?>.from(jsonDecode(row.rule) as Map),
+    ).occurrences;
+    expect([for (final o in occ) o.day], [0, 2]); // still Wed and Fri
     await unmount(tester);
   });
 }

@@ -23,8 +23,6 @@ import 'tx_templates.dart';
 
 const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-DateTime _mondayOf(DateTime d) => d.subtract(Duration(days: d.weekday - 1));
-
 String _dateLabel(DateTime d) => planDateKey(d);
 
 TimeOfDay _tod(int minutes) =>
@@ -32,15 +30,21 @@ TimeOfDay _tod(int minutes) =>
 
 // ---- scope question ---------------------------------------------------------
 
-enum PlanScope { day, all }
+enum PlanScope { day, weekday, all }
 
-/// "This day only" or "Whole pattern" for a changed occurrence.
-Future<PlanScope?> askPlanScope(BuildContext context) =>
+/// "This day only", "This weekday only" ([weekday]: the item is a cycle that can
+/// be split by weekday) or "Whole pattern" for a changed occurrence.
+Future<PlanScope?> askPlanScope(BuildContext context, {bool weekday = false}) =>
     showStackedDialog<PlanScope>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Change the plan'),
-        content: const Text('Apply the new time to this day only, or to every repetition?'),
+        content: Text(
+          weekday
+              ? 'Apply the new time to this day only, to this weekday every '
+                    'week, or to every repetition?'
+              : 'Apply the new time to this day only, or to every repetition?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -51,6 +55,12 @@ Future<PlanScope?> askPlanScope(BuildContext context) =>
             onPressed: () => Navigator.of(ctx).pop(PlanScope.day),
             child: const Text('This day only'),
           ),
+          if (weekday)
+            OutlinedButton(
+              key: const ValueKey('plan-scope-weekday'),
+              onPressed: () => Navigator.of(ctx).pop(PlanScope.weekday),
+              child: const Text('This weekday only'),
+            ),
           FilledButton(
             key: const ValueKey('plan-scope-all'),
             onPressed: () => Navigator.of(ctx).pop(PlanScope.all),
@@ -69,14 +79,31 @@ Future<void> applyGhostChange(
   int startMin,
   int durationMin,
 ) async {
-  final scope = await askPlanScope(context);
-  if (scope == null) return;
   final plans = ref.read(planServiceProvider);
+  // Splitting by weekday makes sense for a cycle that is not already whole weeks.
+  final item = (await plans.items()).where((r) => r.id == occ.planItemId).firstOrNull;
+  var canSplit = false;
+  if (item != null) {
+    final data = plans.decode(item);
+    final n = data.cycle?.cycleDays ?? 7;
+    canSplit = data.kind == PlanKind.cycle && n % 7 != 0;
+  }
+  if (!context.mounted) return;
+  final scope = await askPlanScope(context, weekday: canSplit);
+  if (scope == null) return;
   if (scope == PlanScope.day) {
     await plans.setOverride(
       itemId: occ.planItemId,
       date: occ.date,
       index: occ.index,
+      startMin: startMin,
+      durationMin: durationMin,
+    );
+  } else if (scope == PlanScope.weekday) {
+    await plans.shiftWeekday(
+      occ.planItemId,
+      occ.date,
+      occ.index,
       startMin: startMin,
       durationMin: durationMin,
     );
@@ -390,9 +417,13 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         _collectionIds = [...d.collectionIds];
         if (d.cycle != null) {
           _cycleDays.text = '${d.cycle!.cycleDays}';
+          // A weekly pattern shows its rows as weekdays (0 = Monday); stored, a
+          // row's day counts from the pattern's start date.
+          final weekly = d.cycle!.cycleDays == 7;
+          final sw = d.startDate.weekday - 1;
           for (final o in d.cycle!.occurrences) {
             final r = _OccRow(
-              day: o.day,
+              day: weekly ? (sw + o.day) % 7 : o.day,
               startMin: o.startMin,
               durationMin: o.durationMin,
               name: o.name,
@@ -513,14 +544,16 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     int? manual;
     if (_kind == PlanKind.cycle) {
       final n = _days;
-      // A weekly pattern is anchored to a Monday so its rows are plain weekdays.
-      if (n == 7) start = _mondayOf(start);
+      // The pattern starts on the chosen date; a weekly row's weekday is stored
+      // as the number of days after it (so the date is never moved).
+      final sw = start.weekday - 1;
+      int stored(int day) => n == 7 ? (((day - sw) % 7) + 7) % 7 : day % n;
       cycle = CycleRule(
         cycleDays: n,
         occurrences: [
           for (final r in _rows)
             CycleOccurrence(
-              day: r.day % n,
+              day: stored(r.day),
               startMin: r.startMin,
               durationMin: int.tryParse(r.duration.text),
               name: r.name.text.trim().isEmpty ? null : r.name.text.trim(),

@@ -93,6 +93,10 @@ class PlanDeleteUndo {
 /// are in `plan_rules.dart`; this class stores them and turns occurrences into
 /// real actions (always through a template, so a plan and the Templates list
 /// stay one catalogue).
+int _gcd(int a, int b) => b == 0 ? a : _gcd(b, a % b);
+
+int _lcm(int a, int b) => a ~/ _gcd(a, b) * b;
+
 class PlanService {
   PlanService(this.db, this.actions)
     : _budget = BudgetService(db),
@@ -358,6 +362,143 @@ class PlanService {
                 t.planItemId.equals(itemId) & t.occurrenceIndex.equals(index),
           ))
         .go();
+  }
+
+  /// "This weekday only": the occurrence [index] on [date] takes a new start time /
+  /// duration in the RULE, but only on the weekdays of [date] - every other
+  /// weekday of the pattern keeps its time.
+  ///
+  /// A cycle of N days is stretched to lcm(N, 7) days (a daily item becomes a
+  /// weekly one with one row per weekday; a 3-day cycle becomes 21 days ...), the
+  /// stretched row of that weekday is changed, and everything that is addressed
+  /// by a row's position (this item's overrides and the `plan_key` of the actions
+  /// it already made) is renumbered, so nothing is created twice later. A cycle
+  /// that already is whole weeks, and a monthly rule, have nothing to split:
+  /// that is [shiftPattern].
+  Future<void> shiftWeekday(
+    String itemId,
+    DateTime date,
+    int index, {
+    required int startMin,
+    required int durationMin,
+  }) async {
+    final row = await (db.select(
+      db.planItemsTable,
+    )..where((t) => t.id.equals(itemId))).getSingleOrNull();
+    if (row == null) return;
+    final data = decode(row);
+    final rule = data.cycle;
+    if (data.kind != PlanKind.cycle || rule == null) {
+      return shiftPattern(itemId, index, startMin: startMin, durationMin: durationMin);
+    }
+    final n = rule.cycleDays < 1 ? 1 : rule.cycleDays;
+    final l = _lcm(n, 7);
+    final rep = l ~/ n;
+    final c = rule.occurrences.length;
+    if (rep == 1 || index < 0 || index >= c) {
+      return shiftPattern(itemId, index, startMin: startMin, durationMin: durationMin);
+    }
+
+    int mod(int a, int m) => ((a % m) + m) % m;
+    final oldStart = data.startDate;
+    // The start date stays: a row's day always counts from it.
+
+    final rows = <CycleOccurrence>[];
+    for (var r = 0; r < rep; r++) {
+      for (final o in rule.occurrences) {
+        final day = (o.day % n) + r * n;
+        rows.add(
+          CycleOccurrence(
+            day: day,
+            startMin: o.startMin,
+            durationMin: o.durationMin,
+            name: o.name,
+            templateId: o.templateId,
+            extras: o.extras,
+            allDay: o.allDay,
+          ),
+        );
+      }
+    }
+
+    int newIndex(DateTime d, int oldIndex) {
+      final p = mod(d.difference(oldStart).inDays, l);
+      return oldIndex + (p ~/ n) * c;
+    }
+
+    final target = newIndex(date, index);
+    final o = rows[target];
+    rows[target] = CycleOccurrence(
+      day: o.day,
+      startMin: startMin,
+      durationMin: durationMin,
+      name: o.name,
+      templateId: o.templateId,
+      extras: o.extras,
+      allDay: o.allDay,
+    );
+
+    final now = dateTimeToDb(DateTime.now())!;
+    await db.transaction(() async {
+      await (db.update(db.planItemsTable)..where((t) => t.id.equals(itemId)))
+          .write(
+            PlanItemsTableCompanion(
+              rule: Value(
+                jsonEncode(CycleRule(cycleDays: l, occurrences: rows).toJson()),
+              ),
+              updatedAt: Value(now),
+            ),
+          );
+      // Overrides are keyed by row position: renumber them.
+      for (final ov in await (db.select(
+        db.planOverridesTable,
+      )..where((t) => t.planItemId.equals(itemId))).get()) {
+        final d = planDateFromKey(ov.date);
+        final ni = newIndex(d, ov.occurrenceIndex);
+        if (ni == ov.occurrenceIndex) continue;
+        await (db.delete(
+          db.planOverridesTable,
+        )..where((t) => t.id.equals(ov.id))).go();
+        await db
+            .into(db.planOverridesTable)
+            .insert(
+              PlanOverridesTableCompanion.insert(
+                id: overrideId(itemId, d, ni),
+                planItemId: itemId,
+                date: ov.date,
+                occurrenceIndex: Value(ni),
+                startMin: Value(ov.startMin),
+                durationMin: Value(ov.durationMin),
+                name: Value(ov.name),
+                skipped: Value(ov.skipped),
+                createdAt: ov.createdAt,
+                updatedAt: now,
+              ),
+            );
+      }
+      // The row of this weekday was just changed for ALL its dates: its old
+      // single-day edits no longer apply.
+      await (db.delete(db.planOverridesTable)..where(
+            (t) => t.planItemId.equals(itemId) & t.occurrenceIndex.equals(target),
+          ))
+          .go();
+      // The actions already made keep their place in the pattern: renumber the
+      // row part of their plan_key (`YYYY-MM-DD#row` and `...>p0` / `>n0`).
+      final re = RegExp(r'^(\d{4}-\d{2}-\d{2})#(\d+)(.*)$');
+      for (final a in await (db.select(db.actionsTable)..where(
+            (t) => t.planItemId.equals(itemId) & t.planKey.isNotNull(),
+          ))
+          .get()) {
+        final m = re.firstMatch(a.planKey!);
+        if (m == null) continue;
+        final oldRow = int.parse(m.group(2)!);
+        final ni = newIndex(planDateFromKey(m.group(1)!), oldRow);
+        if (ni == oldRow) continue;
+        await (db.update(db.actionsTable)..where((t) => t.id.equals(a.id))).write(
+          ActionsTableCompanion(planKey: Value('${m.group(1)}#$ni${m.group(3)}')),
+        );
+      }
+    });
   }
 
   Future<void> setPaused(String id, bool paused) =>
