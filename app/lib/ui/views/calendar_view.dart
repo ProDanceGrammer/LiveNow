@@ -34,7 +34,7 @@ import '../../data/database.dart' show ActionTemplate;
 import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
-import '../../domain/plan_rules.dart' show planDateOf;
+import '../../domain/plan_rules.dart' show PlanOccurrence, planDateOf;
 import '../../domain/postpone_rules.dart';
 import '../calendar_fullscreen.dart';
 import '../calendar_allday.dart';
@@ -442,7 +442,9 @@ class CalendarView extends ConsumerWidget {
     };
 
     final phone = usePhoneLayout(context);
-    final allDay = ref.watch(calendarAllDayProvider);
+    // Planning mode always shows the strip: its all-day plan items live there.
+    final allDay =
+        ref.watch(calendarAllDayProvider) || ref.watch(calendarPlanningProvider);
     // Turned upright with 4+ days showing: a phone offers 1-3 there.
     if (phone &&
         dayCount > 3 &&
@@ -1428,6 +1430,14 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
       ..stripDayCount = dayCount;
     final showIcons = ref.watch(calendarIconsProvider);
     final primary = Theme.of(context).colorScheme.primary;
+    // Planning mode: the all-day plan occurrences, as ghost chips per day.
+    final firstDay = planDateOf(start);
+    final planned = <int, List<PlanOccurrence>>{};
+    for (final o in ref.watch(planOccurrencesProvider).value ?? const <PlanOccurrence>[]) {
+      if (!o.allDay) continue;
+      final d = o.date.difference(firstDay).inDays;
+      if (d >= 0 && d < dayCount) planned.putIfAbsent(d, () => []).add(o);
+    }
     return Container(
       key: cross.stripKey,
       constraints: const BoxConstraints(minHeight: 30, maxHeight: 96),
@@ -1472,6 +1482,8 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
                               running: running.contains(a.id),
                               showIcons: showIcons,
                             ),
+                          for (final o in planned[i] ?? const <PlanOccurrence>[])
+                            _PlanAllDayChip(occ: o),
                         ],
                       ),
                       builder: (context, target, chips) => Container(
@@ -1557,6 +1569,53 @@ class _DirectionChip extends StatelessWidget {
       child: child,
     ),
   );
+}
+
+/// A plan occurrence that is all-day (planning mode): a translucent chip in the
+/// all-day strip; double-click (a tap on a phone) opens the plan item.
+class _PlanAllDayChip extends StatelessWidget {
+  const _PlanAllDayChip({required this.occ});
+
+  final PlanOccurrence occ;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.tertiary;
+    final phone = usePhoneLayout(context);
+    void open() => PlanItemEditorDialog.show(context, itemId: occ.planItemId);
+    return Padding(
+      key: ValueKey('plan-ghost-allday-${occ.planItemId}-${occ.key}'),
+      padding: const EdgeInsets.only(bottom: 2),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: phone ? open : null,
+        onDoubleTap: phone ? null : open,
+        child: Container(
+          height: 18,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          alignment: Alignment.centerLeft,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.16),
+            border: Border.all(color: color.withValues(alpha: 0.7)),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  occ.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, height: 1.1),
+                ),
+              ),
+              Icon(Icons.event_repeat, size: 11, color: color),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _AllDayChip extends ConsumerWidget {

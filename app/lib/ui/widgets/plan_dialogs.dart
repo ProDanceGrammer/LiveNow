@@ -205,6 +205,7 @@ class _OccRow extends _Extras {
     int? durationMin,
     String? name,
     this.templateId,
+    this.allDay = false,
   }) : name = TextEditingController(text: name ?? ''),
        duration = TextEditingController(
          text: durationMin == null ? '' : '$durationMin',
@@ -213,6 +214,9 @@ class _OccRow extends _Extras {
   int day;
   int startMin;
   final String? templateId;
+
+  /// An all-day row: no time, minutes or Previous / Next actions.
+  bool allDay;
   final TextEditingController name;
   final TextEditingController duration;
 
@@ -223,6 +227,7 @@ class _OccRow extends _Extras {
       durationMin: int.tryParse(duration.text),
       name: name.text,
       templateId: templateId,
+      allDay: allDay,
     );
     r.copyFrom(this);
     return r;
@@ -298,6 +303,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
   int _nth = 1;
   int _weekday = DateTime.monday;
   int _monthlyStart = 9 * 60;
+  bool _monthlyAllDay = false;
   bool _loaded = false;
   PlanItem? _existing;
 
@@ -391,6 +397,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               durationMin: o.durationMin,
               name: o.name,
               templateId: o.templateId,
+              allDay: o.allDay,
             );
             r.copyFrom(_Extras.from(o.extras));
             _rows.add(r);
@@ -404,6 +411,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
           _nth = m.nth;
           _weekday = m.weekday;
           _monthlyStart = m.startMin;
+          _monthlyAllDay = m.allDay;
           if (m.durationMin != null) _manual.text = '${m.durationMin}';
           _monthlyExtras.copyFrom(_Extras.from(m.extras));
         }
@@ -517,7 +525,11 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               durationMin: int.tryParse(r.duration.text),
               name: r.name.text.trim().isEmpty ? null : r.name.text.trim(),
               templateId: r.templateId,
-              extras: r.toExtras(),
+              allDay: r.allDay,
+              // An all-day row keeps only its transactions.
+              extras: r.allDay
+                  ? PlanExtras(txTemplateIds: [...r.tx])
+                  : r.toExtras(),
             ),
         ],
       );
@@ -532,7 +544,10 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         weekday: _weekday,
         startMin: _monthlyStart,
         durationMin: manual,
-        extras: _monthlyExtras.toExtras(),
+        allDay: _monthlyAllDay,
+        extras: _monthlyAllDay
+            ? PlanExtras(txTemplateIds: [..._monthlyExtras.tx])
+            : _monthlyExtras.toExtras(),
       );
     }
     final id = await plans.saveItem(
@@ -692,6 +707,13 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
       r.startMin,
       (v) => r.startMin = v,
     );
+    final allDayChip = FilterChip(
+      key: ValueKey('plan-row-allday-$i'),
+      label: const Text('All day'),
+      visualDensity: VisualDensity.compact,
+      selected: r.allDay,
+      onSelected: (v) => setState(() => r.allDay = v),
+    );
     final minutes = SizedBox(
       width: 104,
       child: TextField(
@@ -734,7 +756,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
             Wrap(
               spacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [day, time, minutes, buttons],
+              children: [day, allDayChip, if (!r.allDay) ...[time, minutes], buttons],
             ),
             const SizedBox(height: 4),
             name,
@@ -743,16 +765,21 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               children: [
                 day,
                 const SizedBox(width: 10),
-                time,
-                const SizedBox(width: 10),
-                minutes,
+                allDayChip,
+                if (!r.allDay) ...[
+                  const SizedBox(width: 10),
+                  time,
+                  const SizedBox(width: 10),
+                  minutes,
+                ],
                 const SizedBox(width: 10),
                 Expanded(child: name),
                 buttons,
               ],
             ),
-          ?_averageNote(r.duration.text, ValueKey('plan-row-avg-$i')),
-          _extrasEditor(r, 'row-$i', allRows: true),
+          if (!r.allDay)
+            ?_averageNote(r.duration.text, ValueKey('plan-row-avg-$i')),
+          _extrasEditor(r, 'row-$i', allRows: true, companions: !r.allDay),
         ],
       ),
     );
@@ -760,7 +787,12 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
 
   // ---- Previous / Next / Transactions of one row --------------------------------
 
-  Widget _extrasEditor(_Extras e, String prefix, {bool allRows = false}) {
+  Widget _extrasEditor(
+    _Extras e,
+    String prefix, {
+    bool allRows = false,
+    bool companions = true,
+  }) {
     final names = {
       for (final t
           in ref.watch(budgetTxTemplatesProvider).value ??
@@ -829,11 +861,13 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               e.open ? Icons.expand_less : Icons.expand_more,
               size: 18,
             ),
-            label: Text(
-              e.count == 0
+            label: Text(() {
+              final title = companions
                   ? 'Previous / Next / Transactions'
-                  : 'Previous / Next / Transactions (${e.count})',
-            ),
+                  : 'Transactions';
+              final n = companions ? e.count : e.tx.length;
+              return n == 0 ? title : '$title ($n)';
+            }()),
             onPressed: () => setState(() => e.open = !e.open),
           ),
         ),
@@ -867,20 +901,22 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                   ],
                 ),
                 txChips(e.tx, '$prefix-tx-add'),
-                const SizedBox(height: 8),
-                if (phone) ...[
-                  prev,
+                if (companions) ...[
                   const SizedBox(height: 8),
-                  next,
-                ] else
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: prev),
-                      const SizedBox(width: 16),
-                      Expanded(child: next),
-                    ],
-                  ),
+                  if (phone) ...[
+                    prev,
+                    const SizedBox(height: 8),
+                    next,
+                  ] else
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: prev),
+                        const SizedBox(width: 16),
+                        Expanded(child: next),
+                      ],
+                    ),
+                ],
               ],
             ),
           ),
@@ -1098,12 +1134,21 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                 onChanged: (v) => setState(() => _weekday = v ?? _weekday),
               ),
             ],
-            _timeButton(
-              const ValueKey('plan-monthly-time'),
-              _monthlyStart,
-              (v) => _monthlyStart = v,
+            FilterChip(
+              key: const ValueKey('plan-monthly-allday'),
+              label: const Text('All day'),
+              visualDensity: VisualDensity.compact,
+              selected: _monthlyAllDay,
+              onSelected: (v) => setState(() => _monthlyAllDay = v),
             ),
-            SizedBox(
+            if (!_monthlyAllDay)
+              _timeButton(
+                const ValueKey('plan-monthly-time'),
+                _monthlyStart,
+                (v) => _monthlyStart = v,
+              ),
+            if (!_monthlyAllDay)
+              SizedBox(
               width: 104,
               child: TextField(
                 key: const ValueKey('plan-monthly-duration'),
@@ -1119,8 +1164,13 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
             ),
           ],
         ),
-        ?_averageNote(_manual.text, const ValueKey('plan-monthly-avg')),
-        _extrasEditor(_monthlyExtras, 'monthly'),
+        if (!_monthlyAllDay)
+          ?_averageNote(_manual.text, const ValueKey('plan-monthly-avg')),
+        _extrasEditor(
+          _monthlyExtras,
+          'monthly',
+          companions: !_monthlyAllDay,
+        ),
       ],
     );
   }

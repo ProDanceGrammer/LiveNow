@@ -291,14 +291,18 @@ void main() {
     await settle(tester);
     await tester.tap(find.byKey(const ValueKey('plan-bar-add')));
     await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('row-0-extras-toggle')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('row-0-add-prev')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('row-0-add-next')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('plan-row-duplicate-0')));
-    await tester.pump();
+    Future<void> tapKey(String key) async {
+      final f = find.byKey(ValueKey(key));
+      await tester.ensureVisible(f);
+      await tester.pump();
+      await tester.tap(f);
+      await tester.pump();
+    }
+
+    await tapKey('row-0-extras-toggle');
+    await tapKey('row-0-add-prev');
+    await tapKey('row-0-add-next');
+    await tapKey('plan-row-duplicate-0');
     expect(tester.takeException(), isNull);
     await unmount(tester);
   });
@@ -345,6 +349,38 @@ void main() {
     await tester.enterText(find.byKey(const ValueKey('plan-row-duration-0')), '60');
     await tester.pump();
     expect(note().data, contains('yours is 15 min longer'));
+    await unmount(tester);
+  });
+
+  testWidgets('a time row can be all day: no time or minutes, saved in the rule', (
+    tester,
+  ) async {
+    await mount(tester);
+    await pumpCalendar(tester);
+    await openEditor(tester);
+    await tester.enterText(find.byKey(const ValueKey('plan-name')), 'Rest day');
+
+    expect(find.byKey(const ValueKey('plan-row-time-0')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('plan-row-allday-0')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('plan-row-time-0')), findsNothing);
+    expect(find.byKey(const ValueKey('plan-row-duration-0')), findsNothing);
+
+    // Previous / Next do not apply; Transactions do.
+    await tester.tap(find.byKey(const ValueKey('row-0-extras-toggle')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('row-0-add-prev')), findsNothing);
+    expect(find.byKey(const ValueKey('row-0-tx-add')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('plan-save')));
+    await settle(tester);
+    final row = (await tester.runAsync(
+      () => db.select(db.planItemsTable).getSingle(),
+    ))!;
+    final occ = CycleRule.fromJson(
+      Map<String, Object?>.from(jsonDecode(row.rule) as Map),
+    ).occurrences.single;
+    expect(occ.allDay, isTrue);
     await unmount(tester);
   });
 }

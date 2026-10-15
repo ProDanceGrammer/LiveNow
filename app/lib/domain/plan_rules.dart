@@ -137,11 +137,16 @@ class CycleOccurrence {
     this.name,
     this.templateId,
     this.extras = const PlanExtras(),
+    this.allDay = false,
   });
 
   final int day;
   final int startMin;
   final PlanExtras extras;
+
+  /// An all-day row: it makes an all-day action on its day (the time, length and
+  /// Previous / Next actions do not apply; transactions still do).
+  final bool allDay;
 
   /// Null = the plan item's default duration (the template's average).
   final int? durationMin;
@@ -156,6 +161,7 @@ class CycleOccurrence {
     if (durationMin != null) 'durationMin': durationMin,
     if (name != null) 'name': name,
     if (templateId != null) 'templateId': templateId,
+    if (allDay) 'allDay': true,
     ...extras.toJson(),
   };
 
@@ -166,6 +172,7 @@ class CycleOccurrence {
     name: j['name'] as String?,
     templateId: j['templateId'] as String?,
     extras: PlanExtras.fromJson(j),
+    allDay: j['allDay'] == true,
   );
 }
 
@@ -200,9 +207,13 @@ class MonthlyRule {
     this.durationMin,
     this.name,
     this.extras = const PlanExtras(),
+    this.allDay = false,
   });
 
   final PlanExtras extras;
+
+  /// See [CycleOccurrence.allDay].
+  final bool allDay;
 
   /// Every N months (1..99999) counted from the plan's start month.
   final int everyMonths;
@@ -229,6 +240,7 @@ class MonthlyRule {
     'startMin': startMin,
     if (durationMin != null) 'durationMin': durationMin,
     if (name != null) 'name': name,
+    if (allDay) 'allDay': true,
     ...extras.toJson(),
   };
 
@@ -245,6 +257,7 @@ class MonthlyRule {
     durationMin: (j['durationMin'] as num?)?.toInt(),
     name: j['name'] as String?,
     extras: PlanExtras.fromJson(j),
+    allDay: j['allDay'] == true,
   );
 }
 
@@ -367,10 +380,15 @@ class PlanOccurrence {
     required this.durationMin,
     this.ownName = false,
     this.extras = const PlanExtras(),
+    this.allDay = false,
   });
 
   /// Previous / Next companions and transactions of this occurrence's row.
   final PlanExtras extras;
+
+  /// An all-day occurrence: [startUtc] is its day's local midnight, [endUtc] the
+  /// same instant, [startMin] / [durationMin] are 0.
+  final bool allDay;
 
   final String planItemId;
 
@@ -421,12 +439,16 @@ List<PlanOccurrence> occurrencesInRange(
     String? name,
     String? templateId,
     PlanExtras extras,
+    bool allDay,
   ) {
     final key = '${planDateKey(date)}#$index';
     final o = byKey[key];
     if (o != null && o.skipped) return;
-    final start = o?.startMin ?? startMin;
-    final dur = (o?.durationMin ?? durationMin ?? defaultMinutes).clamp(1, 24 * 60 * 7);
+    // An all-day row has no time of its own: midnight, no length.
+    final start = allDay ? 0 : (o?.startMin ?? startMin);
+    final dur = allDay
+        ? 0
+        : (o?.durationMin ?? durationMin ?? defaultMinutes).clamp(1, 24 * 60 * 7);
     out.add(
       PlanOccurrence(
         planItemId: item.id,
@@ -434,6 +456,7 @@ List<PlanOccurrence> occurrencesInRange(
         date: date,
         startUtc: planInstant(date, start),
         endUtc: planInstant(date, start + dur),
+        allDay: allDay,
         name: o?.name ?? name ?? item.name,
         templateId: templateId ?? item.templateId,
         index: index,
@@ -459,7 +482,7 @@ List<PlanOccurrence> occurrencesInRange(
       final k = _daysBetween(item.startDate, date);
       for (final i in byDay[k % n] ?? const <int>[]) {
         final o = rule.occurrences[i];
-        add(date, i, o.startMin, o.durationMin, o.name, o.templateId, o.extras);
+        add(date, i, o.startMin, o.durationMin, o.name, o.templateId, o.extras, o.allDay);
       }
       date = DateTime.utc(date.year, date.month, date.day + 1);
     }
@@ -504,7 +527,7 @@ List<PlanOccurrence> occurrencesInRange(
       if (day == null) continue; // e.g. no 5th Monday this month
       final date = DateTime.utc(y, m, day);
       if (date.isBefore(first) || date.isAfter(last)) continue;
-      add(date, 0, rule.startMin, rule.durationMin, rule.name, null, rule.extras);
+      add(date, 0, rule.startMin, rule.durationMin, rule.name, null, rule.extras, rule.allDay);
     }
   }
   out.sort((a, b) {
@@ -542,7 +565,7 @@ String describePlan(PlanItemData item) {
       MonthlyMode.nthWeekday =>
         '${m.nth == -1 ? 'last' : _ordinal(m.nth)} ${_weekdayNames[m.weekday - 1]}',
     };
-    return '$every: $when ${planTime(m.startMin)}';
+    return '$every: $when ${m.allDay ? 'all day' : planTime(m.startMin)}';
   }
   final c = item.cycle;
   if (c == null || c.occurrences.isEmpty) return 'Nothing planned';
@@ -560,9 +583,11 @@ String describePlan(PlanItemData item) {
   final parts = [
     for (final o in sorted)
       switch (c.cycleDays) {
-        1 => planTime(o.startMin),
-        7 => '${_weekdayNames[(startWeekday + o.day) % 7]} ${planTime(o.startMin)}',
-        _ => 'day ${o.day + 1} ${planTime(o.startMin)}',
+        1 => o.allDay ? 'all day' : planTime(o.startMin),
+        7 =>
+          '${_weekdayNames[(startWeekday + o.day) % 7]} '
+              '${o.allDay ? 'all day' : planTime(o.startMin)}',
+        _ => 'day ${o.day + 1} ${o.allDay ? 'all day' : planTime(o.startMin)}',
       },
   ];
   return '$head: ${parts.join(', ')}';

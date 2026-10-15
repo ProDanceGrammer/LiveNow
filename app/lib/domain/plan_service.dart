@@ -501,9 +501,11 @@ class PlanService {
   }) async {
     final now = (nowUtc ?? DateTime.now()).toUtc();
     final occs = await occurrences(from, to, itemIds: itemIds);
+    // An all-day occurrence counts from the start of its day: today's still is.
+    final today = planDateOf(now);
     final future = [
       for (final o in occs)
-        if (o.startUtc.isAfter(now)) o,
+        if (o.startUtc.isAfter(now) || (o.allDay && !o.date.isBefore(today))) o,
     ];
     if (future.isEmpty) return (toCreate: const <PlanOccurrence>[], existing: 0);
     final ids = {for (final o in future) o.planItemId};
@@ -627,18 +629,22 @@ class PlanService {
             name: o.ownName ? o.name : null,
             planItemId: o.planItemId,
             planKey: o.key,
+            allDay: o.allDay ? true : null,
           );
         } else {
           id = await actions.createAction(
             name: o.name,
             startAt: o.startUtc,
-            endAt: o.endUtc,
+            endAt: o.allDay ? null : o.endUtc,
+            isAllDay: o.allDay,
             planItemId: o.planItemId,
             planKey: o.key,
           );
         }
         created.add(id);
         await makeTransactions(o.extras.txTemplateIds, id, o.startUtc, o.name);
+        // An all-day row has no time to put a Previous / Next action next to.
+        if (o.allDay) continue;
         for (var n = 0; n < o.extras.prev.length; n++) {
           final c = o.extras.prev[n];
           final end = o.startUtc.subtract(Duration(minutes: c.gapMinutes));
@@ -699,13 +705,18 @@ class PlanService {
   /// done and never edited since they were created. Returns the undo (null when
   /// there was nothing to remove).
   Future<DeleteManyUndo?> removeFuture(String itemId, {DateTime? nowUtc}) async {
-    final nowText = dateTimeToDb(nowUtc ?? DateTime.now())!;
+    final now = (nowUtc ?? DateTime.now()).toUtc();
+    final nowText = dateTimeToDb(now)!;
+    // An all-day action counts from the start of its day (today's still is).
+    final todayText = dateTimeToDb(planInstant(planDateOf(now), 0))!;
     final rows = await (db.select(db.actionsTable)
           ..where(
             (t) =>
                 t.planItemId.equals(itemId) &
                 t.done.equals(false) &
-                t.startAt.isBiggerThanValue(nowText) &
+                (t.startAt.isBiggerThanValue(nowText) |
+                    (t.isAllDay.equals(true) &
+                        t.startAt.isBiggerOrEqualValue(todayText))) &
                 t.updatedAt.equalsExp(t.createdAt),
           ))
         .get();

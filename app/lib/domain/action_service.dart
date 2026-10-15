@@ -1392,11 +1392,13 @@ class ActionService {
     String? name,
     String? planItemId,
     String? planKey,
+    bool? allDay,
   }) async {
     final d = await templateDraft(
       templateId,
       startUtc: startUtc,
       duration: duration,
+      allDay: allDay,
     );
     final id = await createAction(
       name: name ?? d.name,
@@ -1426,6 +1428,7 @@ class ActionService {
     String templateId, {
     DateTime? startUtc,
     Duration? duration,
+    bool? allDay,
   }) async {
     final Map<String, dynamic> payload;
     try {
@@ -1442,10 +1445,13 @@ class ActionService {
         break;
       }
     }
+    // [allDay] overrides the template's own all-day flag (a plan row that is
+    // all-day makes an all-day action whatever its template is).
+    final isAllDay = allDay ?? a.isAllDay;
     DateTime? start;
     DateTime? end;
     if (startUtc != null) {
-      if (a.isAllDay) {
+      if (isAllDay) {
         final local = tz.TZDateTime.from(startUtc, _location());
         start = tz.TZDateTime(_location(), local.year, local.month, local.day)
             .toUtc();
@@ -1461,7 +1467,7 @@ class ActionService {
     final blocks = (payload['diaryBlocks'] as String?)?.trim();
     return ActionDraft(
       name: a.name,
-      isAllDay: a.isAllDay,
+      isAllDay: isAllDay,
       startAt: start,
       endAt: end,
       notes: a.notes,

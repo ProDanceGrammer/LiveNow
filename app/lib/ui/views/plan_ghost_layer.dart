@@ -164,6 +164,8 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     }
 
     for (final o in widget.occurrences) {
+      // All-day occurrences are chips in the all-day strip, not blocks here.
+      if (o.allDay) continue;
       final mainStart = o.startMin;
       final mainEnd = o.startMin + o.durationMin;
       add(o, _Kind.main, 0, null, mainStart, mainEnd);

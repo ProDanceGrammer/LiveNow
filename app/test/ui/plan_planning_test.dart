@@ -8,6 +8,7 @@ import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/plan_rules.dart';
 import 'package:livenow/domain/plan_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/ui/calendar_allday.dart';
 import 'package:livenow/ui/plan_providers.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
@@ -494,6 +495,42 @@ void main() {
     expect(find.text('Beta\n20:00-20:30'), findsNothing);
     await g.cancel();
     await tester.pump(const Duration(milliseconds: 500));
+    await unmount(tester);
+  });
+
+  testWidgets('an all-day plan item shows as chips in the all-day strip', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      seed: (plans) async {
+        await plans.saveItem(
+          PlanItemInput(
+            name: 'Rest day',
+            kind: PlanKind.cycle,
+            startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+            cycle: const CycleRule(
+              cycleDays: 1,
+              occurrences: [CycleOccurrence(day: 0, startMin: 0, allDay: true)],
+            ),
+          ),
+        );
+      },
+    );
+    // Hide the strip the normal way: planning mode still shows it.
+    container.read(calendarAllDayProvider.notifier).set(false);
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+
+    final chips = find.byWidgetPredicate((w) {
+      final k = w.key;
+      return k is ValueKey<String> && k.value.startsWith('plan-ghost-allday-');
+    });
+    expect(chips, findsNWidgets(7));
+    expect(find.text('Rest day'), findsNWidgets(7));
+    // The timed ghosts (Run) are untouched and the all-day ones are not blocks.
+    expect(ghosts(), findsNWidgets(7 + 7)); // Run blocks + the chips' keys
     await unmount(tester);
   });
 }
