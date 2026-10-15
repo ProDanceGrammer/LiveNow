@@ -129,7 +129,7 @@ class NotesEditor extends StatefulWidget {
   State<NotesEditor> createState() => NotesEditorState();
 }
 
-class NotesEditorState extends State<NotesEditor> {
+class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
   static const _debounce = Duration(milliseconds: 400);
 
   late final EditorState _editorState;
@@ -143,6 +143,13 @@ class NotesEditorState extends State<NotesEditor> {
   StreamSubscription<EditorTransactionValue>? _sub;
   Timer? _timer;
   String? _lastEmitted;
+
+  /// The last selection the user had in the editor. Leaving the app window makes
+  /// Flutter suspend the focus and appflowy_editor answers by setting its
+  /// selection to null (the caret vanishes); this is what gets put back when the
+  /// window returns. Cleared only by a null selection while the app is active
+  /// (the user clicked away or pressed Esc).
+  Selection? _lastSelection;
 
   /// Number of editors created so far (tests assert it stays put while a
   /// collapsed section must not build the editor).
@@ -241,10 +248,59 @@ class NotesEditorState extends State<NotesEditor> {
       _timer?.cancel();
       _timer = Timer(_debounce, _flush);
     });
+    _editorState.selectionNotifier.addListener(_rememberSelection);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  void _rememberSelection() {
+    final sel = _editorState.selection;
+    if (sel != null) {
+      _lastSelection = sel;
+    } else if (WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      // A deliberate clear. (While the window is away the null is only the
+      // editor reacting to the suspended focus: keep what we remembered.)
+      _lastSelection = null;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final sel = _lastSelection;
+    if (sel == null || _editorState.selection != null) return;
+    // After the frame: Flutter hands the suspended focus back during this
+    // callback chain, and the selection update then re-attaches the keyboard.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _editorState.selection != null) return;
+      final fitted = _fitSelection(sel);
+      if (fitted == null) return;
+      _editorState.updateSelectionWithReason(
+        fitted,
+        reason: SelectionUpdateReason.uiEvent,
+      );
+    });
+  }
+
+  /// [sel] clamped to the current document, or null when its nodes are gone.
+  Selection? _fitSelection(Selection sel) {
+    Position? fit(Position p) {
+      final node = _editorState.getNodeAtPath(p.path);
+      if (node == null) return null;
+      final length = node.delta?.length ?? 0;
+      return Position(path: p.path, offset: p.offset.clamp(0, length));
+    }
+
+    final start = fit(sel.start);
+    final end = fit(sel.end);
+    if (start == null || end == null) return null;
+    return Selection(start: start, end: end);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _editorState.selectionNotifier.removeListener(_rememberSelection);
     if (_timer?.isActive ?? false) _flush();
     _timer?.cancel();
     _sub?.cancel();

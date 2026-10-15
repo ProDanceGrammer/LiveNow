@@ -319,4 +319,88 @@ void main() {
     expect(dumpDoc(ed.document), 'paragraph:abc');
     await unmount(tester);
   });
+
+  group('leaving and returning to the window', () {
+    final windows = TargetPlatformVariant.only(TargetPlatform.windows);
+    Future<void> leaveAndReturn(WidgetTester tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    Future<NotesEditorState> focused(WidgetTester tester, Selection sel) async {
+      // Flutter suspends the focus on `inactive` only on desktop and web, and
+      // only once the focus manager listens to the lifecycle.
+      FocusManager.instance.listenToApplicationLifecycleChangesIfSupported();
+      final ed = await pumpEditor(
+        tester,
+        json: jsonOf([paragraphNode(text: 'Hello world')]),
+      );
+      // A real click gives the editor's focus node the primary focus.
+      await tester.tap(find.byType(AppFlowyEditor));
+      await tester.pump();
+      ed.editorState.updateSelectionWithReason(
+        sel,
+        reason: SelectionUpdateReason.uiEvent,
+      );
+      await tester.pump();
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'keyboard service',
+      );
+      return ed;
+    }
+
+    testWidgets('the caret comes back where it was', (tester) async {
+      final sel = Selection.collapsed(Position(path: [0], offset: 5));
+      final ed = await focused(tester, sel);
+      expect(ed.editorState.selection, sel);
+
+      await leaveAndReturn(tester);
+      expect(ed.editorState.selection, sel);
+      await unmount(tester);
+    }, variant: windows);
+
+    testWidgets('a range selection comes back too', (tester) async {
+      final sel = Selection(
+        start: Position(path: [0], offset: 2),
+        end: Position(path: [0], offset: 8),
+      );
+      final ed = await focused(tester, sel);
+      await leaveAndReturn(tester);
+      expect(ed.editorState.selection, sel);
+      await unmount(tester);
+    }, variant: windows);
+
+    testWidgets('typing after returning goes in at the remembered place', (
+      tester,
+    ) async {
+      final ed = await focused(
+        tester,
+        Selection.collapsed(Position(path: [0], offset: 5)),
+      );
+      await leaveAndReturn(tester);
+      await ed.editorState.insertTextAtCurrentSelection('!');
+      await tester.pump();
+      expect(dumpDoc(ed.editorState.document), 'paragraph:Hello! world');
+      await unmount(tester);
+    }, variant: windows);
+
+    testWidgets('a deliberate click-away is not undone by leaving', (
+      tester,
+    ) async {
+      final ed = await focused(
+        tester,
+        Selection.collapsed(Position(path: [0], offset: 5)),
+      );
+      // The user clicks away / presses Esc while the window is active.
+      ed.editorState.selection = null;
+      await tester.pump();
+      await leaveAndReturn(tester);
+      expect(ed.editorState.selection, isNull);
+      await unmount(tester);
+    }, variant: windows);
+  });
 }
