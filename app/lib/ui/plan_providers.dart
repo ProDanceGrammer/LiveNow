@@ -44,7 +44,9 @@ final planOccurrencesProvider =
       // still run into it (a sleep 22:00-07:00): the ghost layer draws only the
       // slices that fall on visible days.
       final from = planDateOf(start).subtract(const Duration(days: 7));
-      final to = planDateOf(calendarAddDays(start, days - 1));
+      // One day more at the end: a block just after the range can have a
+      // Previous action that falls on the last visible day.
+      final to = planDateOf(calendarAddDays(start, days));
       final plans = ref.read(planServiceProvider);
       // Only the items of visible collections (and of none) are drawn.
       final visible = visiblePlanItemIds(

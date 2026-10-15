@@ -12,7 +12,15 @@ import '../../domain/plan_rules.dart';
 /// An occurrence that crosses midnight (a sleep 22:00-07:00) is drawn as one
 /// SLICE per day it touches, like a real event: the part after midnight stands at
 /// the top of the next day. The host passes occurrences that started up to a week
-/// before [firstDay], so the continuation on the first visible day is there too.
+/// before [firstDay] (and one day after the last), so the pieces on the first
+/// visible day and the Previous actions of a block just after the range are there
+/// too.
+///
+/// The Previous / Next actions a row creates with each occurrence are drawn next
+/// to it (a Previous one ending [PlanCompanion.gapMinutes] before the block
+/// starts, a Next one starting that long after it ends) in a lighter tint with an
+/// arrow; they follow the block while it is dragged and open the plan item when
+/// edited.
 ///
 /// Desktop: drag a block (any slice) to change its time of day (10-minute steps),
 /// drag the bottom edge of its last slice to change its length, double-click to
@@ -30,6 +38,7 @@ class PlanGhostLayer extends StatefulWidget {
     required this.occurrences,
     required this.onEdit,
     required this.onChanged,
+    this.templateNames = const {},
   });
 
   /// The first visible local date ([planDate]).
@@ -39,6 +48,10 @@ class PlanGhostLayer extends StatefulWidget {
   final double hourHeight;
   final bool phone;
   final List<PlanOccurrence> occurrences;
+
+  /// Template id -> name: a Previous / Next action without a name of its own is
+  /// called what its template is called.
+  final Map<String, String> templateNames;
   final void Function(PlanOccurrence occ) onEdit;
   final void Function(PlanOccurrence occ, int startMin, int durationMin)
   onChanged;
@@ -55,15 +68,31 @@ class _GhostDrag {
   double dy = 0;
 }
 
-/// One day's part of an occurrence.
+enum _Kind { main, prev, next }
+
+/// One day's part of an occurrence or of one of its Previous / Next actions.
 class _Slot {
-  _Slot(this.occ, this.day, this.k, this.startMin, this.endMin);
+  _Slot(
+    this.occ,
+    this.kind,
+    this.index,
+    this.companion,
+    this.day,
+    this.k,
+    this.startMin,
+    this.endMin,
+  );
   final PlanOccurrence occ;
+  final _Kind kind;
+
+  /// The position in the row's Previous / Next list (companions only).
+  final int index;
+  final PlanCompanion? companion;
 
   /// The visible day column.
   final int day;
 
-  /// 0 = the day the occurrence starts on, 1 = the next day ...
+  /// Days after (before, when negative) the day the occurrence starts on.
   final int k;
 
   /// The committed part of the day it covers (minutes; empty = start >= end).
@@ -79,28 +108,69 @@ const _kSnap = 10;
 const _kMinLen = 10;
 const _kDay = 24 * 60;
 
+int _floorDiv(int a, int b) => (a / b).floor();
+
 class _PlanGhostLayerState extends State<PlanGhostLayer> {
   _GhostDrag? _drag;
 
   double get _pxPerMin => widget.hourHeight / 60;
 
-  /// Every slice on the visible days, with lanes packed per day. Slices for one
-  /// day more than the occurrence needs are included (empty until a drag makes
-  /// the block longer or later).
+  /// The (start, end) of a Previous / Next action in minutes from the midnight of
+  /// its occurrence's own day, given the occurrence's [mainStart] / [mainEnd].
+  (int, int) _companionSpan(
+    _Kind kind,
+    PlanCompanion c,
+    int mainStart,
+    int mainEnd,
+  ) {
+    if (kind == _Kind.prev) {
+      final end = mainStart - c.gapMinutes;
+      return (end - c.minutes, end);
+    }
+    final start = mainEnd + c.gapMinutes;
+    return (start, start + c.minutes);
+  }
+
+  /// Every slice on the visible days, with lanes packed per day. Slices one day
+  /// beyond what a block needs are included (empty until a drag makes it longer,
+  /// later or earlier).
   List<_Slot> _slots() {
     final slots = <_Slot>[];
-    for (final o in widget.occurrences) {
+
+    void add(
+      PlanOccurrence o,
+      _Kind kind,
+      int index,
+      PlanCompanion? c,
+      int absStart,
+      int absEnd,
+    ) {
       final occDay = o.date.difference(widget.firstDay).inDays;
-      final absStart = o.startMin;
-      final absEnd = o.startMin + o.durationMin;
-      final needed = ((absEnd - 1) ~/ _kDay) + 1;
-      for (var k = 0; k <= needed; k++) {
+      final lo = _floorDiv(absStart, _kDay) - (kind == _Kind.main ? 0 : 1);
+      final hi = _floorDiv(absEnd - 1, _kDay) + 1;
+      for (var k = lo; k <= hi; k++) {
         final day = occDay + k;
         if (day < 0 || day >= widget.dayCount) continue;
         final base = k * _kDay;
         final s = math.max(absStart, base) - base;
         final e = math.min(absEnd, base + _kDay) - base;
-        slots.add(_Slot(o, day, k, s, e));
+        slots.add(_Slot(o, kind, index, c, day, k, s, e));
+      }
+    }
+
+    for (final o in widget.occurrences) {
+      final mainStart = o.startMin;
+      final mainEnd = o.startMin + o.durationMin;
+      add(o, _Kind.main, 0, null, mainStart, mainEnd);
+      for (var i = 0; i < o.extras.prev.length; i++) {
+        final c = o.extras.prev[i];
+        final (s, e) = _companionSpan(_Kind.prev, c, mainStart, mainEnd);
+        add(o, _Kind.prev, i, c, s, e);
+      }
+      for (var i = 0; i < o.extras.next.length; i++) {
+        final c = o.extras.next[i];
+        final (s, e) = _companionSpan(_Kind.next, c, mainStart, mainEnd);
+        add(o, _Kind.next, i, c, s, e);
       }
     }
     // Greedy lanes per day: overlapping ghosts stand side by side.
@@ -165,37 +235,66 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     );
   }
 
+  String _label(_Slot s, int absStart, int absEnd) {
+    final c = s.companion;
+    final String name;
+    if (c == null) {
+      name = s.occ.name;
+    } else {
+      name =
+          c.name ??
+          widget.templateNames[c.templateId] ??
+          '${s.occ.name} - ${s.kind == _Kind.prev ? 'before' : 'after'}';
+    }
+    return '$name\n${planTime(absStart)}-${planTime(absEnd)}';
+  }
+
   Widget _ghost(BuildContext context, ColorScheme scheme, _Slot s) {
     final drag = _drag?.key == s.occ.key ? _drag : null;
     // The occurrence as it is (or as the drag would make it), from its own
     // midnight; this slice is the part that falls on its day.
-    var absStart = s.occ.startMin;
-    var absEnd = s.occ.startMin + s.occ.durationMin;
+    var mainStart = s.occ.startMin;
+    var mainEnd = s.occ.startMin + s.occ.durationMin;
     if (drag != null) {
       final delta = _deltaMin(drag.dy);
       if (drag.resize) {
-        absEnd = math.max(absStart + _kMinLen, absEnd + delta);
+        mainEnd = math.max(mainStart + _kMinLen, mainEnd + delta);
       } else {
-        final dur = absEnd - absStart;
-        absStart = (absStart + delta).clamp(0, _kDay - _kMinLen);
-        absEnd = absStart + dur;
+        final dur = mainEnd - mainStart;
+        mainStart = (mainStart + delta).clamp(0, _kDay - _kMinLen);
+        mainEnd = mainStart + dur;
       }
+    }
+    final int absStart, absEnd;
+    if (s.kind == _Kind.main) {
+      absStart = mainStart;
+      absEnd = mainEnd;
+    } else {
+      (absStart, absEnd) = _companionSpan(
+        s.kind,
+        s.companion!,
+        mainStart,
+        mainEnd,
+      );
     }
     final base = s.k * _kDay;
     final startMin = math.max(absStart, base) - base;
     final endMin = math.min(absEnd, base + _kDay) - base;
     if (endMin <= startMin) return const SizedBox.shrink();
 
-    final isLast = absEnd <= base + _kDay;
+    final isMain = s.kind == _Kind.main;
+    final isLast = isMain && absEnd <= base + _kDay;
     final laneW = (widget.dayWidth - 2) / s.lanes;
     final height = math.max(14.0, (endMin - startMin) * _pxPerMin);
-    final color = scheme.tertiary;
-    final label = '${s.occ.name}\n${planTime(absStart)}-${planTime(absEnd)}';
+    final color = isMain ? scheme.tertiary : scheme.secondary;
+    final label = _label(s, absStart, absEnd);
 
     Widget body = DecoratedBox(
       decoration: BoxDecoration(
-        color: color.withValues(alpha: drag != null ? 0.3 : 0.16),
-        border: Border.all(color: color.withValues(alpha: 0.7)),
+        color: color.withValues(
+          alpha: drag != null ? 0.3 : (isMain ? 0.16 : 0.1),
+        ),
+        border: Border.all(color: color.withValues(alpha: isMain ? 0.7 : 0.5)),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Padding(
@@ -215,7 +314,15 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
                 ),
               ),
             ),
-            Icon(Icons.event_repeat, size: 11, color: color),
+            Icon(
+              isMain
+                  ? Icons.event_repeat
+                  : (s.kind == _Kind.prev
+                        ? Icons.keyboard_double_arrow_right
+                        : Icons.keyboard_double_arrow_left),
+              size: 11,
+              color: color,
+            ),
           ],
         ),
       ),
@@ -229,7 +336,15 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     void update(DragUpdateDetails u) =>
         setState(() => _drag?.dy = u.globalPosition.dy - _drag!.startY);
 
-    if (widget.phone) {
+    if (!isMain) {
+      // A Previous / Next action is changed in the plan item, not dragged.
+      body = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.phone ? () => widget.onEdit(s.occ) : null,
+        onDoubleTap: widget.phone ? null : () => widget.onEdit(s.occ),
+        child: body,
+      );
+    } else if (widget.phone) {
       body = GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => widget.onEdit(s.occ),
@@ -279,10 +394,11 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
       );
     }
 
+    final String keySuffix = isMain
+        ? (s.k == 0 ? '' : '~${s.k}')
+        : '>${s.kind == _Kind.prev ? 'p' : 'n'}${s.index}@${s.k}';
     return Positioned(
-      key: ValueKey(
-        'plan-ghost-${s.occ.planItemId}-${s.occ.key}${s.k == 0 ? '' : '~${s.k}'}',
-      ),
+      key: ValueKey('plan-ghost-${s.occ.planItemId}-${s.occ.key}$keySuffix'),
       left: s.day * widget.dayWidth + s.lane * laneW,
       top: startMin * _pxPerMin,
       width: laneW,

@@ -348,4 +348,101 @@ void main() {
     expect(tester.getSize(first).height, closeTo(hour * 7, 1));
     await unmount(tester);
   });
+
+  testWidgets('the Previous and Next actions of a row are drawn next to it', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      seed: (plans) async {
+        await plans.saveItem(
+          PlanItemInput(
+            name: 'Bazaar',
+            kind: PlanKind.cycle,
+            startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+            cycle: const CycleRule(
+              cycleDays: 1,
+              occurrences: [
+                CycleOccurrence(
+                  day: 0,
+                  startMin: 18 * 60,
+                  durationMin: 60,
+                  extras: PlanExtras(
+                    prev: [PlanCompanion(name: 'Get ready', minutes: 30)],
+                    next: [
+                      PlanCompanion(name: 'Unpack', minutes: 20, gapMinutes: 10),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+
+    Finder keyed(String marker) => find.byWidgetPredicate((w) {
+      final k = w.key;
+      return k is ValueKey<String> &&
+          k.value.startsWith('plan-ghost-') &&
+          k.value.contains(marker);
+    });
+    expect(keyed('>p0'), findsNWidgets(7));
+    expect(keyed('>n0'), findsNWidgets(7));
+    expect(find.text('Get ready\n17:30-18:00'), findsNWidgets(7));
+    expect(find.text('Unpack\n19:10-19:30'), findsNWidgets(7));
+
+    // Geometry on the first day: ends where the block starts / 10 min after it.
+    final col = find.byKey(const ValueKey('day-column-0'));
+    final hour = tester.getSize(col).height / 24;
+    final top = tester.getTopLeft(col).dy;
+    final prev = keyed('>p0').first;
+    expect(tester.getTopLeft(prev).dy, closeTo(top + 17.5 * hour, 1));
+    expect(tester.getSize(prev).height, closeTo(0.5 * hour, 1));
+    await unmount(tester);
+  });
+
+  testWidgets('a Previous action that falls on the day before a block shows there', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      seed: (plans) async {
+        await plans.saveItem(
+          PlanItemInput(
+            name: 'Early',
+            kind: PlanKind.cycle,
+            startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+            cycle: const CycleRule(
+              cycleDays: 1,
+              occurrences: [
+                CycleOccurrence(
+                  day: 0,
+                  startMin: 10, // 00:10
+                  durationMin: 30,
+                  extras: PlanExtras(
+                    prev: [PlanCompanion(name: 'Warm up', minutes: 30)],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    // 23:40-00:10: the part before midnight is on the PREVIOUS day. Seven days
+    // are visible, so the blocks of days 1..7 put one on each visible day.
+    final before = find.byWidgetPredicate((w) {
+      final k = w.key;
+      return k is ValueKey<String> &&
+          k.value.startsWith('plan-ghost-') &&
+          k.value.contains('>p0@-1');
+    });
+    expect(before, findsNWidgets(7));
+    await unmount(tester);
+  });
 }

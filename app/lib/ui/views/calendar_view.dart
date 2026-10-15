@@ -30,6 +30,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/settings.dart';
+import '../../data/database.dart' show ActionTemplate;
 import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
@@ -3083,6 +3084,12 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
             hourHeight: _hourHeight,
             phone: usePhoneLayout(context),
             occurrences: planned,
+            templateNames: {
+              for (final t
+                  in ref.watch(templatesProvider).value ??
+                      const <ActionTemplate>[])
+                t.id: t.name,
+            },
             onEdit: (o) =>
                 PlanItemEditorDialog.show(context, itemId: o.planItemId),
             onChanged: (o, start, dur) =>
