@@ -10,6 +10,10 @@ export 'code_block.dart'
         CodeBlockComponentWidget,
         codeBlockBackspaceCommand,
         codeBlockNode,
+        indentLines,
+        outdentLines,
+        LineEdit,
+        LineShift,
         formatBackticksToCodeBlock,
         codeBlockType;
 export 'toggle_list_block.dart'
@@ -58,6 +62,7 @@ List<CharacterShortcutEvent> customNotesCharacterShortcuts() => [
 /// block; Backspace in empty code block / at start of a toggle).
 List<CommandShortcutEvent> customNotesCommandShortcuts() => [
   codeBlockTabCommand,
+  codeBlockOutdentCommand,
   codeBlockBackspaceCommand,
   toggleListBackspaceCommand,
 ];

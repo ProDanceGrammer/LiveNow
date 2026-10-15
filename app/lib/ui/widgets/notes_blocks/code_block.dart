@@ -255,7 +255,135 @@ final CharacterShortcutEvent insertNewLineInCodeBlock = CharacterShortcutEvent(
   },
 );
 
-/// Tab inside a code block inserts two spaces (never indents the block).
+/// One edit of a line-wise indent: at [offset] remove [remove] characters and
+/// insert [insert].
+typedef LineEdit = ({int offset, int remove, String insert});
+
+/// The result of [indentLines] / [outdentLines]: the edits (LAST line first, so
+/// applying them one after the other keeps every offset valid) and the selection
+/// after them.
+typedef LineShift = ({List<LineEdit> edits, int start, int end});
+
+const String _kIndent = '  ';
+
+/// Start offset of every line of [text].
+List<int> _lineStarts(String text) => [
+  0,
+  for (var i = 0; i < text.length; i++)
+    if (text[i] == '\n') i + 1,
+];
+
+/// The first and last line the selection [start]..[end] touches: a selection that
+/// ends at the very START of a later line does not include that line.
+(int first, int last) _touchedLines(List<int> starts, int start, int end) {
+  int lineOf(int offset) {
+    var line = 0;
+    for (var i = 0; i < starts.length; i++) {
+      if (starts[i] <= offset) line = i;
+    }
+    return line;
+  }
+
+  final first = lineOf(start);
+  var last = lineOf(end);
+  if (last > first && end == starts[last]) last--;
+  return (first, last);
+}
+
+/// Tab over several lines of a code block: two spaces at the start of EVERY
+/// touched line.
+LineShift indentLines(String text, int start, int end) {
+  final starts = _lineStarts(text);
+  final (first, last) = _touchedLines(starts, start, end);
+  final edits = <LineEdit>[
+    for (var i = last; i >= first; i--)
+      (offset: starts[i], remove: 0, insert: _kIndent),
+  ];
+  final count = last - first + 1;
+  return (
+    edits: edits,
+    // A start in the middle of a line moves with its text; one at the line start
+    // stays there (the new spaces are inside the selection).
+    start: start > starts[first] ? start + _kIndent.length : start,
+    end: end + count * _kIndent.length,
+  );
+}
+
+/// Shift+Tab over the touched lines (a caret: its line): removes up to two
+/// leading spaces (or one tab) from each.
+LineShift outdentLines(String text, int start, int end) {
+  final starts = _lineStarts(text);
+  final (first, last) = _touchedLines(starts, start, end);
+  final removed = <int, int>{};
+  for (var i = first; i <= last; i++) {
+    final s = starts[i];
+    var n = 0;
+    while (n < _kIndent.length && s + n < text.length && text[s + n] == ' ') {
+      n++;
+    }
+    if (n == 0 && s < text.length && text[s] == '\t') n = 1;
+    removed[i] = n;
+  }
+  int shift(int offset, {required int from, required int to}) {
+    var total = 0;
+    for (var i = from; i <= to; i++) {
+      final overlap = offset - starts[i];
+      if (overlap > 0) total += removed[i]! < overlap ? removed[i]! : overlap;
+    }
+    return total;
+  }
+
+  return (
+    edits: [
+      for (var i = last; i >= first; i--)
+        if (removed[i]! > 0) (offset: starts[i], remove: removed[i]!, insert: ''),
+    ],
+    start: start - shift(start, from: first, to: first),
+    end: end - shift(end, from: first, to: last),
+  );
+}
+
+/// Applies [shift] to the code block [node] and moves the selection with it.
+void _applyLineShift(EditorState editorState, Node node, LineShift shift) {
+  final transaction = editorState.transaction;
+  for (final e in shift.edits) {
+    if (e.remove > 0) transaction.deleteText(node, e.offset, e.remove);
+    if (e.insert.isNotEmpty) transaction.insertText(node, e.offset, e.insert);
+  }
+  transaction.afterSelection = Selection(
+    start: Position(path: node.path, offset: shift.start),
+    end: Position(path: node.path, offset: shift.end),
+  );
+  editorState.apply(transaction);
+}
+
+/// Shift+Tab in a code block outdents every selected line (never outdents the
+/// block itself).
+final CommandShortcutEvent codeBlockOutdentCommand = CommandShortcutEvent(
+  key: 'code block shift+tab removes indentation',
+  getDescription: () => 'Remove two spaces from the selected lines of a code block',
+  command: 'shift+tab',
+  handler: (editorState) {
+    final selection = editorState.selection?.normalized;
+    if (selection == null || !selection.isSingle) {
+      return KeyEventResult.ignored;
+    }
+    final node = editorState.getNodeAtPath(selection.start.path);
+    if (node == null || node.type != codeBlockType) {
+      return KeyEventResult.ignored;
+    }
+    final text = node.delta?.toPlainText() ?? '';
+    _applyLineShift(
+      editorState,
+      node,
+      outdentLines(text, selection.startIndex, selection.endIndex),
+    );
+    return KeyEventResult.handled;
+  },
+);
+
+/// Tab inside a code block inserts two spaces (never indents the block); with a
+/// selection over SEVERAL lines it indents every selected line instead.
 final CommandShortcutEvent codeBlockTabCommand = CommandShortcutEvent(
   key: 'code block tab inserts spaces',
   getDescription: () => 'Insert two spaces in a code block',
@@ -268,6 +396,16 @@ final CommandShortcutEvent codeBlockTabCommand = CommandShortcutEvent(
     final node = editorState.getNodeAtPath(selection.start.path);
     if (node == null || node.type != codeBlockType) {
       return KeyEventResult.ignored;
+    }
+    final text = node.delta?.toPlainText() ?? '';
+    if (!selection.isCollapsed &&
+        text.substring(selection.startIndex, selection.endIndex).contains('\n')) {
+      _applyLineShift(
+        editorState,
+        node,
+        indentLines(text, selection.startIndex, selection.endIndex),
+      );
+      return KeyEventResult.handled;
     }
     final transaction = editorState.transaction;
     if (!selection.isCollapsed) {
