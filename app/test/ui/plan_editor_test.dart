@@ -4,7 +4,10 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:livenow/core/ids.dart';
+import 'package:livenow/core/time_codec.dart';
+import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/budget_service.dart';
 import 'package:livenow/domain/plan_rules.dart';
@@ -297,6 +300,51 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('plan-row-duplicate-0')));
     await tester.pump();
     expect(tester.takeException(), isNull);
+    await unmount(tester);
+  });
+
+  testWidgets('the Minutes field shows the average and how yours differs', (
+    tester,
+  ) async {
+    await mount(tester);
+    await template(tester, 'Swim');
+    // Two finished 45-minute runs of "Swim" in the last days.
+    await tester.runAsync(() async {
+      final now = DateTime.now().toUtc();
+      for (var d = 1; d <= 2; d++) {
+        final start = now.subtract(Duration(days: d, hours: 1));
+        final id = await ActionService(db).createAction(
+          name: 'Swim',
+          startAt: start,
+          endAt: start.add(const Duration(minutes: 45)),
+        );
+        await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+          ActionsTableCompanion(
+            done: const Value(true),
+            completedAt: Value(dateTimeToDb(now)!),
+          ),
+        );
+      }
+    });
+    await pumpCalendar(tester);
+    await openEditor(tester);
+
+    // No average until the item is named / a template is chosen.
+    expect(find.byKey(const ValueKey('plan-row-avg-0')), findsNothing);
+    await pickTemplate(tester, 'Swim');
+    await settle(tester);
+    Text note() => tester.widget<Text>(find.byKey(const ValueKey('plan-row-avg-0')));
+    expect(note().data, 'Average of finished runs: 45 min');
+
+    await tester.enterText(find.byKey(const ValueKey('plan-row-duration-0')), '30');
+    await tester.pump();
+    expect(note().data, contains('yours is 15 min shorter'));
+    await tester.enterText(find.byKey(const ValueKey('plan-row-duration-0')), '45');
+    await tester.pump();
+    expect(note().data, 'Average of finished runs: 45 min');
+    await tester.enterText(find.byKey(const ValueKey('plan-row-duration-0')), '60');
+    await tester.pump();
+    expect(note().data, contains('yours is 15 min longer'));
     await unmount(tester);
   });
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -302,6 +304,62 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
   /// The collections the item is in (ids; unknown ones are kept as they were).
   List<String> _collectionIds = [];
 
+  /// The average real duration of the finished runs of this item's template (its
+  /// name when it has none), shown next to every Minutes field so a typed length
+  /// that differs from it is noticed. Null = no finished run yet.
+  Duration? _average;
+  int _averageSeq = 0;
+  Timer? _averageTimer;
+
+  /// Looks the average up for the current template / name (guarded against an
+  /// older answer arriving late).
+  Future<void> _refreshAverage() async {
+    final seq = ++_averageSeq;
+    final service = ref.read(actionServiceProvider);
+    final templates = ref.read(templatesProvider).value ?? const [];
+    final t = templates.where((x) => x.id == _templateId).firstOrNull;
+    final name = (t?.name ?? _name.text).trim();
+    final avg = name.isEmpty ? null : await service.templateAverage(name);
+    if (!mounted || seq != _averageSeq) return;
+    setState(() => _average = avg);
+  }
+
+  void _refreshAverageSoon() {
+    _averageTimer?.cancel();
+    _averageTimer = Timer(
+      const Duration(milliseconds: 300),
+      _refreshAverage,
+    );
+  }
+
+  /// 'Average 45 min' (+ how the typed [minutes] compare), or null without an
+  /// average.
+  Widget? _averageNote(String? minutes, Key key) {
+    final avg = _average;
+    if (avg == null) return null;
+    final avgMin = (avg.inSeconds / 60).round();
+    final typed = int.tryParse(minutes ?? '');
+    final scheme = Theme.of(context).colorScheme;
+    String text = 'Average of finished runs: $avgMin min';
+    var differs = false;
+    if (typed != null && typed != avgMin) {
+      differs = true;
+      final d = typed - avgMin;
+      text += ' · yours is ${d.abs()} min ${d > 0 ? 'longer' : 'shorter'}';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        text,
+        key: key,
+        style: TextStyle(
+          fontSize: 12,
+          color: differs ? scheme.error : scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -370,11 +428,15 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         _rows.add(_OccRow(day: _start.weekday - 1));
       }
     }
-    if (mounted) setState(() => _loaded = true);
+    if (mounted) {
+      setState(() => _loaded = true);
+      _refreshAverage();
+    }
   }
 
   @override
   void dispose() {
+    _averageTimer?.cancel();
     _name.dispose();
     _cycleDays.dispose();
     _everyMonths.dispose();
@@ -426,6 +488,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
       if (nu != null && (cur.isEmpty || cur == old)) _name.text = nu;
       _templateId = id;
     });
+    _refreshAverage();
   }
 
   Future<void> _save() async {
@@ -637,6 +700,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
         decoration: const InputDecoration(labelText: 'Minutes', isDense: true),
+        onChanged: (_) => setState(() {}),
       ),
     );
     final name = TextField(
@@ -687,6 +751,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                 buttons,
               ],
             ),
+          ?_averageNote(r.duration.text, ValueKey('plan-row-avg-$i')),
           _extrasEditor(r, 'row-$i', allRows: true),
         ],
       ),
@@ -1044,6 +1109,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                 key: const ValueKey('plan-monthly-duration'),
                 controller: _manual,
                 keyboardType: TextInputType.number,
+                onChanged: (_) => setState(() {}),
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: const InputDecoration(
                   labelText: 'Minutes',
@@ -1053,6 +1119,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
             ),
           ],
         ),
+        ?_averageNote(_manual.text, const ValueKey('plan-monthly-avg')),
         _extrasEditor(_monthlyExtras, 'monthly'),
       ],
     );
@@ -1085,7 +1152,10 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                       controller: _name,
                       autofocus: isNew,
                       decoration: const InputDecoration(hintText: 'Name'),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) {
+                        setState(() {});
+                        _refreshAverageSoon();
+                      },
                     ),
                     const SizedBox(height: 8),
                     DropdownButton<String?>(
