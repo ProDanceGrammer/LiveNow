@@ -445,4 +445,55 @@ void main() {
     expect(before, findsNWidgets(7));
     await unmount(tester);
   });
+
+  testWidgets('dragging one ghost does not pull the other plan items of that day', (
+    tester,
+  ) async {
+    Future<void> daily(PlanService plans, String name, int startMin) async {
+      await plans.saveItem(
+        PlanItemInput(
+          name: name,
+          kind: PlanKind.cycle,
+          startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+          cycle: CycleRule(
+            cycleDays: 1,
+            occurrences: [
+              CycleOccurrence(day: 0, startMin: startMin, durationMin: 30),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Every item has the same occurrence key (date#0) on a day.
+    await mount(
+      tester,
+      seed: (plans) async {
+        await daily(plans, 'Alpha', 20 * 60);
+        await daily(plans, 'Beta', 21 * 60);
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+
+    final alpha = find.text('Alpha\n20:00-20:30').first;
+    final hour = tester.getSize(find.byKey(const ValueKey('day-column-0'))).height / 24;
+    final g = await tester.startGesture(
+      tester.getCenter(alpha),
+      kind: PointerDeviceKind.mouse,
+    );
+    await g.moveBy(const Offset(0, 1));
+    await tester.pump();
+    await g.moveBy(Offset(0, -hour));
+    await tester.pump();
+
+    // Only Alpha of that day moves (19:00); Beta and the other days stay.
+    expect(find.text('Alpha\n19:00-19:30'), findsOneWidget);
+    expect(find.text('Alpha\n20:00-20:30'), findsNWidgets(6));
+    expect(find.text('Beta\n21:00-21:30'), findsNWidgets(7));
+    expect(find.text('Beta\n20:00-20:30'), findsNothing);
+    await g.cancel();
+    await tester.pump(const Duration(milliseconds: 500));
+    await unmount(tester);
+  });
 }

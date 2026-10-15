@@ -110,6 +110,11 @@ const _kDay = 24 * 60;
 
 int _floorDiv(int a, int b) => (a / b).floor();
 
+/// Identifies ONE occurrence: `PlanOccurrence.key` is only `YYYY-MM-DD#row`, which
+/// every plan item has on the same day - a drag that compared it alone pulled all
+/// of them together.
+String _idOf(PlanOccurrence o) => '${o.planItemId}|${o.key}';
+
 class _PlanGhostLayerState extends State<PlanGhostLayer> {
   _GhostDrag? _drag;
 
@@ -250,7 +255,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
   }
 
   Widget _ghost(BuildContext context, ColorScheme scheme, _Slot s) {
-    final drag = _drag?.key == s.occ.key ? _drag : null;
+    final drag = _drag?.key == _idOf(s.occ) ? _drag : null;
     // The occurrence as it is (or as the drag would make it), from its own
     // midnight; this slice is the part that falls on its day.
     var mainStart = s.occ.startMin;
@@ -331,7 +336,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     // The drag starts at the pointer DOWN (so the first pixels count) and is
     // measured against that point, not summed from deltas.
     void start(DragStartDetails d, bool resize) => setState(
-      () => _drag = _GhostDrag(s.occ.key, resize, d.globalPosition.dy),
+      () => _drag = _GhostDrag(_idOf(s.occ), resize, d.globalPosition.dy),
     );
     void update(DragUpdateDetails u) =>
         setState(() => _drag?.dy = u.globalPosition.dy - _drag!.startY);
@@ -348,7 +353,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
       body = GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => widget.onEdit(s.occ),
-        onLongPressStart: (_) => setState(() => _drag = _GhostDrag(s.occ.key, false, 0)),
+        onLongPressStart: (_) => setState(() => _drag = _GhostDrag(_idOf(s.occ), false, 0)),
         onLongPressMoveUpdate: (u) =>
             setState(() => _drag?.dy = u.offsetFromOrigin.dy),
         onLongPressEnd: (_) => _finish(s),
