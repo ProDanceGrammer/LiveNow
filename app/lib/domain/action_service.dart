@@ -77,6 +77,38 @@ class BudgetTxDetach {
 }
 
 /// Everything [ActionService.deleteActions] removed, in deletion order.
+/// The data a template gives a NEW action (what the editor is prefilled with):
+/// see [ActionService.templateDraft].
+class ActionDraft {
+  const ActionDraft({
+    required this.name,
+    this.isAllDay = false,
+    this.startAt,
+    this.endAt,
+    this.notes,
+    this.metricIds = const [],
+    this.countableActivityId,
+    this.diaryBlocks,
+    this.postponeFlex = 'flexible',
+    this.depthLevel,
+    this.estimatedMinutes,
+  });
+
+  final String name;
+  final bool isAllDay;
+  final DateTime? startAt;
+  final DateTime? endAt;
+  final String? notes;
+  final List<String> metricIds;
+  final String? countableActivityId;
+
+  /// The template's "What is done?" Blocks codes (stored in `result_note`).
+  final String? diaryBlocks;
+  final String postponeFlex;
+  final String? depthLevel;
+  final int? estimatedMinutes;
+}
+
 class DeleteManyUndo {
   final List<DeleteUndo> parts;
 
@@ -1361,7 +1393,46 @@ class ActionService {
     String? planItemId,
     String? planKey,
   }) async {
-    final payload = await _templatePayload(templateId);
+    final d = await templateDraft(
+      templateId,
+      startUtc: startUtc,
+      duration: duration,
+    );
+    final id = await createAction(
+      name: name ?? d.name,
+      postponeFlex: d.postponeFlex,
+      depthLevel: d.depthLevel,
+      startAt: d.startAt,
+      endAt: d.endAt,
+      isAllDay: d.isAllDay,
+      estimatedMinutes: d.estimatedMinutes,
+      countableActivityId: d.countableActivityId,
+      notes: d.notes,
+      metricIds: d.metricIds,
+      planItemId: planItemId,
+      planKey: planKey,
+    );
+    await setDiaryBlocks(id, d.diaryBlocks);
+    return id;
+  }
+
+  /// What template [templateId] gives a new action starting at [startUtc]
+  /// (null = no schedule): its name, directions (deleted ones dropped), notes,
+  /// the Countable Activity of the same name, the "What is done?" Blocks and the
+  /// times - [duration] long, default [templateDuration]; an all-day template
+  /// gets that day's Istanbul midnight and no end. Throws [StateError] when the
+  /// template no longer exists.
+  Future<ActionDraft> templateDraft(
+    String templateId, {
+    DateTime? startUtc,
+    Duration? duration,
+  }) async {
+    final Map<String, dynamic> payload;
+    try {
+      payload = await _templatePayload(templateId);
+    } on StateError {
+      throw StateError('That template no longer exists.');
+    }
     final a = await _templateArgs(payload);
     final wanted = a.name.trim().toLowerCase();
     String? activityId;
@@ -1371,37 +1442,45 @@ class ActionService {
         break;
       }
     }
-    final dur =
-        duration ??
-        await templateDuration(templateId) ??
-        defaultActionDuration;
-    final DateTime start;
-    final DateTime? end;
-    if (a.isAllDay) {
-      final local = tz.TZDateTime.from(startUtc, _location());
-      start = tz.TZDateTime(_location(), local.year, local.month, local.day)
-          .toUtc();
-      end = null;
-    } else {
-      start = startUtc;
-      end = startUtc.add(dur);
+    DateTime? start;
+    DateTime? end;
+    if (startUtc != null) {
+      if (a.isAllDay) {
+        final local = tz.TZDateTime.from(startUtc, _location());
+        start = tz.TZDateTime(_location(), local.year, local.month, local.day)
+            .toUtc();
+      } else {
+        final dur =
+            duration ??
+            await templateDuration(templateId) ??
+            defaultActionDuration;
+        start = startUtc;
+        end = startUtc.add(dur);
+      }
     }
-    final id = await createAction(
-      name: name ?? a.name,
-      postponeFlex: a.postponeFlex,
-      depthLevel: a.depthLevel,
+    final blocks = (payload['diaryBlocks'] as String?)?.trim();
+    return ActionDraft(
+      name: a.name,
+      isAllDay: a.isAllDay,
       startAt: start,
       endAt: end,
-      isAllDay: a.isAllDay,
-      estimatedMinutes: a.estimatedMinutes,
-      countableActivityId: activityId,
       notes: a.notes,
       metricIds: a.metricIds,
-      planItemId: planItemId,
-      planKey: planKey,
+      countableActivityId: activityId,
+      diaryBlocks: blocks == null || blocks.isEmpty ? null : blocks,
+      postponeFlex: a.postponeFlex,
+      depthLevel: a.depthLevel,
+      estimatedMinutes: a.estimatedMinutes,
     );
-    await _applyTemplateBlocks(id, payload);
-    return id;
+  }
+
+  /// Writes the "What is done?" Blocks codes (`result_note`) of an action; empty
+  /// or null does nothing.
+  Future<void> setDiaryBlocks(String actionId, String? blocks) async {
+    final text = blocks?.trim();
+    if (text == null || text.isEmpty) return;
+    await (db.update(db.actionsTable)..where((t) => t.id.equals(actionId)))
+        .write(ActionsTableCompanion(resultNote: Value(text)));
   }
 
   Future<Map<String, dynamic>> _templatePayload(String templateId) async {

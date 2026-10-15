@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/action_urgency.dart';
+import '../../domain/action_service.dart' show ActionDraft;
 import '../../domain/chain_schedule.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/duration_rules.dart';
@@ -80,6 +81,15 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
   /// Unsaved edits to restore (Undo after a Back-button close).
   final ActionEditorDraft? draft;
 
+  /// For a new action: what a template gives it (name, directions, notes,
+  /// activity, times ...); the form opens prefilled and nothing is written until
+  /// Save.
+  final ActionDraft? initialDraft;
+
+  /// For a new action: once it is created it becomes the previous
+  /// ([asPredecessor]) or next action of [actionId].
+  final ({String actionId, bool asPredecessor})? linkTo;
+
   const ActionEditorDialog({
     super.key,
     this.existing,
@@ -87,6 +97,8 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     this.initialEnd,
     this.initialMetricIds = const {},
     this.draft,
+    this.initialDraft,
+    this.linkTo,
   });
 
   static Future<void> show(
@@ -96,6 +108,8 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     DateTime? initialEnd,
     Set<String> initialMetricIds = const {},
     ActionEditorDraft? draft,
+    ActionDraft? initialDraft,
+    ({String actionId, bool asPredecessor})? linkTo,
   }) {
     return showStackedDialog<void>(
       context: context,
@@ -105,6 +119,8 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
         initialEnd: initialEnd,
         initialMetricIds: initialMetricIds,
         draft: draft,
+        initialDraft: initialDraft,
+        linkTo: linkTo,
       ),
     );
   }
@@ -171,6 +187,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     _startAt = widget.initialStart;
     _endAt = widget.initialEnd;
     _selectedMetricIds = {...widget.initialMetricIds};
+    final pre = widget.initialDraft;
+    if (existing == null && pre != null) {
+      _nameController.text = pre.name;
+      _startAt = pre.startAt ?? widget.initialStart;
+      _endAt = pre.endAt ?? widget.initialEnd;
+      _isAllDay = pre.isAllDay;
+      _notes = pre.notes;
+      _notesOpen =
+          _notes != null && !notesDocumentIsEmpty(notesDocumentFromJson(_notes));
+      _countableActivityId = pre.countableActivityId;
+      _postponeFlex = pre.postponeFlex;
+      _depthLevel = pre.depthLevel;
+      _selectedMetricIds = {...pre.metricIds, ...widget.initialMetricIds};
+    }
 
     if (existing != null) {
       _postponeFlex = existing.postponeFlex;
@@ -223,7 +253,12 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
       _postponeFlex = d.postponeFlex;
       _depthLevel = d.depthLevel;
     }
-    if (existing == null) _baselineMetricIds = {...widget.initialMetricIds};
+    if (existing == null) {
+      _baselineMetricIds = {
+        ...?widget.initialDraft?.metricIds,
+        ...widget.initialMetricIds,
+      };
+    }
   }
 
   @override
@@ -236,15 +271,21 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   /// database holds it now: Start/Finish/Postpone and autosave write there).
   bool get _isDirty {
     final base = _seen ?? widget.existing;
-    if (_nameController.text != (base?.name ?? '')) return true;
+    final pre = base == null ? widget.initialDraft : null;
+    if (_nameController.text != (base?.name ?? pre?.name ?? '')) return true;
     final start = base == null
-        ? widget.initialStart
+        ? (pre?.startAt ?? widget.initialStart)
         : dateTimeFromDb(base.startAt);
-    final end = base == null ? widget.initialEnd : dateTimeFromDb(base.endAt);
+    final end = base == null
+        ? (pre?.endAt ?? widget.initialEnd)
+        : dateTimeFromDb(base.endAt);
     if (_startAt != start || _endAt != end) return true;
-    if (_isAllDay != (base?.isAllDay ?? false)) return true;
-    if (_notes != base?.notes) return true;
-    if (_countableActivityId != base?.countableActivityId) return true;
+    if (_isAllDay != (base?.isAllDay ?? pre?.isAllDay ?? false)) return true;
+    if (_notes != (base == null ? pre?.notes : base.notes)) return true;
+    if (_countableActivityId !=
+        (base == null ? pre?.countableActivityId : base.countableActivityId)) {
+      return true;
+    }
     return !(_selectedMetricIds.length == _baselineMetricIds.length &&
         _selectedMetricIds.containsAll(_baselineMetricIds));
   }
@@ -736,7 +777,14 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
               childrenPadding: kSectionChildrenPadding,
               initiallyExpanded: true,
               expandedCrossAxisAlignment: CrossAxisAlignment.start,
-              children: [_DependencySection(actionId: widget.existing!.id)],
+              children: [
+                _DependencySection(
+                  actionId: widget.existing!.id,
+                  startAt: _startAt,
+                  endAt: _endAt,
+                  isAllDay: _isAllDay,
+                ),
+              ],
             ),
           ),
         if (_isEditing) ActionBudgetSection(actionId: widget.existing!.id),
@@ -953,8 +1001,28 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         metricIds: _selectedMetricIds.toList(),
         notes: _notes,
       );
+      await service.setDiaryBlocks(_createdId!, widget.initialDraft?.diaryBlocks);
+      await _linkCreated(_createdId!);
     }
     return true;
+  }
+
+  /// A new action made from the Connected actions block becomes the previous /
+  /// next action of the one it was made for.
+  Future<void> _linkCreated(String newId) async {
+    final link = widget.linkTo;
+    if (link == null) return;
+    final overlay = rootOverlayOf(context);
+    try {
+      await ref
+          .read(dependencyServiceProvider)
+          .addDependency(
+            predecessorId: link.asPredecessor ? newId : link.actionId,
+            successorId: link.asPredecessor ? link.actionId : newId,
+          );
+    } on DependencyCycleException {
+      showInfoToast(overlay, 'That would create a dependency cycle.');
+    }
   }
 
   Future<void> _save() async {
@@ -1028,7 +1096,18 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
 class _DependencySection extends ConsumerWidget {
   final String actionId;
 
-  const _DependencySection({required this.actionId});
+  /// The current form schedule: a NEW previous / next action is placed right
+  /// next to it.
+  final DateTime? startAt;
+  final DateTime? endAt;
+  final bool isAllDay;
+
+  const _DependencySection({
+    required this.actionId,
+    this.startAt,
+    this.endAt,
+    this.isAllDay = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1127,16 +1206,74 @@ class _DependencySection extends ConsumerWidget {
     );
   }
 
+  /// 'New action...' / 'New from template...': opens the editor of the new action
+  /// (prefilled, times right next to this one); it is created and linked when
+  /// that editor is saved.
+  Future<void> _createNew(
+    BuildContext context,
+    WidgetRef ref,
+    bool asPredecessor,
+    ActionPickResult pick,
+  ) async {
+    final service = ref.read(actionServiceProvider);
+    final overlay = rootOverlayOf(context);
+    final link = (actionId: actionId, asPredecessor: asPredecessor);
+    ActionDraft? draft;
+    var length = defaultActionDuration;
+    if (pick is ActionPickFromTemplate) {
+      final templateId = await TemplatePickerDialog.show(context);
+      if (templateId == null || !context.mounted) return;
+      try {
+        length = await service.templateDuration(templateId) ?? length;
+        final sched = adjacentSchedule(
+          before: asPredecessor,
+          startAt: startAt,
+          endAt: endAt,
+          isAllDay: isAllDay,
+          length: length,
+        );
+        draft = await service.templateDraft(
+          templateId,
+          startUtc: sched?.start,
+          duration: length,
+        );
+      } on StateError catch (e) {
+        showInfoToast(overlay, e.message);
+        return;
+      }
+    }
+    if (!context.mounted) return;
+    final sched = adjacentSchedule(
+      before: asPredecessor,
+      startAt: startAt,
+      endAt: endAt,
+      isAllDay: isAllDay,
+      length: length,
+    );
+    await ActionEditorDialog.show(
+      context,
+      initialStart: sched?.start,
+      initialEnd: sched?.end,
+      initialDraft: draft,
+      linkTo: link,
+    );
+  }
+
   Future<void> _addDependency(
     BuildContext context,
     WidgetRef ref, {
     required bool asPredecessor,
   }) async {
-    final chosen = await ActionPickerDialog.show(
+    final pick = await ActionPickerDialog.showWithCreate(
       context,
       excludeIds: {actionId},
     );
-    if (chosen == null) return;
+    if (pick == null || !context.mounted) return;
+    if (pick is! ActionPickExisting) {
+      await _createNew(context, ref, asPredecessor, pick);
+      return;
+    }
+    final chosen = pick.item;
 
     final deps = ref.read(dependencyServiceProvider);
     try {

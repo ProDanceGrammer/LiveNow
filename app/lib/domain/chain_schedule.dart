@@ -65,3 +65,22 @@ Duration _length(DateTime? start, DateTime? end) =>
     end: earliest,
   );
 }
+
+/// Where a NEW action of [length] goes directly before ([before]) or after the
+/// current one: it ends exactly when the current action starts / starts exactly
+/// when it ends. An action without a start, or an all-day one, has no time to be
+/// next to: null (the new action then has no schedule either).
+({DateTime start, DateTime end})? adjacentSchedule({
+  required bool before,
+  required DateTime? startAt,
+  required DateTime? endAt,
+  required bool isAllDay,
+  required Duration length,
+}) {
+  if (isAllDay || startAt == null) return null;
+  if (before) {
+    return (start: startAt.subtract(length), end: startAt);
+  }
+  final end = endAt ?? startAt.add(computeActionDuration(startAt: startAt, endAt: null));
+  return (start: end, end: end.add(length));
+}
