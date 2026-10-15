@@ -93,11 +93,13 @@ void main() {
     WidgetTester tester,
     Finder block,
     Offset localFrom,
-    Offset delta,
-  ) async {
+    Offset delta, {
+    int buttons = kPrimaryButton,
+  }) async {
     final g = await tester.startGesture(
       tester.getTopLeft(block) + localFrom,
       kind: PointerDeviceKind.mouse,
+      buttons: buttons,
     );
     await g.moveBy(const Offset(0, 1));
     await tester.pump();
@@ -303,32 +305,32 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('the magnet locks a dragged block onto the edge of another one '
-      '(Alt = grid only)', (tester) async {
+  testWidgets('right button follows the edges of other events, left button the grid', (
+    tester,
+  ) async {
     await pump(tester);
     final a = await create(tester, 'First', at(10), at(11));
     await create(tester, 'Second', at(12, 5), at(13)); // off the 10-min grid
     await useDays(tester, 3);
-    // 61 min down: the grid alone would end at 12:00, the magnet at 12:05.
+    // Right button, 61 min down: the magnet ends it at 12:05, not 12:00.
     await dragBy(
       tester,
       find.byKey(ValueKey('event-$a')),
       const Offset(30, 10),
       Offset(0, 61 * pxPerMinute(tester)),
+      buttons: kSecondaryButton,
     );
     var r = await row(tester, a);
     expect(dateTimeFromDb(r.startAt), at(11, 5));
     expect(dateTimeFromDb(r.endAt), at(12, 5));
 
-    // With Alt held the magnet is off: plain 10-minute steps.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    // Left button: plain 10-minute steps, no magnet.
     await dragBy(
       tester,
       find.byKey(ValueKey('event-$a')),
       const Offset(30, 10),
       Offset(0, -61 * pxPerMinute(tester)),
     );
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     r = await row(tester, a);
     expect(dateTimeFromDb(r.startAt), at(10, 5));
     await unmount(tester);
@@ -342,8 +344,9 @@ void main() {
     final g = await tester.startGesture(
       tester.getTopLeft(find.byKey(ValueKey('event-$a'))) + const Offset(30, 10),
       kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryButton,
     );
-    await g.moveBy(const Offset(0, 1));
+    await g.moveBy(const Offset(0, 5));
     await tester.pump();
     await g.moveBy(Offset(0, 61 * pxPerMinute(tester)));
     await tester.pump();
@@ -382,6 +385,7 @@ void main() {
         find.byKey(ValueKey('event-$mover')),
         const Offset(30, 15),
         Offset(0, wantedStart.difference(cur).inMinutes * ppm + extraPx),
+        buttons: kSecondaryButton,
       );
       return row(tester, mover);
     }

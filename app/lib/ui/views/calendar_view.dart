@@ -14,7 +14,8 @@ import 'package:flutter/gestures.dart'
         PointerScrollEvent,
         PointerSignalEvent,
         PointerUpEvent,
-        kPrimaryButton;
+        kPrimaryButton,
+        kSecondaryButton;
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
@@ -218,6 +219,11 @@ bool _pressDragged = false;
 /// opens the editor, or toggles once something is selected; a long-press
 /// selects), unlike a mouse.
 PointerDeviceKind _pressKind = PointerDeviceKind.mouse;
+
+/// The pressed mouse button was the RIGHT one: a desktop drag started with it
+/// follows other events' edges (the magnet); the left button moves in plain
+/// 10-minute steps.
+bool _pressSecondary = false;
 bool get _touchPress =>
     _pressKind == PointerDeviceKind.touch ||
     _pressKind == PointerDeviceKind.stylus;
@@ -272,6 +278,7 @@ void _onPress(
   _pressCollapseId = null;
   _pressDragged = false;
   _pressKind = e.kind;
+  _pressSecondary = (e.buttons & kSecondaryButton) != 0;
   // On a phone a touch only selects through the long-press (see
   // [_phoneSelect]); a wide window's clicks always select on press.
   if (phone && _touchPress) return;
@@ -2233,7 +2240,6 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _cross.stripTarget.value = null;
     _stopEdgeTurn();
     _stopScrollTurn();
-    HardwareKeyboard.instance.removeHandler(_altHandler);
     _tick?.cancel();
     _settle?.cancel();
     _endMarquee();
@@ -2464,15 +2470,18 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     _draggedIds.value = {for (final m in members) m.id};
     // The edges of every other timed event, for the magnet.
     final memberIds = {for (final m in members) m.id};
+    // The magnet: a phone always has it, a desktop only for a RIGHT-button drag
+    // (the left button moves in plain 10-minute steps).
+    final magnetOn = usePhoneLayout(context) || _pressSecondary;
     final edges = <DateTime>{};
     for (final a in widget.items) {
+      if (!magnetOn) break;
       if (a.isAllDay || a.startAt == null || memberIds.contains(a.id)) continue;
       edges
         ..add(a.startAt!)
         ..add(_effectiveEnd(a));
     }
     final sortedEdges = edges.toList()..sort();
-    HardwareKeyboard.instance.addHandler(_altHandler);
     _dragN.value = _Drag(
       grabbed: grabbed,
       grabbedColumn: p.event.day,
@@ -2582,17 +2591,6 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// The neighbour edge the preview locked onto (drawn as a guide line).
   DateTime? _snapAt;
 
-  /// Holding Alt on a desktop turns the magnet off; a key press does not move
-  /// the pointer, so the preview is nudged by hand.
-  bool _altHandler(KeyEvent e) {
-    if (e.logicalKey == LogicalKeyboardKey.altLeft ||
-        e.logicalKey == LogicalKeyboardKey.altRight) {
-      final d = _drag;
-      if (d != null && !_committing) _dragN.value = d.at(d.current);
-    }
-    return false;
-  }
-
   void _dragUpdate(Offset pos) {
     final d = _drag;
     if (d == null || _committing) return;
@@ -2693,7 +2691,6 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   void _clearDrag() {
     _stopEdgeTurn();
     _stopScrollTurn();
-    HardwareKeyboard.instance.removeHandler(_altHandler);
     _snapAt = null;
     _cross.gridDragging = false;
     _cross.stripTarget.value = null;
@@ -2733,9 +2730,8 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     );
     final dayDelta = scrolled + column - d.grabbedColumn;
 
-    // The magnet (a desktop can switch it off with Alt; a phone has no Alt).
-    final magnet =
-        usePhoneLayout(context) || !HardwareKeyboard.instance.isAltPressed;
+    // The magnet works only when the drag has neighbour edges (see _dragStart).
+    const magnet = true;
     // A one-day block normally stays inside its day; once the grid has been
     // scrolled by an hour or more during the drag (held at the edge) it may be
     // carried across midnight.
@@ -3822,6 +3818,11 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
   Timer? _armTimer;
   bool _armed = false;
   bool _heldStill = true;
+
+  /// Desktop right-button press: where it went down and the y inside the block
+  /// (null = none); the drag starts once the pointer has travelled a little.
+  Offset? _rightDown;
+  double _rightLocalY = 0;
   Offset _pressPos = Offset.zero;
 
   void _disarm() {
@@ -4042,9 +4043,28 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     // release) arrives through the grid's global pointer route, so the drag
     // survives this block being rebuilt or unmounted mid-drag.
     return Listener(
-      onPointerDown: (e) =>
-          _onPress(ref, item.id, e, phone: usePhoneLayout(context)),
-      onPointerUp: (_) => _onRelease(ref, item.id),
+      onPointerDown: (e) {
+        _onPress(ref, item.id, e, phone: usePhoneLayout(context));
+        // Desktop: a RIGHT-button drag moves / resizes too, with the magnet.
+        if (!usePhoneLayout(context) &&
+            e.kind == PointerDeviceKind.mouse &&
+            (e.buttons & kSecondaryButton) != 0) {
+          _rightDown = e.position;
+          _rightLocalY = e.localPosition.dy;
+        } else {
+          _rightDown = null;
+        }
+      },
+      onPointerMove: (e) {
+        final o = _rightDown;
+        if (o == null || (e.position - o).distance < 4) return;
+        _rightDown = null;
+        widget.onDragStart(_kindAt(_rightLocalY), o);
+      },
+      onPointerUp: (_) {
+        _rightDown = null;
+        _onRelease(ref, item.id);
+      },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         dragStartBehavior: DragStartBehavior.down,
