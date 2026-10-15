@@ -192,6 +192,35 @@ Future<void> runUndoableSetMetricsMany(
   );
 }
 
+/// The countable activity of SEVERAL actions at once (null clears it), one
+/// transaction, ONE Undo.
+Future<void> runUndoableSetActivityMany(
+  BuildContext context,
+  WidgetRef ref,
+  Iterable<String> actionIds,
+  String? activityId,
+) async {
+  final ids = actionIds.toList();
+  if (ids.isEmpty) return;
+  final service = ref.read(bulkEditServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final lastUndo = ref.read(undoHistoryProvider.notifier);
+
+  final undo = await service.setActivityMany(ids, activityId);
+  if (undo.before.isEmpty) {
+    showInfoToast(overlay, 'Nothing to change');
+    return;
+  }
+  _offerUndo(
+    overlay,
+    lastUndo,
+    undo.before.length == 1
+        ? 'Countable activity changed'
+        : 'Countable activity changed for ${undo.before.length} actions',
+    () => service.undoSetActivityMany(undo),
+  );
+}
+
 /// The same previous / next action for SEVERAL actions ([mode]: add / remove /
 /// replace), one transaction and ONE Undo. Pairs that would close a loop are
 /// skipped and mentioned in the toast.

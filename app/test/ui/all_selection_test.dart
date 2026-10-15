@@ -281,4 +281,37 @@ void main() {
     await tester.pump(const Duration(seconds: 6));
     await unmount(tester);
   });
+
+  testWidgets('the bulk bar sets the countable activity of every selected action', (
+    tester,
+  ) async {
+    await pump(tester);
+    final activity = (await tester.runAsync(
+      () => ActionService(db).createCountableActivity('Reading'),
+    ))!;
+    await settle(tester);
+    await tester.tap(find.byKey(ValueKey('all-check-${ids[0]}')));
+    await tester.tap(find.byKey(ValueKey('all-check-${ids[1]}')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('bulk-activity')));
+    await settle(tester, 400);
+    await tester.tap(find.text('Reading').last);
+    await settle(tester, 400);
+
+    Future<List<String?>> activities() async => (await tester.runAsync(
+      () async => [
+        for (final id in ids.take(3))
+          (await (db.select(db.actionsTable)..where((t) => t.id.equals(id)))
+                  .getSingle())
+              .countableActivityId,
+      ],
+    ))!;
+    expect(await activities(), [activity, activity, null]);
+
+    // Undo puts them back.
+    await tester.tap(find.text('Undo'));
+    await settle(tester, 400);
+    expect(await activities(), [null, null, null]);
+    await unmount(tester);
+  });
 }

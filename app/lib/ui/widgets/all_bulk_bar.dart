@@ -84,6 +84,12 @@ class AllBulkBar extends ConsumerWidget {
                       () => runBulkDirections(context, ref, ids()),
                     ),
                     action(
+                      'bulk-activity',
+                      const Icon(Icons.track_changes),
+                      'Activity',
+                      () => runBulkActivity(context, ref, ids()),
+                    ),
+                    action(
                       'bulk-previous',
                       // The Continue arrow mirrored: the action BEFORE.
                       const ContinueGlyph(mirrored: true),

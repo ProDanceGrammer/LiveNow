@@ -242,7 +242,11 @@ class PlanItemEditorDialog extends ConsumerStatefulWidget {
     this.initialStart,
     this.initialMinutes,
     this.initialTemplateId,
+    this.initialName,
   });
+
+  /// A name a new item starts with (e.g. the action it is made from).
+  final String? initialName;
 
   final String? itemId;
 
@@ -256,12 +260,16 @@ class PlanItemEditorDialog extends ConsumerStatefulWidget {
     String? itemId,
     DateTime? initialStart,
     int? initialMinutes,
+    String? initialName,
+    String? initialTemplateId,
   }) => showStackedDialog<String>(
     context: context,
     builder: (_) => PlanItemEditorDialog(
       itemId: itemId,
       initialStart: initialStart,
       initialMinutes: initialMinutes,
+      initialName: initialName,
+      initialTemplateId: initialTemplateId,
     ),
   );
 
@@ -341,6 +349,8 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     } else {
       final s = widget.initialStart;
       final mins = widget.initialMinutes;
+      _name.text = widget.initialName ?? '';
+      _templateId = widget.initialTemplateId;
       if (s != null) {
         final date = planDateOf(s);
         final startMin = s.difference(planInstant(date, 0)).inMinutes;

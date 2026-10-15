@@ -19,6 +19,14 @@ class BulkMetricsUndo {
   final Map<String, List<String>> before;
 }
 
+/// The countable activity each changed action had before a bulk edit (for Undo;
+/// null = it had none).
+class BulkActivityUndo {
+  const BulkActivityUndo(this.before);
+
+  final Map<String, String?> before;
+}
+
 /// The edges a bulk link edit added and removed, as (predecessor, successor).
 class BulkLinksUndo {
   const BulkLinksUndo(this.added, this.removed);
@@ -76,6 +84,44 @@ class BulkEditService {
     }
     return BulkMetricsUndo(before);
   });
+
+  /// Sets the countable activity of every action in [actionIds] ([activityId] null
+  /// clears it) in ONE transaction; actions that already have it are skipped.
+  Future<BulkActivityUndo> setActivityMany(
+    Iterable<String> actionIds,
+    String? activityId,
+  ) => db.transaction(() async {
+    final before = <String, String?>{};
+    final now = dateTimeToDb(DateTime.now())!;
+    for (final id in actionIds) {
+      final row = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(id))).getSingleOrNull();
+      if (row == null || row.countableActivityId == activityId) continue;
+      before[id] = row.countableActivityId;
+      await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+        ActionsTableCompanion(
+          countableActivityId: Value(activityId),
+          updatedAt: Value(now),
+        ),
+      );
+    }
+    return BulkActivityUndo(before);
+  });
+
+  Future<void> undoSetActivityMany(BulkActivityUndo undo) =>
+      db.transaction(() async {
+        final now = dateTimeToDb(DateTime.now())!;
+        for (final e in undo.before.entries) {
+          await (db.update(db.actionsTable)..where((t) => t.id.equals(e.key)))
+              .write(
+                ActionsTableCompanion(
+                  countableActivityId: Value(e.value),
+                  updatedAt: Value(now),
+                ),
+              );
+        }
+      });
 
   Future<void> undoSetMetricsMany(BulkMetricsUndo undo) =>
       db.transaction(() async {

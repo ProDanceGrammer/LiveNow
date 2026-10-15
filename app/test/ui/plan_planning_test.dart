@@ -223,4 +223,68 @@ void main() {
     expect(planDateFromKey(swim.startDate).weekday, DateTime.monday);
     await unmount(tester);
   });
+
+  testWidgets('right click on a real action in planning mode offers a plan item', (
+    tester,
+  ) async {
+    await mount(tester);
+    final start = DateTime.now().toUtc();
+    final day = DateTime.utc(start.year, start.month, start.day, 12);
+    final id = (await tester.runAsync(
+      () => ActionService(db).createAction(
+        name: 'Piano',
+        startAt: day,
+        endAt: day.add(const Duration(minutes: 45)),
+      ),
+    ))!;
+    // Not in planning mode yet: the pointer does nothing special.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          calendarVisibleHoursProvider.overrideWith((ref) => 24),
+        ],
+        child: const MaterialApp(home: Scaffold(body: CalendarView())),
+      ),
+    );
+    await settle(tester);
+    final block = find.byKey(ValueKey('event-$id'));
+    expect(block, findsOneWidget);
+    Future<void> rightClick() async {
+      final g = await tester.startGesture(
+        tester.getCenter(block),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await g.up();
+      await settle(tester);
+    }
+
+    await rightClick();
+    expect(find.byKey(const ValueKey('block-plan-from-action')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    await rightClick();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const ValueKey('block-plan-from-action')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('block-plan-from-action')));
+    await settle(tester);
+
+    // The editor opens prefilled with the action's name, time and length.
+    expect(
+      tester.widget<TextField>(find.byKey(const ValueKey('plan-name'))).controller!.text,
+      'Piano',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('plan-row-duration-0')))
+          .controller!
+          .text,
+      '45',
+    );
+    await unmount(tester);
+  });
 }

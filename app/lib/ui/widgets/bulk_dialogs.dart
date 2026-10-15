@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +8,10 @@ import '../../domain/action_service.dart' show ScheduleChange;
 import '../../domain/bulk_edit_service.dart';
 import '../../domain/bulk_schedule.dart';
 import '../dialog_stack.dart';
+import '../providers.dart';
+import '../../domain/name_sort.dart' show compareIgnoringEmoji;
 import '../undo.dart';
+import 'activity_picker_dialog.dart';
 import 'action_picker_dialog.dart';
 import 'app_toast.dart';
 import 'metric_picker.dart';
@@ -121,6 +125,75 @@ class _BulkDirectionsDialogState extends State<_BulkDirectionsDialog> {
       ],
     );
   }
+}
+
+// ---- countable activity -----------------------------------------------------
+
+/// The countable activity of [ids]: the same searchable picker as the action
+/// editor (None clears it, 'New activity...' asks a name).
+Future<void> runBulkActivity(
+  BuildContext context,
+  WidgetRef ref,
+  List<String> ids,
+) async {
+  final service = ref.read(actionServiceProvider);
+  // Nothing listens to the (auto-dispose) stream providers here, so read once.
+  final db = ref.read(databaseProvider);
+  final activities = await (db.select(
+    db.countableActivitiesTable,
+  )..orderBy([(t) => OrderingTerm.asc(t.name)])).get();
+  final templates = [...await db.select(db.actionTemplatesTable).get()]
+    ..sort((a, b) => compareIgnoringEmoji(a.name, b.name));
+  if (!context.mounted) return;
+  final pick = await ActivityPickerDialog.show(
+    context,
+    activities: activities,
+    templates: templates,
+  );
+  if (pick == null || !context.mounted) return;
+  final String? activityId;
+  switch (pick) {
+    case ActivityPickNone():
+      activityId = null;
+    case ActivityPickExisting(:final id):
+      activityId = id;
+    case ActivityPickTemplate(:final name):
+      activityId = await service.countableActivityForTemplate(name);
+    case ActivityPickNew():
+      final name = await _askActivityName(context);
+      if (name == null || name.isEmpty || !context.mounted) return;
+      activityId = await service.createCountableActivity(name);
+  }
+  if (!context.mounted) return;
+  await runUndoableSetActivityMany(context, ref, ids, activityId);
+}
+
+Future<String?> _askActivityName(BuildContext context) {
+  final controller = TextEditingController();
+  return showStackedDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('New countable activity'),
+      content: TextField(
+        key: const ValueKey('bulk-activity-name'),
+        controller: controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Name'),
+        onSubmitted: (v) => Navigator.of(dialogContext).pop(v.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(dialogContext).pop(controller.text.trim()),
+          child: const Text('Create'),
+        ),
+      ],
+    ),
+  ).whenComplete(controller.dispose);
 }
 
 // ---- previous / next --------------------------------------------------------

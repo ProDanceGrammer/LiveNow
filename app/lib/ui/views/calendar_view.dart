@@ -3823,6 +3823,43 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
   /// (null = none); the drag starts once the pointer has travelled a little.
   Offset? _rightDown;
   double _rightLocalY = 0;
+
+  /// Planning mode, right click on a real action: 'Create plan item from this
+  /// action' opens the plan item editor prefilled with its name, time, length
+  /// and the template of the same name (if any).
+  Future<void> _planMenu(Offset at) async {
+    final item = widget.seg.item;
+    final box = Overlay.of(context).context.findRenderObject() as RenderBox;
+    // Everything needed afterwards is read BEFORE the await: the block can be
+    // rebuilt or unmounted while the menu is open.
+    final navContext = Navigator.of(context).context;
+    final db = ref.read(databaseProvider);
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(at & Size.zero, Offset.zero & box.size),
+      items: const [
+        PopupMenuItem(
+          key: ValueKey('block-plan-from-action'),
+          value: 'plan',
+          child: Text('Create plan item from this action'),
+        ),
+      ],
+    );
+    if (choice != 'plan' || !navContext.mounted) return;
+    final key = item.name.trim().toLowerCase();
+    final templates = await db.select(db.actionTemplatesTable).get();
+    final template = templates
+        .where((t) => t.name.trim().toLowerCase() == key)
+        .firstOrNull;
+    if (!navContext.mounted) return;
+    await PlanItemEditorDialog.show(
+      navContext,
+      initialStart: item.startAt,
+      initialMinutes: _effectiveEnd(item).difference(item.startAt!).inMinutes,
+      initialName: item.name,
+      initialTemplateId: template?.id,
+    );
+  }
   Offset _pressPos = Offset.zero;
 
   void _disarm() {
@@ -4061,9 +4098,17 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
         _rightDown = null;
         widget.onDragStart(_kindAt(_rightLocalY), o);
       },
-      onPointerUp: (_) {
+      onPointerUp: (e) {
+        // A right click that did not turn into a drag.
+        final rightClick = _rightDown != null;
         _rightDown = null;
         _onRelease(ref, item.id);
+        if (rightClick &&
+            ref.read(calendarPlanningProvider) &&
+            !item.isAllDay &&
+            item.startAt != null) {
+          _planMenu(e.position);
+        }
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
