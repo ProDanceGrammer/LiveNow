@@ -35,6 +35,7 @@ const Map<String, String> syncTables = {
   'saved_views': 'id',
   'plan_items': 'id',
   'plan_overrides': 'id',
+  'budget_tx_templates': 'id',
 };
 
 /// Derived caches: recomputed on every device, so they are neither tracked

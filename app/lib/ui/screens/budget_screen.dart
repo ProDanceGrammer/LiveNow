@@ -22,6 +22,7 @@ import '../time_format.dart' show formatDateTime, wallFromUtc;
 import '../open_entity.dart';
 import '../widgets/account_icon.dart';
 import '../widgets/budget_tx_options_panel.dart';
+import '../widgets/tx_templates.dart';
 import '../widgets/budget_categories_board.dart';
 import '../widgets/budget_dialogs.dart';
 import '../widgets/budget_format.dart';
@@ -709,6 +710,7 @@ class _TransactionsView extends ConsumerStatefulWidget {
 class _TransactionsViewState extends ConsumerState<_TransactionsView> {
   String _query = '';
   bool _showOptions = false;
+  bool _showTemplates = false;
 
   static double _amount(BudgetTransaction t) =>
       (t.isIncome ? 1 : -1) *
@@ -869,6 +871,16 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                   ),
                 ),
                 IconButton(
+                  key: const ValueKey('tx-templates-toggle'),
+                  isSelected: _showTemplates,
+                  tooltip: _showTemplates
+                      ? 'Hide transaction templates'
+                      : 'Transaction templates',
+                  icon: const Icon(Icons.bookmarks_outlined),
+                  onPressed: () =>
+                      setState(() => _showTemplates = !_showTemplates),
+                ),
+                IconButton(
                   key: const ValueKey('budget-tx-options-toggle'),
                   isSelected: _showOptions || optionsActive,
                   tooltip: _showOptions
@@ -880,6 +892,7 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
               ],
             ),
           ),
+          if (_showTemplates) const TxTemplatesPanel(),
           if (_showOptions) const BudgetTxOptionsPanel(),
           // The total of everything the search and filters leave in the list.
           if (items.isNotEmpty)

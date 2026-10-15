@@ -7912,6 +7912,470 @@ class PlanOverridesTableCompanion extends UpdateCompanion<PlanOverride> {
   }
 }
 
+class $BudgetTxTemplatesTableTable extends BudgetTxTemplatesTable
+    with TableInfo<$BudgetTxTemplatesTableTable, BudgetTxTemplate> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $BudgetTxTemplatesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _categoryIdMeta = const VerificationMeta(
+    'categoryId',
+  );
+  @override
+  late final GeneratedColumn<String> categoryId = GeneratedColumn<String>(
+    'category_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _quantityMeta = const VerificationMeta(
+    'quantity',
+  );
+  @override
+  late final GeneratedColumn<double> quantity = GeneratedColumn<double>(
+    'quantity',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _unitPriceMeta = const VerificationMeta(
+    'unitPrice',
+  );
+  @override
+  late final GeneratedColumn<double> unitPrice = GeneratedColumn<double>(
+    'unit_price',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    categoryId,
+    quantity,
+    unitPrice,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'budget_tx_templates';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<BudgetTxTemplate> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    }
+    if (data.containsKey('category_id')) {
+      context.handle(
+        _categoryIdMeta,
+        categoryId.isAcceptableOrUnknown(data['category_id']!, _categoryIdMeta),
+      );
+    }
+    if (data.containsKey('quantity')) {
+      context.handle(
+        _quantityMeta,
+        quantity.isAcceptableOrUnknown(data['quantity']!, _quantityMeta),
+      );
+    }
+    if (data.containsKey('unit_price')) {
+      context.handle(
+        _unitPriceMeta,
+        unitPrice.isAcceptableOrUnknown(data['unit_price']!, _unitPriceMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  BudgetTxTemplate map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return BudgetTxTemplate(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      categoryId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}category_id'],
+      ),
+      quantity: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}quantity'],
+      )!,
+      unitPrice: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}unit_price'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $BudgetTxTemplatesTableTable createAlias(String alias) {
+    return $BudgetTxTemplatesTableTable(attachedDatabase, alias);
+  }
+}
+
+class BudgetTxTemplate extends DataClass
+    implements Insertable<BudgetTxTemplate> {
+  final String id;
+  final String name;
+  final String? categoryId;
+  final double quantity;
+  final double? unitPrice;
+  final String createdAt;
+  final String updatedAt;
+  const BudgetTxTemplate({
+    required this.id,
+    required this.name,
+    this.categoryId,
+    required this.quantity,
+    this.unitPrice,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    if (!nullToAbsent || categoryId != null) {
+      map['category_id'] = Variable<String>(categoryId);
+    }
+    map['quantity'] = Variable<double>(quantity);
+    if (!nullToAbsent || unitPrice != null) {
+      map['unit_price'] = Variable<double>(unitPrice);
+    }
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  BudgetTxTemplatesTableCompanion toCompanion(bool nullToAbsent) {
+    return BudgetTxTemplatesTableCompanion(
+      id: Value(id),
+      name: Value(name),
+      categoryId: categoryId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(categoryId),
+      quantity: Value(quantity),
+      unitPrice: unitPrice == null && nullToAbsent
+          ? const Value.absent()
+          : Value(unitPrice),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory BudgetTxTemplate.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return BudgetTxTemplate(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      categoryId: serializer.fromJson<String?>(json['categoryId']),
+      quantity: serializer.fromJson<double>(json['quantity']),
+      unitPrice: serializer.fromJson<double?>(json['unitPrice']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'categoryId': serializer.toJson<String?>(categoryId),
+      'quantity': serializer.toJson<double>(quantity),
+      'unitPrice': serializer.toJson<double?>(unitPrice),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  BudgetTxTemplate copyWith({
+    String? id,
+    String? name,
+    Value<String?> categoryId = const Value.absent(),
+    double? quantity,
+    Value<double?> unitPrice = const Value.absent(),
+    String? createdAt,
+    String? updatedAt,
+  }) => BudgetTxTemplate(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    categoryId: categoryId.present ? categoryId.value : this.categoryId,
+    quantity: quantity ?? this.quantity,
+    unitPrice: unitPrice.present ? unitPrice.value : this.unitPrice,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  BudgetTxTemplate copyWithCompanion(BudgetTxTemplatesTableCompanion data) {
+    return BudgetTxTemplate(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      categoryId: data.categoryId.present
+          ? data.categoryId.value
+          : this.categoryId,
+      quantity: data.quantity.present ? data.quantity.value : this.quantity,
+      unitPrice: data.unitPrice.present ? data.unitPrice.value : this.unitPrice,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BudgetTxTemplate(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('quantity: $quantity, ')
+          ..write('unitPrice: $unitPrice, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    name,
+    categoryId,
+    quantity,
+    unitPrice,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is BudgetTxTemplate &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.categoryId == this.categoryId &&
+          other.quantity == this.quantity &&
+          other.unitPrice == this.unitPrice &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class BudgetTxTemplatesTableCompanion
+    extends UpdateCompanion<BudgetTxTemplate> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String?> categoryId;
+  final Value<double> quantity;
+  final Value<double?> unitPrice;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const BudgetTxTemplatesTableCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.categoryId = const Value.absent(),
+    this.quantity = const Value.absent(),
+    this.unitPrice = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  BudgetTxTemplatesTableCompanion.insert({
+    required String id,
+    this.name = const Value.absent(),
+    this.categoryId = const Value.absent(),
+    this.quantity = const Value.absent(),
+    this.unitPrice = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<BudgetTxTemplate> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? categoryId,
+    Expression<double>? quantity,
+    Expression<double>? unitPrice,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (categoryId != null) 'category_id': categoryId,
+      if (quantity != null) 'quantity': quantity,
+      if (unitPrice != null) 'unit_price': unitPrice,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  BudgetTxTemplatesTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String?>? categoryId,
+    Value<double>? quantity,
+    Value<double?>? unitPrice,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return BudgetTxTemplatesTableCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      categoryId: categoryId ?? this.categoryId,
+      quantity: quantity ?? this.quantity,
+      unitPrice: unitPrice ?? this.unitPrice,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (categoryId.present) {
+      map['category_id'] = Variable<String>(categoryId.value);
+    }
+    if (quantity.present) {
+      map['quantity'] = Variable<double>(quantity.value);
+    }
+    if (unitPrice.present) {
+      map['unit_price'] = Variable<double>(unitPrice.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('BudgetTxTemplatesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('categoryId: $categoryId, ')
+          ..write('quantity: $quantity, ')
+          ..write('unitPrice: $unitPrice, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -7943,6 +8407,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $PlanItemsTableTable planItemsTable = $PlanItemsTableTable(this);
   late final $PlanOverridesTableTable planOverridesTable =
       $PlanOverridesTableTable(this);
+  late final $BudgetTxTemplatesTableTable budgetTxTemplatesTable =
+      $BudgetTxTemplatesTableTable(this);
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -8011,6 +8477,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     savedViewsTable,
     planItemsTable,
     planOverridesTable,
+    budgetTxTemplatesTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxActionsStart,
@@ -15648,6 +16115,276 @@ typedef $$PlanOverridesTableTableProcessedTableManager =
       PlanOverride,
       PrefetchHooks Function({bool planItemId})
     >;
+typedef $$BudgetTxTemplatesTableTableCreateCompanionBuilder =
+    BudgetTxTemplatesTableCompanion Function({
+      required String id,
+      Value<String> name,
+      Value<String?> categoryId,
+      Value<double> quantity,
+      Value<double?> unitPrice,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$BudgetTxTemplatesTableTableUpdateCompanionBuilder =
+    BudgetTxTemplatesTableCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String?> categoryId,
+      Value<double> quantity,
+      Value<double?> unitPrice,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$BudgetTxTemplatesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $BudgetTxTemplatesTableTable> {
+  $$BudgetTxTemplatesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get categoryId => $composableBuilder(
+    column: $table.categoryId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get unitPrice => $composableBuilder(
+    column: $table.unitPrice,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$BudgetTxTemplatesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $BudgetTxTemplatesTableTable> {
+  $$BudgetTxTemplatesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get categoryId => $composableBuilder(
+    column: $table.categoryId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get quantity => $composableBuilder(
+    column: $table.quantity,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get unitPrice => $composableBuilder(
+    column: $table.unitPrice,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$BudgetTxTemplatesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $BudgetTxTemplatesTableTable> {
+  $$BudgetTxTemplatesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get categoryId => $composableBuilder(
+    column: $table.categoryId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get quantity =>
+      $composableBuilder(column: $table.quantity, builder: (column) => column);
+
+  GeneratedColumn<double> get unitPrice =>
+      $composableBuilder(column: $table.unitPrice, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$BudgetTxTemplatesTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $BudgetTxTemplatesTableTable,
+          BudgetTxTemplate,
+          $$BudgetTxTemplatesTableTableFilterComposer,
+          $$BudgetTxTemplatesTableTableOrderingComposer,
+          $$BudgetTxTemplatesTableTableAnnotationComposer,
+          $$BudgetTxTemplatesTableTableCreateCompanionBuilder,
+          $$BudgetTxTemplatesTableTableUpdateCompanionBuilder,
+          (
+            BudgetTxTemplate,
+            BaseReferences<
+              _$AppDatabase,
+              $BudgetTxTemplatesTableTable,
+              BudgetTxTemplate
+            >,
+          ),
+          BudgetTxTemplate,
+          PrefetchHooks Function()
+        > {
+  $$BudgetTxTemplatesTableTableTableManager(
+    _$AppDatabase db,
+    $BudgetTxTemplatesTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$BudgetTxTemplatesTableTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$BudgetTxTemplatesTableTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$BudgetTxTemplatesTableTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String?> categoryId = const Value.absent(),
+                Value<double> quantity = const Value.absent(),
+                Value<double?> unitPrice = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => BudgetTxTemplatesTableCompanion(
+                id: id,
+                name: name,
+                categoryId: categoryId,
+                quantity: quantity,
+                unitPrice: unitPrice,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String> name = const Value.absent(),
+                Value<String?> categoryId = const Value.absent(),
+                Value<double> quantity = const Value.absent(),
+                Value<double?> unitPrice = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => BudgetTxTemplatesTableCompanion.insert(
+                id: id,
+                name: name,
+                categoryId: categoryId,
+                quantity: quantity,
+                unitPrice: unitPrice,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$BudgetTxTemplatesTableTable, BudgetTxTemplate>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $BudgetTxTemplatesTableTable,
+                    BudgetTxTemplate
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$BudgetTxTemplatesTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $BudgetTxTemplatesTableTable,
+      BudgetTxTemplate,
+      $$BudgetTxTemplatesTableTableFilterComposer,
+      $$BudgetTxTemplatesTableTableOrderingComposer,
+      $$BudgetTxTemplatesTableTableAnnotationComposer,
+      $$BudgetTxTemplatesTableTableCreateCompanionBuilder,
+      $$BudgetTxTemplatesTableTableUpdateCompanionBuilder,
+      (
+        BudgetTxTemplate,
+        BaseReferences<
+          _$AppDatabase,
+          $BudgetTxTemplatesTableTable,
+          BudgetTxTemplate
+        >,
+      ),
+      BudgetTxTemplate,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -15697,4 +16434,9 @@ class $AppDatabaseManager {
       $$PlanItemsTableTableTableManager(_db, _db.planItemsTable);
   $$PlanOverridesTableTableTableManager get planOverridesTable =>
       $$PlanOverridesTableTableTableManager(_db, _db.planOverridesTable);
+  $$BudgetTxTemplatesTableTableTableManager get budgetTxTemplatesTable =>
+      $$BudgetTxTemplatesTableTableTableManager(
+        _db,
+        _db.budgetTxTemplatesTable,
+      );
 }

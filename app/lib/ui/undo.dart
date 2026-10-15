@@ -450,7 +450,10 @@ Future<PlanConfirmResult> runUndoableConfirmPlan(
       overlay,
       history,
       'Created ${result.createdIds.length} planned actions',
-      () => plans.undoConfirm(result.createdIds),
+      () => plans.undoConfirm(
+        result.createdIds,
+        transactionIds: result.transactionIds,
+      ),
     );
   }
   return result;

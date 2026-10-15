@@ -27,6 +27,7 @@ part 'database.g.dart';
     SavedViewsTable,
     PlanItemsTable,
     PlanOverridesTable,
+    BudgetTxTemplatesTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -36,7 +37,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -145,6 +146,10 @@ class AppDatabase extends _$AppDatabase {
       if (from < 13) {
         // Saved sort / filter views (purely additive).
         await m.createTable(savedViewsTable);
+      }
+      if (from < 15) {
+        // Transaction templates (purely additive).
+        await m.createTable(budgetTxTemplatesTable);
       }
       if (from < 14) {
         // Planning: plan items, their per-day overrides, and the link from a

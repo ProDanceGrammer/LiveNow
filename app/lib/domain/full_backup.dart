@@ -20,6 +20,7 @@ const List<String> backupTableOrder = [
   'metrics',
   'budget_accounts',
   'budget_categories',
+  'budget_tx_templates',
   'budget_transactions',
   'action_dependencies',
   'action_occurrences',

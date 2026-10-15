@@ -74,7 +74,7 @@ void main() {
 
   group('bootstrap', () {
     test(
-      'a fresh database has the sync tables, a device id and 45 triggers',
+      'a fresh database has the sync tables, a device id and 48 triggers',
       () async {
         expect(await deviceId(), matches(RegExp(r'^[0-9a-f]{16}$')));
         expect(await triggerCount(), syncTables.length * 3);
@@ -173,7 +173,7 @@ void main() {
       expect(v.keys, contains('budget_settings|period_months'));
     });
 
-    test('all 15 tables are tracked', () async {
+    test('all 16 tables are tracked', () async {
       final b = BudgetService(db);
       final acc = await b.saveAccount(
         name: 'A',
@@ -211,6 +211,9 @@ void main() {
       );
       await exec(
         "INSERT INTO plan_overrides (id, plan_item_id, date, created_at, updated_at) VALUES ('po1', 'pi1', '2026-10-20', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO budget_tx_templates (id, name, created_at, updated_at) VALUES ('bt1', 'T', 't', 't')",
       );
       final tables = {
         for (final k in (await versions()).keys) k.split('|').first,
@@ -402,11 +405,11 @@ void main() {
       'ensureSyncTriggers is idempotent and restores a missing trigger',
       () async {
         await ensureSyncTriggers(db);
-        expect(await triggerCount(), 45);
+        expect(await triggerCount(), 48);
         await exec('DROP TRIGGER sync_actions_upd');
-        expect(await triggerCount(), 44);
+        expect(await triggerCount(), 47);
         await ensureSyncTriggers(db);
-        expect(await triggerCount(), 45);
+        expect(await triggerCount(), 48);
         final id = await actions.createAction(name: 'x');
         final before = (await versions())['actions|$id']!.seq;
         await exec('UPDATE actions SET name = ? WHERE id = ?', ['y', id]);
@@ -524,7 +527,7 @@ void main() {
               "WHERE type='trigger' AND name LIKE 'sync_%'",
             )
             .getSingle();
-        expect(triggers.read<int>('n'), 45);
+        expect(triggers.read<int>('n'), 48);
         final device = await second
             .customSelect(
               "SELECT value FROM sync_state WHERE key = 'device_id'",

@@ -6,6 +6,8 @@ import '../core/ids.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'action_service.dart';
+import 'budget_service.dart';
+import 'dependency_service.dart';
 import 'duration_rules.dart' show defaultActionDuration;
 import 'plan_rules.dart';
 
@@ -44,10 +46,23 @@ class PlanItemInput {
 /// What a confirmation did: the actions it created (for ONE Undo) and how many
 /// occurrences already had a real action.
 class PlanConfirmResult {
-  const PlanConfirmResult(this.createdIds, this.existing);
+  const PlanConfirmResult(
+    this.createdIds,
+    this.existing, {
+    this.transactionIds = const [],
+    this.skipped = 0,
+  });
 
+  /// Every action created: the main ones AND their Previous / Next companions.
   final List<String> createdIds;
   final int existing;
+
+  /// The transactions created from transaction templates.
+  final List<String> transactionIds;
+
+  /// Links / transactions that could not be made (a cycle, a deleted template or
+  /// category, a group category): counted, never fatal.
+  final int skipped;
 }
 
 /// Everything needed to bring a deleted plan item back.
@@ -66,10 +81,14 @@ class PlanDeleteUndo {
 /// real actions (always through a template, so a plan and the Templates list
 /// stay one catalogue).
 class PlanService {
-  PlanService(this.db, this.actions);
+  PlanService(this.db, this.actions)
+    : _budget = BudgetService(db),
+      _deps = DependencyService(db);
 
   final AppDatabase db;
   final ActionService actions;
+  final BudgetService _budget;
+  final DependencyService _deps;
 
   // ---- reading ----------------------------------------------------------------
 
@@ -192,6 +211,7 @@ class PlanService {
         durationMin: durationMin,
         name: o.name,
         templateId: o.templateId,
+        extras: o.extras,
       );
       rule = jsonEncode(
         CycleRule(cycleDays: data.cycle!.cycleDays, occurrences: occ).toJson(),
@@ -208,6 +228,7 @@ class PlanService {
           startMin: startMin,
           durationMin: durationMin,
           name: m.name,
+          extras: m.extras,
         ).toJson(),
       );
     } else {
@@ -413,6 +434,74 @@ class PlanService {
             null;
 
     final created = <String>[];
+    final transactionIds = <String>[];
+    var skipped = 0;
+
+    // A Previous / Next companion: through its template when it has one, else a
+    // plain action; keyed `<occurrence key>>p<n>` / `>n<n>`.
+    Future<String> createCompanion(
+      PlanOccurrence o,
+      PlanCompanion c,
+      DateTime start,
+      DateTime end,
+      String key,
+      String fallbackName,
+    ) async {
+      final tid = c.templateId;
+      if (tid != null && await templateExists(tid)) {
+        return actions.createFromTemplateAt(
+          tid,
+          start,
+          duration: end.difference(start),
+          name: c.name,
+          planItemId: o.planItemId,
+          planKey: key,
+        );
+      }
+      return actions.createAction(
+        name: c.name ?? fallbackName,
+        startAt: start,
+        endAt: end,
+        planItemId: o.planItemId,
+        planKey: key,
+      );
+    }
+
+    Future<void> makeTransactions(
+      List<String> templateIds,
+      String actionId,
+      DateTime date,
+      String name,
+    ) async {
+      for (final t in templateIds) {
+        try {
+          transactionIds.add(
+            await _budget.createTransactionFromTemplate(
+              t,
+              actionId: actionId,
+              date: date,
+              fallbackName: name,
+            ),
+          );
+        } on BudgetGroupException {
+          skipped++;
+        } on StateError {
+          skipped++;
+        }
+      }
+    }
+
+    Future<void> link(String predecessor, String successor) async {
+      try {
+        await _deps.addDependency(
+          predecessorId: predecessor,
+          successorId: successor,
+        );
+      } on DependencyCycleException {
+        skipped++;
+      }
+    }
+
     await db.transaction(() async {
       for (final o in p.toCreate) {
         final tid = o.templateId;
@@ -438,14 +527,62 @@ class PlanService {
           );
         }
         created.add(id);
+        await makeTransactions(o.extras.txTemplateIds, id, o.startUtc, o.name);
+        for (var n = 0; n < o.extras.prev.length; n++) {
+          final c = o.extras.prev[n];
+          final end = o.startUtc.subtract(Duration(minutes: c.gapMinutes));
+          final start = end.subtract(Duration(minutes: c.minutes));
+          final cid = await createCompanion(
+            o,
+            c,
+            start,
+            end,
+            '${o.key}>p$n',
+            '${o.name} - before',
+          );
+          created.add(cid);
+          await link(cid, id);
+          await makeTransactions(c.txTemplateIds, cid, start, c.name ?? o.name);
+        }
+        for (var n = 0; n < o.extras.next.length; n++) {
+          final c = o.extras.next[n];
+          final start = o.endUtc.add(Duration(minutes: c.gapMinutes));
+          final end = start.add(Duration(minutes: c.minutes));
+          final cid = await createCompanion(
+            o,
+            c,
+            start,
+            end,
+            '${o.key}>n$n',
+            '${o.name} - after',
+          );
+          created.add(cid);
+          await link(id, cid);
+          await makeTransactions(c.txTemplateIds, cid, start, c.name ?? o.name);
+        }
       }
     });
-    return PlanConfirmResult(created, p.existing);
+    return PlanConfirmResult(
+      created,
+      p.existing,
+      transactionIds: transactionIds,
+      skipped: skipped,
+    );
   }
 
-  /// Takes back a confirmation (the actions were just created: no history).
-  Future<DeleteManyUndo> undoConfirm(List<String> ids) =>
-      actions.deleteActions(ids);
+  /// Takes back a confirmation (the actions were just created: no history). The
+  /// transactions go FIRST: deleting an action would only detach them.
+  Future<DeleteManyUndo> undoConfirm(
+    List<String> ids, {
+    List<String> transactionIds = const [],
+  }) async {
+    if (transactionIds.isNotEmpty) {
+      await (db.delete(
+        db.budgetTransactionsTable,
+      )..where((t) => t.id.isIn(transactionIds))).go();
+    }
+    return actions.deleteActions(ids);
+  }
 
   /// Deletes the plan item's generated actions that are still in the future, not
   /// done and never edited since they were created. Returns the undo (null when

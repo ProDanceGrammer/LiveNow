@@ -282,6 +282,28 @@ class SavedViewsTable extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// A reusable transaction (schema v15): what a plan item creates next to the
+/// actions it generates, and what the Budget > Transactions screen lists as
+/// "templates". `category_id` is a soft reference (the category may be deleted;
+/// creating a transaction from such a template is then refused), `unit_price`
+/// null = the category's own price.
+@DataClassName('BudgetTxTemplate')
+class BudgetTxTemplatesTable extends Table {
+  @override
+  String get tableName => 'budget_tx_templates';
+
+  TextColumn get id => text()();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  TextColumn get categoryId => text().nullable()();
+  RealColumn get quantity => real().withDefault(const Constant(1))();
+  RealColumn get unitPrice => real().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// A recurring plan (schema v14): what the calendar's planning mode shows as
 /// translucent blocks and what "confirm" turns into real actions.
 /// `kind` is `cycle` (every N days, occurrences per cycle day) or `monthly`;

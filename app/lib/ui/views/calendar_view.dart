@@ -2698,7 +2698,13 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final dx = d.current.dx - d.origin.dx;
     // Pointer travel + the grid's own scroll since the drag began: a wheel
     // turning mid-drag must carry the block along.
-    var minutes = dragMinuteDelta(
+    final latticeMinutes = dragMinuteDelta(
+      d.current.dy - d.origin.dy,
+      _scrollOffsetNow - d.originScroll,
+      pxPerMinute: _pxPerMinute,
+    );
+    // Where the pointer really is (the magnet looks at this, not the lattice).
+    final rawMinutes = rawMinuteDelta(
       d.current.dy - d.origin.dy,
       _scrollOffsetNow - d.originScroll,
       pxPerMinute: _pxPerMinute,
@@ -2721,85 +2727,95 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         (_scrollOffsetNow - d.originScroll).abs() >= _pxPerMinute * 60;
     _snapAt = null;
 
-    switch (d.kind) {
-      case _DragKind.move:
-        // Each member has its OWN limit: a block that fits inside one day stays
-        // inside it (the day itself is changed sideways), but one that crosses
-        // midnight (a sleep, 23:00 -> 07:00) moves freely, so it can be
-        // dragged up and down too; its end may land later on the next day.
-        int minutesFor(ActionListItem m) {
-          if (m.isAllDay) return 0;
-          final s = m.startAt!;
-          final dur = _effectiveEnd(m).difference(s).inMinutes;
-          final sm = minutesOfDay(s);
-          if (carried || dur > 1440 - sm) return minutes; // crosses midnight
-          return minutes.clamp(-sm, 1440 - sm - dur);
-        }
+    // The schedules for a vertical travel of [minutes]; [useMagnet] lets the
+    // result lock onto another event's edge.
+    List<_Moved> build(int minutes, bool useMagnet) {
+      switch (d.kind) {
+        case _DragKind.move:
+          // Each member has its OWN limit: a block that fits inside one day stays
+          // inside it (the day itself is changed sideways), but one that crosses
+          // midnight (a sleep, 23:00 -> 07:00) moves freely, so it can be
+          // dragged up and down too; its end may land later on the next day.
+          int minutesFor(ActionListItem m) {
+            if (m.isAllDay) return 0;
+            final s = m.startAt!;
+            final dur = _effectiveEnd(m).difference(s).inMinutes;
+            final sm = minutesOfDay(s);
+            if (carried || dur > 1440 - sm) return minutes; // crosses midnight
+            return minutes.clamp(-sm, 1440 - sm - dur);
+          }
 
-        final moved = [
-          for (final m in d.members)
-            (
-              item: m,
-              schedule: movedSchedule(
-                startAt: m.startAt!,
-                endAt: m.endAt,
-                dayDelta: dayDelta,
-                // All-day chips follow the day delta only.
-                minuteDelta: minutesFor(m),
-                legacyEstimatedMinutes: m.estimatedMinutes,
+          final moved = [
+            for (final m in d.members)
+              (
+                item: m,
+                schedule: movedSchedule(
+                  startAt: m.startAt!,
+                  endAt: m.endAt,
+                  dayDelta: dayDelta,
+                  // All-day chips follow the day delta only.
+                  minuteDelta: minutesFor(m),
+                  legacyEstimatedMinutes: m.estimatedMinutes,
+                ),
               ),
-            ),
-        ];
-        if (!magnet || item.isAllDay || d.neighbours.isEmpty) return moved;
-        // The grabbed block drives the magnet; the others shift with it.
-        final snap = snapToNeighbours(
-          schedule: moved.first.schedule,
-          moveWhole: true,
-          neighbourEdges: d.neighbours,
-          pxPerMinute: _pxPerMinute,
-        );
-        if (snap.snappedTo == null) return moved;
-        _snapAt = snap.snappedTo;
-        final shift = snap.schedule.startAt.difference(
-          moved.first.schedule.startAt,
-        );
-        return [
-          for (final m in moved)
-            m.item.isAllDay
-                ? m
-                : (
-                    item: m.item,
-                    schedule: (
-                      startAt: m.schedule.startAt.add(shift),
-                      endAt: m.schedule.endAt.add(shift),
-                    ),
-                  ),
-        ];
-      case _DragKind.resizeTop:
-      case _DragKind.resizeBottom:
-        // The edge may cross days: the horizontal distance picks the day, the
-        // vertical one the minutes; the 10-minute floor is in resizedSchedule.
-        var resized = resizedSchedule(
-          startAt: start,
-          endAt: item.endAt,
-          fromTop: d.kind == _DragKind.resizeTop,
-          dayDelta: dayDelta,
-          minuteDelta: minutes,
-          legacyEstimatedMinutes: item.estimatedMinutes,
-        );
-        if (magnet && d.neighbours.isNotEmpty) {
+          ];
+          if (!useMagnet || item.isAllDay || d.neighbours.isEmpty) return moved;
+          // The grabbed block drives the magnet; the others shift with it.
           final snap = snapToNeighbours(
-            schedule: resized,
-            moveWhole: false,
-            movedEdgeIsStart: d.kind == _DragKind.resizeTop,
+            schedule: moved.first.schedule,
+            moveWhole: true,
             neighbourEdges: d.neighbours,
             pxPerMinute: _pxPerMinute,
           );
-          resized = snap.schedule;
+          if (snap.snappedTo == null) return moved;
           _snapAt = snap.snappedTo;
-        }
-        return [(item: item, schedule: resized)];
+          final shift = snap.schedule.startAt.difference(
+            moved.first.schedule.startAt,
+          );
+          return [
+            for (final m in moved)
+              m.item.isAllDay
+                  ? m
+                  : (
+                      item: m.item,
+                      schedule: (
+                        startAt: m.schedule.startAt.add(shift),
+                        endAt: m.schedule.endAt.add(shift),
+                      ),
+                    ),
+          ];
+        case _DragKind.resizeTop:
+        case _DragKind.resizeBottom:
+          // The edge may cross days: the horizontal distance picks the day, the
+          // vertical one the minutes; the 10-minute floor is in resizedSchedule.
+          var resized = resizedSchedule(
+            startAt: start,
+            endAt: item.endAt,
+            fromTop: d.kind == _DragKind.resizeTop,
+            dayDelta: dayDelta,
+            minuteDelta: minutes,
+            legacyEstimatedMinutes: item.estimatedMinutes,
+          );
+          if (useMagnet && d.neighbours.isNotEmpty) {
+            final snap = snapToNeighbours(
+              schedule: resized,
+              moveWhole: false,
+              movedEdgeIsStart: d.kind == _DragKind.resizeTop,
+              neighbourEdges: d.neighbours,
+              pxPerMinute: _pxPerMinute,
+            );
+            resized = snap.schedule;
+            _snapAt = snap.snappedTo;
+          }
+          return [(item: item, schedule: resized)];
+      }
     }
+
+    if (magnet && d.neighbours.isNotEmpty) {
+      final snapped = build(rawMinutes, true);
+      if (_snapAt != null) return snapped;
+    }
+    return build(latticeMinutes, false);
   }
 
   Future<void> _dragEnd() async {

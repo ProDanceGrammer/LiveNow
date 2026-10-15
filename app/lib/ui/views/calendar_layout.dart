@@ -62,6 +62,16 @@ int dragMinuteDelta(
   double pxPerMinute = kPxPerMinute,
 }) => snapMinutes(pointerDy + scrollDelta, pxPerMinute: pxPerMinute);
 
+/// Like [dragMinuteDelta] but NOT snapped to the 10-minute grid (whole minutes
+/// only): the magnet that locks onto other events' edges has to look at where the
+/// pointer really is, otherwise an edge is caught only when it happens to lie
+/// near a grid point of the dragged block's own start/end.
+int rawMinuteDelta(
+  double pointerDy,
+  double scrollDelta, {
+  double pxPerMinute = kPxPerMinute,
+}) => ((pointerDy + scrollDelta) / pxPerMinute).round();
+
 double minutesToPx(num minutes, {double pxPerMinute = kPxPerMinute}) =>
     minutes * pxPerMinute;
 

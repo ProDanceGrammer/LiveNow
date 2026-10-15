@@ -50,6 +50,84 @@ int _daysInMonth(int y, int m) => DateTime.utc(y, m + 1, 0).day;
 
 int _monthIndex(DateTime d) => d.year * 12 + (d.month - 1);
 
+/// A Previous / Next action created together with each occurrence: [minutes]
+/// long, starting [gapMinutes] after the main action ends (next) or ending
+/// [gapMinutes] before it starts (previous). A template ([templateId]) brings its
+/// name, directions and notes; [name] (else the template's) names it; every id
+/// in [txTemplateIds] makes a transaction (Budget transaction templates).
+class PlanCompanion {
+  const PlanCompanion({
+    this.name,
+    this.templateId,
+    this.minutes = 30,
+    this.gapMinutes = 0,
+    this.txTemplateIds = const [],
+  });
+
+  final String? name;
+  final String? templateId;
+  final int minutes;
+  final int gapMinutes;
+  final List<String> txTemplateIds;
+
+  Map<String, Object?> toJson() => {
+    if (name != null) 'name': name,
+    if (templateId != null) 'templateId': templateId,
+    'minutes': minutes,
+    'gapMinutes': gapMinutes,
+    if (txTemplateIds.isNotEmpty) 'tx': txTemplateIds,
+  };
+
+  static PlanCompanion fromJson(Map<String, Object?> j) => PlanCompanion(
+    name: j['name'] as String?,
+    templateId: j['templateId'] as String?,
+    minutes: ((j['minutes'] as num?)?.toInt() ?? 30).clamp(1, 24 * 60),
+    gapMinutes: ((j['gapMinutes'] as num?)?.toInt() ?? 0).clamp(0, 7 * 24 * 60),
+    txTemplateIds: [
+      for (final t in (j['tx'] as List? ?? const []))
+        if (t is String) t,
+    ],
+  );
+}
+
+/// What an occurrence brings besides itself: [prev] / [next] companion actions
+/// and the transactions ([txTemplateIds]) of the main action.
+class PlanExtras {
+  const PlanExtras({
+    this.prev = const [],
+    this.next = const [],
+    this.txTemplateIds = const [],
+  });
+
+  final List<PlanCompanion> prev;
+  final List<PlanCompanion> next;
+  final List<String> txTemplateIds;
+
+  bool get isEmpty => prev.isEmpty && next.isEmpty && txTemplateIds.isEmpty;
+
+  /// Entries merged into the JSON of the occurrence / monthly rule.
+  Map<String, Object?> toJson() => {
+    if (prev.isNotEmpty) 'prev': [for (final c in prev) c.toJson()],
+    if (next.isNotEmpty) 'next': [for (final c in next) c.toJson()],
+    if (txTemplateIds.isNotEmpty) 'tx': txTemplateIds,
+  };
+
+  static PlanExtras fromJson(Map<String, Object?> j) {
+    List<PlanCompanion> list(Object? v) => [
+      for (final c in (v as List? ?? const []))
+        if (c is Map) PlanCompanion.fromJson(Map<String, Object?>.from(c)),
+    ];
+    return PlanExtras(
+      prev: list(j['prev']),
+      next: list(j['next']),
+      txTemplateIds: [
+        for (final t in (j['tx'] as List? ?? const []))
+          if (t is String) t,
+      ],
+    );
+  }
+}
+
 /// One occurrence of a cycle: on cycle day [day] (0-based) at [startMin].
 class CycleOccurrence {
   const CycleOccurrence({
@@ -58,10 +136,12 @@ class CycleOccurrence {
     this.durationMin,
     this.name,
     this.templateId,
+    this.extras = const PlanExtras(),
   });
 
   final int day;
   final int startMin;
+  final PlanExtras extras;
 
   /// Null = the plan item's default duration (the template's average).
   final int? durationMin;
@@ -76,6 +156,7 @@ class CycleOccurrence {
     if (durationMin != null) 'durationMin': durationMin,
     if (name != null) 'name': name,
     if (templateId != null) 'templateId': templateId,
+    ...extras.toJson(),
   };
 
   static CycleOccurrence fromJson(Map<String, Object?> j) => CycleOccurrence(
@@ -84,6 +165,7 @@ class CycleOccurrence {
     durationMin: (j['durationMin'] as num?)?.toInt(),
     name: j['name'] as String?,
     templateId: j['templateId'] as String?,
+    extras: PlanExtras.fromJson(j),
   );
 }
 
@@ -117,7 +199,10 @@ class MonthlyRule {
     this.startMin = 9 * 60,
     this.durationMin,
     this.name,
+    this.extras = const PlanExtras(),
   });
+
+  final PlanExtras extras;
 
   /// Every N months (1..99999) counted from the plan's start month.
   final int everyMonths;
@@ -144,6 +229,7 @@ class MonthlyRule {
     'startMin': startMin,
     if (durationMin != null) 'durationMin': durationMin,
     if (name != null) 'name': name,
+    ...extras.toJson(),
   };
 
   static MonthlyRule fromJson(Map<String, Object?> j) => MonthlyRule(
@@ -158,6 +244,7 @@ class MonthlyRule {
     startMin: (j['startMin'] as num?)?.toInt() ?? 9 * 60,
     durationMin: (j['durationMin'] as num?)?.toInt(),
     name: j['name'] as String?,
+    extras: PlanExtras.fromJson(j),
   );
 }
 
@@ -247,7 +334,11 @@ class PlanOccurrence {
     required this.startMin,
     required this.durationMin,
     this.ownName = false,
+    this.extras = const PlanExtras(),
   });
+
+  /// Previous / Next companions and transactions of this occurrence's row.
+  final PlanExtras extras;
 
   final String planItemId;
 
@@ -297,6 +388,7 @@ List<PlanOccurrence> occurrencesInRange(
     int? durationMin,
     String? name,
     String? templateId,
+    PlanExtras extras,
   ) {
     final key = '${planDateKey(date)}#$index';
     final o = byKey[key];
@@ -316,6 +408,7 @@ List<PlanOccurrence> occurrencesInRange(
         startMin: start,
         durationMin: dur,
         ownName: (o?.name ?? name) != null,
+        extras: extras,
       ),
     );
   }
@@ -334,7 +427,7 @@ List<PlanOccurrence> occurrencesInRange(
       final k = _daysBetween(item.startDate, date);
       for (final i in byDay[k % n] ?? const <int>[]) {
         final o = rule.occurrences[i];
-        add(date, i, o.startMin, o.durationMin, o.name, o.templateId);
+        add(date, i, o.startMin, o.durationMin, o.name, o.templateId, o.extras);
       }
       date = DateTime.utc(date.year, date.month, date.day + 1);
     }
@@ -379,7 +472,7 @@ List<PlanOccurrence> occurrencesInRange(
       if (day == null) continue; // e.g. no 5th Monday this month
       final date = DateTime.utc(y, m, day);
       if (date.isBefore(first) || date.isAfter(last)) continue;
-      add(date, 0, rule.startMin, rule.durationMin, rule.name, null);
+      add(date, 0, rule.startMin, rule.durationMin, rule.name, null, rule.extras);
     }
   }
   out.sort((a, b) {

@@ -28,8 +28,8 @@ void main() {
         isUtc: true,
       );
 
-  Future<void> pump(WidgetTester tester) async {
-    tester.view.physicalSize = const Size(1400, 1700);
+  Future<void> pump(WidgetTester tester, {double height = 1700}) async {
+    tester.view.physicalSize = Size(1400, height);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -351,6 +351,57 @@ void main() {
     await g.up();
     await tester.pump();
     await settle(tester);
+    await unmount(tester);
+  });
+
+  testWidgets('the magnet catches EVERY neighbour edge, whatever the minutes', (
+    tester,
+  ) async {
+    // A tall window: ~4.7 px per minute with the whole day visible, so the
+    // magnet reaches only ~1.7 minutes - the case the old lattice-first code
+    // got wrong for every edge more than 2 minutes off the 10-minute grid.
+    await pump(tester, height: 7000);
+    final mover = await create(tester, 'Mover', at(8), at(8, 30));
+    // Durations 25/35/45/55 and starts off the 10-minute grid: the lattice of
+    // the dragged block never lands within reach of these edges by itself.
+    final cases = <(DateTime, DateTime)>[
+      (at(11), at(11, 25)),
+      (at(13, 7), at(13, 42)),
+      (at(15), at(15, 45)),
+      (at(17, 3), at(17, 58)),
+    ];
+    for (final c in cases) {
+      await create(tester, 'N${c.$1.hour}', c.$1, c.$2);
+    }
+    await useDays(tester, 3);
+    final ppm = pxPerMinute(tester);
+    Future<ActionRow> dragTo(DateTime wantedStart, double extraPx) async {
+      final cur = dateTimeFromDb((await row(tester, mover)).startAt)!;
+      await dragBy(
+        tester,
+        find.byKey(ValueKey('event-$mover')),
+        const Offset(30, 15),
+        Offset(0, wantedStart.difference(cur).inMinutes * ppm + extraPx),
+      );
+      return row(tester, mover);
+    }
+
+    for (final c in cases) {
+      // Below it: the start lands exactly on the neighbour's end.
+      var r = await dragTo(c.$2, 2);
+      expect(dateTimeFromDb(r.startAt), c.$2, reason: 'after ${c.$1}');
+      expect(
+        dateTimeFromDb(r.endAt),
+        c.$2.add(const Duration(minutes: 30)),
+      );
+      // Above it: the end lands exactly on the neighbour's start.
+      r = await dragTo(c.$1.subtract(const Duration(minutes: 30)), -2);
+      expect(
+        dateTimeFromDb(r.endAt),
+        c.$1,
+        reason: 'before ${c.$1}',
+      );
+    }
     await unmount(tester);
   });
 }

@@ -669,4 +669,26 @@ void main() {
     expect(await db.select(db.planOverridesTable).get(), isEmpty);
     expect((await db.select(db.actionsTable).get()).length, 1);
   });
+
+  test('an old database gets the v15 transaction templates and their sync triggers', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db
+        .into(db.budgetTxTemplatesTable)
+        .insert(
+          BudgetTxTemplatesTableCompanion.insert(
+            id: 'bt1',
+            createdAt: 't',
+            updatedAt: 't',
+          ),
+        );
+    final t = (await db.select(db.budgetTxTemplatesTable).get()).single;
+    expect((t.name, t.quantity, t.unitPrice, t.categoryId), ('', 1.0, null, null));
+    final n = await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = 'budget_tx_templates' AND row_id = 'bt1'",
+        )
+        .getSingle();
+    expect(n.read<int>('n'), 1);
+  });
 }

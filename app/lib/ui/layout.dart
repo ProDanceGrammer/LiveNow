@@ -8,3 +8,10 @@ const kPhoneBreakpoint = 900.0;
 
 bool usePhoneLayout(BuildContext context) =>
     MediaQuery.sizeOf(context).width < kPhoneBreakpoint;
+
+/// The content width of a dialog: [wide] on a desktop window, never more than
+/// the screen minus the dialog's own insets (a fixed 640 overflowed a phone).
+double dialogWidth(BuildContext context, double wide) {
+  final room = MediaQuery.sizeOf(context).width - 64;
+  return room < wide ? room : wide;
+}

@@ -627,6 +627,106 @@ class BudgetService {
   Future<void> undoDeleteTransaction(BudgetTransaction row) =>
       db.into(db.budgetTransactionsTable).insert(row);
 
+  // ---- transaction templates ----------------------------------------------------
+
+  Stream<List<BudgetTxTemplate>> watchTxTemplates() =>
+      (db.select(db.budgetTxTemplatesTable)
+            ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+          .watch();
+
+  Future<List<BudgetTxTemplate>> txTemplates() =>
+      db.select(db.budgetTxTemplatesTable).get();
+
+  /// Creates (no [id]) or edits a transaction template; returns its id.
+  Future<String> saveTxTemplate({
+    String? id,
+    required String name,
+    required String? categoryId,
+    double quantity = 1,
+    double? unitPrice,
+  }) async {
+    final now = dateTimeToDb(DateTime.now())!;
+    final qty = quantity > 0 ? quantity : 1.0;
+    if (id == null) {
+      final newTemplateId = newId();
+      await db
+          .into(db.budgetTxTemplatesTable)
+          .insert(
+            BudgetTxTemplatesTableCompanion.insert(
+              id: newTemplateId,
+              name: Value(name.trim()),
+              categoryId: Value(categoryId),
+              quantity: Value(qty),
+              unitPrice: Value(unitPrice),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      return newTemplateId;
+    }
+    await (db.update(db.budgetTxTemplatesTable)..where((t) => t.id.equals(id)))
+        .write(
+          BudgetTxTemplatesTableCompanion(
+            name: Value(name.trim()),
+            categoryId: Value(categoryId),
+            quantity: Value(qty),
+            unitPrice: Value(unitPrice),
+            updatedAt: Value(now),
+          ),
+        );
+    return id;
+  }
+
+  /// Deletes a template and returns the row for an Undo (null = it was gone).
+  Future<BudgetTxTemplate?> deleteTxTemplate(String id) async {
+    final row = await (db.select(
+      db.budgetTxTemplatesTable,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
+    if (row == null) return null;
+    await (db.delete(
+      db.budgetTxTemplatesTable,
+    )..where((t) => t.id.equals(id))).go();
+    return row;
+  }
+
+  Future<void> undoDeleteTxTemplate(BudgetTxTemplate row) =>
+      db.into(db.budgetTxTemplatesTable).insertOnConflictUpdate(row);
+
+  /// A real transaction made from template [templateId]: its category, quantity
+  /// and price (null = the category's), named like the template (else like
+  /// [fallbackName], e.g. the action), linked to [actionId] and dated [date].
+  /// Throws [BudgetGroupException] for a group category and [StateError] when the
+  /// template or its category is gone.
+  Future<String> createTransactionFromTemplate(
+    String templateId, {
+    String? actionId,
+    DateTime? date,
+    String fallbackName = '',
+  }) async {
+    final t = await (db.select(
+      db.budgetTxTemplatesTable,
+    )..where((r) => r.id.equals(templateId))).getSingleOrNull();
+    if (t == null) throw StateError('That transaction template no longer exists.');
+    final categoryId = t.categoryId;
+    final exists =
+        categoryId != null &&
+        await (db.select(
+              db.budgetCategoriesTable,
+            )..where((c) => c.id.equals(categoryId))).getSingleOrNull() !=
+            null;
+    if (!exists) {
+      throw StateError('The category of "${t.name}" no longer exists.');
+    }
+    return createTransaction(
+      categoryId: categoryId,
+      name: t.name.isEmpty ? fallbackName : t.name,
+      actionId: actionId,
+      date: date,
+      quantity: t.quantity,
+      unitPrice: t.unitPrice,
+    );
+  }
+
   Future<BudgetCategory> _leafCategory(String categoryId) async {
     final category = await (db.select(
       db.budgetCategoriesTable,

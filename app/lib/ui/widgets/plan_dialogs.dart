@@ -6,11 +6,14 @@ import '../../data/database.dart';
 import '../../domain/plan_rules.dart';
 import '../../domain/plan_service.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../plan_providers.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
 import '../undo.dart';
 import 'app_toast.dart';
+import 'section_block.dart';
+import 'tx_templates.dart';
 
 // Planning mode's dialogs: the plan item editor, the "this day only / whole
 // pattern" question, the confirm dialog (turn the plan into real actions) and the
@@ -87,12 +90,119 @@ Future<void> applyGhostChange(
 
 // ---- plan item editor ---------------------------------------------------------
 
-class _OccRow {
+/// A Previous / Next companion being edited.
+class _Comp {
+  _Comp({
+    String? name,
+    this.templateId,
+    int minutes = 30,
+    int gap = 0,
+    List<String>? tx,
+  }) : name = TextEditingController(text: name ?? ''),
+       minutes = TextEditingController(text: '$minutes'),
+       gap = TextEditingController(text: '$gap'),
+       tx = [...?tx];
+
+  final TextEditingController name;
+  String? templateId;
+  final TextEditingController minutes;
+  final TextEditingController gap;
+  final List<String> tx;
+
+  _Comp copy() => _Comp(
+    name: name.text,
+    templateId: templateId,
+    minutes: int.tryParse(minutes.text) ?? 30,
+    gap: int.tryParse(gap.text) ?? 0,
+    tx: tx,
+  );
+
+  PlanCompanion toCompanion() => PlanCompanion(
+    name: name.text.trim().isEmpty ? null : name.text.trim(),
+    templateId: templateId,
+    minutes: (int.tryParse(minutes.text) ?? 30).clamp(1, 24 * 60),
+    gapMinutes: (int.tryParse(gap.text) ?? 0).clamp(0, 7 * 24 * 60),
+    txTemplateIds: [...tx],
+  );
+
+  void dispose() {
+    name.dispose();
+    minutes.dispose();
+    gap.dispose();
+  }
+}
+
+/// What one time row (or the monthly rule) brings besides the main action.
+class _Extras {
+  _Extras();
+
+  factory _Extras.from(PlanExtras e) {
+    final x = _Extras();
+    for (final c in e.prev) {
+      x.prev.add(
+        _Comp(
+          name: c.name,
+          templateId: c.templateId,
+          minutes: c.minutes,
+          gap: c.gapMinutes,
+          tx: c.txTemplateIds,
+        ),
+      );
+    }
+    for (final c in e.next) {
+      x.next.add(
+        _Comp(
+          name: c.name,
+          templateId: c.templateId,
+          minutes: c.minutes,
+          gap: c.gapMinutes,
+          tx: c.txTemplateIds,
+        ),
+      );
+    }
+    x.tx.addAll(e.txTemplateIds);
+    x.open = !e.isEmpty;
+    return x;
+  }
+
+  final List<_Comp> prev = [];
+  final List<_Comp> next = [];
+  final List<String> tx = [];
+  bool open = false;
+
+  int get count => prev.length + next.length + tx.length;
+
+  PlanExtras toExtras() => PlanExtras(
+    prev: [for (final c in prev) c.toCompanion()],
+    next: [for (final c in next) c.toCompanion()],
+    txTemplateIds: [...tx],
+  );
+
+  void copyFrom(_Extras o) {
+    for (final c in o.prev) {
+      prev.add(c.copy());
+    }
+    for (final c in o.next) {
+      next.add(c.copy());
+    }
+    tx.addAll(o.tx);
+    open = o.open;
+  }
+
+  void dispose() {
+    for (final c in [...prev, ...next]) {
+      c.dispose();
+    }
+  }
+}
+
+class _OccRow extends _Extras {
   _OccRow({
     this.day = 0,
     this.startMin = 9 * 60,
-    this.durationMin,
+    int? durationMin,
     String? name,
+    this.templateId,
   }) : name = TextEditingController(text: name ?? ''),
        duration = TextEditingController(
          text: durationMin == null ? '' : '$durationMin',
@@ -100,13 +210,27 @@ class _OccRow {
 
   int day;
   int startMin;
-  int? durationMin;
+  final String? templateId;
   final TextEditingController name;
   final TextEditingController duration;
 
+  _OccRow duplicate() {
+    final r = _OccRow(
+      day: day,
+      startMin: startMin,
+      durationMin: int.tryParse(duration.text),
+      name: name.text,
+      templateId: templateId,
+    );
+    r.copyFrom(this);
+    return r;
+  }
+
+  @override
   void dispose() {
     name.dispose();
     duration.dispose();
+    super.dispose();
   }
 }
 
@@ -159,6 +283,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
   bool _forever = false;
   bool _paused = false;
   final _rows = <_OccRow>[];
+  final _monthlyExtras = _Extras();
   MonthlyMode _mode = MonthlyMode.dayOfMonth;
   int _nth = 1;
   int _weekday = DateTime.monday;
@@ -190,14 +315,15 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         if (d.cycle != null) {
           _cycleDays.text = '${d.cycle!.cycleDays}';
           for (final o in d.cycle!.occurrences) {
-            _rows.add(
-              _OccRow(
-                day: o.day,
-                startMin: o.startMin,
-                durationMin: o.durationMin,
-                name: o.name,
-              ),
+            final r = _OccRow(
+              day: o.day,
+              startMin: o.startMin,
+              durationMin: o.durationMin,
+              name: o.name,
+              templateId: o.templateId,
             );
+            r.copyFrom(_Extras.from(o.extras));
+            _rows.add(r);
           }
         }
         final m = d.monthly;
@@ -209,6 +335,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
           _weekday = m.weekday;
           _monthlyStart = m.startMin;
           if (m.durationMin != null) _manual.text = '${m.durationMin}';
+          _monthlyExtras.copyFrom(_Extras.from(m.extras));
         }
       }
     } else {
@@ -242,6 +369,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     for (final r in _rows) {
       r.dispose();
     }
+    _monthlyExtras.dispose();
     super.dispose();
   }
 
@@ -272,6 +400,20 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     if (t != null) setState(() => set(t.hour * 60 + t.minute));
   }
 
+  /// Choosing a template names the item after it when the name is empty or still
+  /// the previous template's.
+  void _chooseTemplate(String? id, List<ActionTemplate> templates) {
+    String? nameOf(String? t) =>
+        templates.where((x) => x.id == t).map((x) => x.name).firstOrNull;
+    final old = nameOf(_templateId);
+    final nu = nameOf(id);
+    setState(() {
+      final cur = _name.text.trim();
+      if (nu != null && (cur.isEmpty || cur == old)) _name.text = nu;
+      _templateId = id;
+    });
+  }
+
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) {
@@ -297,7 +439,8 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               startMin: r.startMin,
               durationMin: int.tryParse(r.duration.text),
               name: r.name.text.trim().isEmpty ? null : r.name.text.trim(),
-              templateId: null,
+              templateId: r.templateId,
+              extras: r.toExtras(),
             ),
         ],
       );
@@ -312,6 +455,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         weekday: _weekday,
         startMin: _monthlyStart,
         durationMin: manual,
+        extras: _monthlyExtras.toExtras(),
       );
     }
     final id = await plans.saveItem(
@@ -339,15 +483,45 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         child: Text(planTime(minutes)),
       );
 
+  /// A labelled switch: ONLY the switch toggles, not the whole block.
+  Widget _switchRow(
+    Key key,
+    String title,
+    String? subtitle,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title),
+              if (subtitle != null)
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
+          ),
+        ),
+        Switch(key: key, value: value, onChanged: onChanged),
+      ],
+    ),
+  );
+
   Widget _cycleSection() {
     final n = _days;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             const Text('Repeats every'),
-            const SizedBox(width: 8),
             SizedBox(
               width: 64,
               child: TextField(
@@ -358,7 +532,6 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                 onChanged: (_) => setState(() {}),
               ),
             ),
-            const SizedBox(width: 8),
             Text(n == 7 ? 'days (a week)' : 'days'),
           ],
         ),
@@ -381,60 +554,340 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
 
   Widget _rowEditor(int i, int n) {
     final r = _rows[i];
+    final phone = usePhoneLayout(context);
+    final day = DropdownButton<int>(
+      key: ValueKey('plan-row-day-$i'),
+      value: r.day % n,
+      dropdownColor: context.glassFillDialog,
+      items: [
+        for (var d = 0; d < n; d++)
+          DropdownMenuItem(
+            value: d,
+            child: Text(n == 7 ? _weekdays[d] : 'Day ${d + 1}'),
+          ),
+      ],
+      onChanged: (v) => setState(() => r.day = v ?? 0),
+    );
+    final time = _timeButton(
+      ValueKey('plan-row-time-$i'),
+      r.startMin,
+      (v) => r.startMin = v,
+    );
+    final minutes = SizedBox(
+      width: 104,
+      child: TextField(
+        key: ValueKey('plan-row-duration-$i'),
+        controller: r.duration,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: const InputDecoration(labelText: 'Minutes', isDense: true),
+      ),
+    );
+    final name = TextField(
+      key: ValueKey('plan-row-name-$i'),
+      controller: r.name,
+      decoration: const InputDecoration(labelText: 'Own name', isDense: true),
+    );
+    final buttons = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: ValueKey('plan-row-duplicate-$i'),
+          tooltip: 'Duplicate this time',
+          icon: const Icon(Icons.copy_all_outlined, size: 18),
+          onPressed: () => setState(() => _rows.insert(i + 1, r.duplicate())),
+        ),
+        IconButton(
+          key: ValueKey('plan-row-remove-$i'),
+          tooltip: 'Remove',
+          icon: const Icon(Icons.close, size: 18),
+          onPressed: () => setState(() => _rows.removeAt(i).dispose()),
+        ),
+      ],
+    );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          DropdownButton<int>(
-            key: ValueKey('plan-row-day-$i'),
-            value: r.day % n,
-            dropdownColor: context.glassFillDialog,
-            items: [
-              for (var d = 0; d < n; d++)
-                DropdownMenuItem(
-                  value: d,
-                  child: Text(n == 7 ? _weekdays[d] : 'Day ${d + 1}'),
-                ),
+          if (phone) ...[
+            Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [day, time, minutes, buttons],
+            ),
+            const SizedBox(height: 4),
+            name,
+          ] else
+            Row(
+              children: [
+                day,
+                const SizedBox(width: 10),
+                time,
+                const SizedBox(width: 10),
+                minutes,
+                const SizedBox(width: 10),
+                Expanded(child: name),
+                buttons,
+              ],
+            ),
+          _extrasEditor(r, 'row-$i', allRows: true),
+        ],
+      ),
+    );
+  }
+
+  // ---- Previous / Next / Transactions of one row --------------------------------
+
+  Widget _extrasEditor(_Extras e, String prefix, {bool allRows = false}) {
+    final names = {
+      for (final t
+          in ref.watch(budgetTxTemplatesProvider).value ??
+              const <BudgetTxTemplate>[])
+        t.id: t.name.isEmpty ? 'Transaction' : t.name,
+    };
+    Widget txChips(List<String> ids, String key) => Wrap(
+      spacing: 6,
+      runSpacing: 2,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        for (final id in ids)
+          InputChip(
+            label: Text(names[id] ?? 'Deleted template'),
+            visualDensity: VisualDensity.compact,
+            onDeleted: () => setState(() => ids.remove(id)),
+          ),
+        ActionChip(
+          key: ValueKey(key),
+          avatar: const Icon(Icons.add, size: 16),
+          label: const Text('Transaction'),
+          visualDensity: VisualDensity.compact,
+          onPressed: () async {
+            final id = await pickTxTemplate(context, excludeIds: ids.toSet());
+            if (id != null && mounted) setState(() => ids.add(id));
+          },
+        ),
+      ],
+    );
+
+    Widget column(String title, List<_Comp> list, String key) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
+              IconButton(
+                key: ValueKey('$prefix-add-$key'),
+                tooltip: 'Add a $key action',
+                icon: const Icon(Icons.add, size: 18),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => list.add(_Comp())),
+              ),
             ],
-            onChanged: (v) => setState(() => r.day = v ?? 0),
           ),
-          _timeButton(
-            ValueKey('plan-row-time-$i'),
-            r.startMin,
-            (v) => r.startMin = v,
+          for (var j = 0; j < list.length; j++)
+            _compEditor(list[j], '$prefix-$key-$j', () {
+              setState(() => list.removeAt(j).dispose());
+            }),
+        ],
+      );
+    }
+
+    final phone = usePhoneLayout(context);
+    final prev = column('Previous', e.prev, 'prev');
+    final next = column('Next', e.next, 'next');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: ValueKey('$prefix-extras-toggle'),
+            icon: Icon(
+              e.open ? Icons.expand_less : Icons.expand_more,
+              size: 18,
+            ),
+            label: Text(
+              e.count == 0
+                  ? 'Previous / Next / Transactions'
+                  : 'Previous / Next / Transactions (${e.count})',
+            ),
+            onPressed: () => setState(() => e.open = !e.open),
           ),
-          SizedBox(
-            width: 84,
-            child: TextField(
-              key: ValueKey('plan-row-duration-$i'),
-              controller: r.duration,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                hintText: 'minutes',
-                isDense: true,
-              ),
+        ),
+        if (e.open)
+          SectionBlock(
+            key: ValueKey('$prefix-extras'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Transactions',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    if (allRows && _rows.length > 1)
+                      TextButton(
+                        key: ValueKey('$prefix-tx-all'),
+                        onPressed: () => setState(() {
+                          for (final o in _rows) {
+                            if (identical(o, e)) continue;
+                            o.tx
+                              ..clear()
+                              ..addAll(e.tx);
+                          }
+                        }),
+                        child: const Text('Same for all times'),
+                      ),
+                  ],
+                ),
+                txChips(e.tx, '$prefix-tx-add'),
+                const SizedBox(height: 8),
+                if (phone) ...[
+                  prev,
+                  const SizedBox(height: 8),
+                  next,
+                ] else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: prev),
+                      const SizedBox(width: 16),
+                      Expanded(child: next),
+                    ],
+                  ),
+              ],
             ),
           ),
-          SizedBox(
-            width: 120,
-            child: TextField(
-              key: ValueKey('plan-row-name-$i'),
-              controller: r.name,
-              decoration: const InputDecoration(
-                hintText: 'own name',
-                isDense: true,
+      ],
+    );
+  }
+
+  Widget _compEditor(_Comp c, String key, VoidCallback onRemove) {
+    final templates =
+        ref.watch(templatesProvider).value ?? const <ActionTemplate>[];
+    final names = {
+      for (final t
+          in ref.watch(budgetTxTemplatesProvider).value ??
+              const <BudgetTxTemplate>[])
+        t.id: t.name.isEmpty ? 'Transaction' : t.name,
+    };
+    return Container(
+      key: ValueKey(key),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(8, 4, 4, 6),
+      decoration: BoxDecoration(
+        border: Border.all(color: context.glass.border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButton<String?>(
+                  key: ValueKey('$key-template'),
+                  isExpanded: true,
+                  isDense: true,
+                  value: templates.any((t) => t.id == c.templateId)
+                      ? c.templateId
+                      : null,
+                  dropdownColor: context.glassFillDialog,
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('No template'),
+                    ),
+                    for (final t in templates)
+                      DropdownMenuItem<String?>(
+                        value: t.id,
+                        child: Text(t.name, overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() {
+                    c.templateId = v;
+                    final t = templates.where((x) => x.id == v).firstOrNull;
+                    if (t != null && c.name.text.trim().isEmpty) {
+                      c.name.text = t.name;
+                    }
+                  }),
+                ),
               ),
-            ),
+              IconButton(
+                key: ValueKey('$key-remove'),
+                tooltip: 'Remove',
+                icon: const Icon(Icons.close, size: 18),
+                visualDensity: VisualDensity.compact,
+                onPressed: onRemove,
+              ),
+            ],
           ),
-          IconButton(
-            key: ValueKey('plan-row-remove-$i'),
-            tooltip: 'Remove',
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: () => setState(() => _rows.removeAt(i).dispose()),
+          TextField(
+            key: ValueKey('$key-name'),
+            controller: c.name,
+            decoration: const InputDecoration(labelText: 'Name', isDense: true),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: ValueKey('$key-minutes'),
+                  controller: c.minutes,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Minutes',
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  key: ValueKey('$key-gap'),
+                  controller: c.gap,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: 'Gap (min)',
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 2,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              for (final id in c.tx)
+                InputChip(
+                  label: Text(names[id] ?? 'Deleted template'),
+                  visualDensity: VisualDensity.compact,
+                  onDeleted: () => setState(() => c.tx.remove(id)),
+                ),
+              ActionChip(
+                key: ValueKey('$key-tx-add'),
+                avatar: const Icon(Icons.add, size: 16),
+                label: const Text('Transaction'),
+                visualDensity: VisualDensity.compact,
+                onPressed: () async {
+                  final id = await pickTxTemplate(
+                    context,
+                    excludeIds: c.tx.toSet(),
+                  );
+                  if (id != null && mounted) setState(() => c.tx.add(id));
+                },
+              ),
+            ],
           ),
         ],
       ),
@@ -530,20 +983,21 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               (v) => _monthlyStart = v,
             ),
             SizedBox(
-              width: 84,
+              width: 104,
               child: TextField(
                 key: const ValueKey('plan-monthly-duration'),
                 controller: _manual,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: const InputDecoration(
-                  hintText: 'minutes',
+                  labelText: 'Minutes',
                   isDense: true,
                 ),
               ),
             ),
           ],
         ),
+        _extrasEditor(_monthlyExtras, 'monthly'),
       ],
     );
   }
@@ -553,10 +1007,13 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     final templates =
         ref.watch(templatesProvider).value ?? const <ActionTemplate>[];
     final isNew = widget.itemId == null;
+    final selected = templates.where((t) => t.id == _templateId).firstOrNull;
+    final showUseName =
+        selected != null && selected.name.trim() != _name.text.trim();
     return AlertDialog(
       title: Text(isNew ? 'New plan item' : 'Edit plan item'),
       content: SizedBox(
-        width: 520,
+        width: dialogWidth(context, 640),
         child: !_loaded
             ? const SizedBox(
                 height: 80,
@@ -572,6 +1029,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                       controller: _name,
                       autofocus: isNew,
                       decoration: const InputDecoration(hintText: 'Name'),
+                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 8),
                     DropdownButton<String?>(
@@ -596,8 +1054,23 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                             child: Text(t.name, overflow: TextOverflow.ellipsis),
                           ),
                       ],
-                      onChanged: (v) => setState(() => _templateId = v),
+                      onChanged: (v) => _chooseTemplate(v, templates),
                     ),
+                    // Like "Use the category's name" on a transaction.
+                    if (showUseName)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          key: const ValueKey('plan-name-from-template'),
+                          icon: const Icon(
+                            Icons.subdirectory_arrow_left,
+                            size: 16,
+                          ),
+                          label: Text('Use "${selected.name}" as the name'),
+                          onPressed: () =>
+                              setState(() => _name.text = selected.name),
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     SegmentedButton<PlanKind>(
                       key: const ValueKey('plan-kind'),
@@ -649,23 +1122,21 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                           ),
                       ],
                     ),
-                    SwitchListTile(
-                      key: const ValueKey('plan-forever'),
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Keep creating actions (forever)'),
-                      subtitle: const Text(
-                        'The next 8 weeks are filled in automatically.',
-                      ),
-                      value: _forever,
-                      onChanged: (v) => setState(() => _forever = v),
+                    const SizedBox(height: 18),
+                    _switchRow(
+                      const ValueKey('plan-forever'),
+                      'Keep creating actions (forever)',
+                      'The next 8 weeks are filled in automatically.',
+                      _forever,
+                      (v) => setState(() => _forever = v),
                     ),
                     if (!isNew)
-                      SwitchListTile(
-                        key: const ValueKey('plan-paused'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Paused'),
-                        value: _paused,
-                        onChanged: (v) => setState(() => _paused = v),
+                      _switchRow(
+                        const ValueKey('plan-paused'),
+                        'Paused',
+                        null,
+                        _paused,
+                        (v) => setState(() => _paused = v),
                       ),
                   ],
                 ),
@@ -731,6 +1202,8 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
   DateTime? _custom;
   Set<String>? _selected; // null = all items
   int? _toCreate;
+  int _extraActions = 0;
+  int _transactions = 0;
   int _existing = 0;
   int _seq = 0;
   bool _busy = false;
@@ -760,8 +1233,18 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
         .read(planServiceProvider)
         .preview(itemIds: _selected, from: _today, to: _to);
     if (!mounted || seq != _seq) return;
+    var extra = 0, tx = 0;
+    for (final o in p.toCreate) {
+      extra += o.extras.prev.length + o.extras.next.length;
+      tx += o.extras.txTemplateIds.length;
+      for (final c in [...o.extras.prev, ...o.extras.next]) {
+        tx += c.txTemplateIds.length;
+      }
+    }
     setState(() {
       _toCreate = p.toCreate.length;
+      _extraActions = extra;
+      _transactions = tx;
       _existing = p.existing;
     });
   }
@@ -797,7 +1280,7 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
     return AlertDialog(
       title: const Text('Confirm plan'),
       content: SizedBox(
-        width: 460,
+        width: dialogWidth(context, 460),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -864,6 +1347,8 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
                 _toCreate == null
                     ? '...'
                     : '$_toCreate action(s) to create'
+                          '${_extraActions > 0 ? ' + $_extraActions previous/next' : ''}'
+                          '${_transactions > 0 ? ', $_transactions transaction(s)' : ''}'
                           '${_existing > 0 ? ', $_existing already exist' : ''}',
                 key: const ValueKey('plan-confirm-preview'),
                 style: const TextStyle(fontWeight: FontWeight.w600),
@@ -960,7 +1445,7 @@ class PlanItemsDialog extends ConsumerWidget {
     return AlertDialog(
       title: const Text('Plan items'),
       content: SizedBox(
-        width: 480,
+        width: dialogWidth(context, 480),
         child: items.isEmpty
             ? const Text('Nothing planned yet. Sweep a time on the calendar.')
             : SingleChildScrollView(
