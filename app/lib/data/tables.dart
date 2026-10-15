@@ -325,6 +325,28 @@ class PlanItemsTable extends Table {
   BoolColumn get forever => boolean().withDefault(const Constant(false))();
   BoolColumn get paused => boolean().withDefault(const Constant(false))();
   TextColumn get rule => text().withDefault(const Constant('{}'))();
+
+  /// JSON list of the ids of the plan collections this item belongs to (schema
+  /// v16; null = none). Ids of deleted collections are ignored when read.
+  TextColumn get collections => text().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// A named group of plan items (schema v16), e.g. "Sport"; `visible` says
+/// whether planning mode draws its items' ghost blocks (synced, so every device
+/// agrees). Hiding changes nothing else.
+@DataClassName('PlanCollection')
+class PlanCollectionsTable extends Table {
+  @override
+  String get tableName => 'plan_collections';
+
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  BoolColumn get visible => boolean().withDefault(const Constant(true))();
   TextColumn get createdAt => text()();
   TextColumn get updatedAt => text()();
 

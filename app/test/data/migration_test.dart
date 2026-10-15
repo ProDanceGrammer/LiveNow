@@ -691,4 +691,41 @@ void main() {
         .getSingle();
     expect(n.read<int>('n'), 1);
   });
+
+  test('an old database gets the v16 plan collections, the membership column and triggers', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db
+        .into(db.planCollectionsTable)
+        .insert(
+          PlanCollectionsTableCompanion.insert(
+            id: 'pc1',
+            name: 'Sport',
+            createdAt: 't',
+            updatedAt: 't',
+          ),
+        );
+    final c = (await db.select(db.planCollectionsTable).get()).single;
+    expect((c.name, c.visible), ('Sport', true));
+    await db
+        .into(db.planItemsTable)
+        .insert(
+          PlanItemsTableCompanion.insert(
+            id: 'p9',
+            name: 'Run',
+            startDate: '2026-10-19',
+            collections: const Value('["pc1"]'),
+            createdAt: 't',
+            updatedAt: 't',
+          ),
+        );
+    final p = (await db.select(db.planItemsTable).get()).where((r) => r.id == 'p9').single;
+    expect(p.collections, '["pc1"]');
+    final n = await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = 'plan_collections' AND row_id = 'pc1'",
+        )
+        .getSingle();
+    expect(n.read<int>('n'), 1);
+  });
 }

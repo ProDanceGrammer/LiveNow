@@ -15,6 +15,7 @@ const int kBackupBatchRows = 500;
 /// the pairing keys). A test asserts this covers `syncTables`.
 const List<String> backupTableOrder = [
   'countable_activities',
+  'plan_collections',
   'plan_items',
   'actions',
   'metrics',

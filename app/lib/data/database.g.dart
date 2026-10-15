@@ -6745,6 +6745,17 @@ class $PlanItemsTableTable extends PlanItemsTable
     requiredDuringInsert: false,
     defaultValue: const Constant('{}'),
   );
+  static const VerificationMeta _collectionsMeta = const VerificationMeta(
+    'collections',
+  );
+  @override
+  late final GeneratedColumn<String> collections = GeneratedColumn<String>(
+    'collections',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -6778,6 +6789,7 @@ class $PlanItemsTableTable extends PlanItemsTable
     forever,
     paused,
     rule,
+    collections,
     createdAt,
     updatedAt,
   ];
@@ -6850,6 +6862,15 @@ class $PlanItemsTableTable extends PlanItemsTable
         rule.isAcceptableOrUnknown(data['rule']!, _ruleMeta),
       );
     }
+    if (data.containsKey('collections')) {
+      context.handle(
+        _collectionsMeta,
+        collections.isAcceptableOrUnknown(
+          data['collections']!,
+          _collectionsMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -6911,6 +6932,10 @@ class $PlanItemsTableTable extends PlanItemsTable
         DriftSqlType.string,
         data['${effectivePrefix}rule'],
       )!,
+      collections: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}collections'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_at'],
@@ -6938,6 +6963,10 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
   final bool forever;
   final bool paused;
   final String rule;
+
+  /// JSON list of the ids of the plan collections this item belongs to (schema
+  /// v16; null = none). Ids of deleted collections are ignored when read.
+  final String? collections;
   final String createdAt;
   final String updatedAt;
   const PlanItem({
@@ -6950,6 +6979,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
     required this.forever,
     required this.paused,
     required this.rule,
+    this.collections,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -6969,6 +6999,9 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
     map['forever'] = Variable<bool>(forever);
     map['paused'] = Variable<bool>(paused);
     map['rule'] = Variable<String>(rule);
+    if (!nullToAbsent || collections != null) {
+      map['collections'] = Variable<String>(collections);
+    }
     map['created_at'] = Variable<String>(createdAt);
     map['updated_at'] = Variable<String>(updatedAt);
     return map;
@@ -6989,6 +7022,9 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
       forever: Value(forever),
       paused: Value(paused),
       rule: Value(rule),
+      collections: collections == null && nullToAbsent
+          ? const Value.absent()
+          : Value(collections),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -7009,6 +7045,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
       forever: serializer.fromJson<bool>(json['forever']),
       paused: serializer.fromJson<bool>(json['paused']),
       rule: serializer.fromJson<String>(json['rule']),
+      collections: serializer.fromJson<String?>(json['collections']),
       createdAt: serializer.fromJson<String>(json['createdAt']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
     );
@@ -7026,6 +7063,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
       'forever': serializer.toJson<bool>(forever),
       'paused': serializer.toJson<bool>(paused),
       'rule': serializer.toJson<String>(rule),
+      'collections': serializer.toJson<String?>(collections),
       'createdAt': serializer.toJson<String>(createdAt),
       'updatedAt': serializer.toJson<String>(updatedAt),
     };
@@ -7041,6 +7079,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
     bool? forever,
     bool? paused,
     String? rule,
+    Value<String?> collections = const Value.absent(),
     String? createdAt,
     String? updatedAt,
   }) => PlanItem(
@@ -7053,6 +7092,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
     forever: forever ?? this.forever,
     paused: paused ?? this.paused,
     rule: rule ?? this.rule,
+    collections: collections.present ? collections.value : this.collections,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -7069,6 +7109,9 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
       forever: data.forever.present ? data.forever.value : this.forever,
       paused: data.paused.present ? data.paused.value : this.paused,
       rule: data.rule.present ? data.rule.value : this.rule,
+      collections: data.collections.present
+          ? data.collections.value
+          : this.collections,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -7086,6 +7129,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
           ..write('forever: $forever, ')
           ..write('paused: $paused, ')
           ..write('rule: $rule, ')
+          ..write('collections: $collections, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -7103,6 +7147,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
     forever,
     paused,
     rule,
+    collections,
     createdAt,
     updatedAt,
   );
@@ -7119,6 +7164,7 @@ class PlanItem extends DataClass implements Insertable<PlanItem> {
           other.forever == this.forever &&
           other.paused == this.paused &&
           other.rule == this.rule &&
+          other.collections == this.collections &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -7133,6 +7179,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
   final Value<bool> forever;
   final Value<bool> paused;
   final Value<String> rule;
+  final Value<String?> collections;
   final Value<String> createdAt;
   final Value<String> updatedAt;
   final Value<int> rowid;
@@ -7146,6 +7193,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
     this.forever = const Value.absent(),
     this.paused = const Value.absent(),
     this.rule = const Value.absent(),
+    this.collections = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -7160,6 +7208,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
     this.forever = const Value.absent(),
     this.paused = const Value.absent(),
     this.rule = const Value.absent(),
+    this.collections = const Value.absent(),
     required String createdAt,
     required String updatedAt,
     this.rowid = const Value.absent(),
@@ -7178,6 +7227,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
     Expression<bool>? forever,
     Expression<bool>? paused,
     Expression<String>? rule,
+    Expression<String>? collections,
     Expression<String>? createdAt,
     Expression<String>? updatedAt,
     Expression<int>? rowid,
@@ -7192,6 +7242,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
       if (forever != null) 'forever': forever,
       if (paused != null) 'paused': paused,
       if (rule != null) 'rule': rule,
+      if (collections != null) 'collections': collections,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -7208,6 +7259,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
     Value<bool>? forever,
     Value<bool>? paused,
     Value<String>? rule,
+    Value<String?>? collections,
     Value<String>? createdAt,
     Value<String>? updatedAt,
     Value<int>? rowid,
@@ -7222,6 +7274,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
       forever: forever ?? this.forever,
       paused: paused ?? this.paused,
       rule: rule ?? this.rule,
+      collections: collections ?? this.collections,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -7258,6 +7311,9 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
     if (rule.present) {
       map['rule'] = Variable<String>(rule.value);
     }
+    if (collections.present) {
+      map['collections'] = Variable<String>(collections.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<String>(createdAt.value);
     }
@@ -7282,6 +7338,7 @@ class PlanItemsTableCompanion extends UpdateCompanion<PlanItem> {
           ..write('forever: $forever, ')
           ..write('paused: $paused, ')
           ..write('rule: $rule, ')
+          ..write('collections: $collections, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -8376,6 +8433,367 @@ class BudgetTxTemplatesTableCompanion
   }
 }
 
+class $PlanCollectionsTableTable extends PlanCollectionsTable
+    with TableInfo<$PlanCollectionsTableTable, PlanCollection> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PlanCollectionsTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _visibleMeta = const VerificationMeta(
+    'visible',
+  );
+  @override
+  late final GeneratedColumn<bool> visible = GeneratedColumn<bool>(
+    'visible',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("visible" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    visible,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'plan_collections';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PlanCollection> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('visible')) {
+      context.handle(
+        _visibleMeta,
+        visible.isAcceptableOrUnknown(data['visible']!, _visibleMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PlanCollection map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PlanCollection(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      visible: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}visible'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $PlanCollectionsTableTable createAlias(String alias) {
+    return $PlanCollectionsTableTable(attachedDatabase, alias);
+  }
+}
+
+class PlanCollection extends DataClass implements Insertable<PlanCollection> {
+  final String id;
+  final String name;
+  final bool visible;
+  final String createdAt;
+  final String updatedAt;
+  const PlanCollection({
+    required this.id,
+    required this.name,
+    required this.visible,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['visible'] = Variable<bool>(visible);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  PlanCollectionsTableCompanion toCompanion(bool nullToAbsent) {
+    return PlanCollectionsTableCompanion(
+      id: Value(id),
+      name: Value(name),
+      visible: Value(visible),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory PlanCollection.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PlanCollection(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      visible: serializer.fromJson<bool>(json['visible']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'visible': serializer.toJson<bool>(visible),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  PlanCollection copyWith({
+    String? id,
+    String? name,
+    bool? visible,
+    String? createdAt,
+    String? updatedAt,
+  }) => PlanCollection(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    visible: visible ?? this.visible,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  PlanCollection copyWithCompanion(PlanCollectionsTableCompanion data) {
+    return PlanCollection(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      visible: data.visible.present ? data.visible.value : this.visible,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanCollection(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('visible: $visible, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, visible, createdAt, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PlanCollection &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.visible == this.visible &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class PlanCollectionsTableCompanion extends UpdateCompanion<PlanCollection> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<bool> visible;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const PlanCollectionsTableCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.visible = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  PlanCollectionsTableCompanion.insert({
+    required String id,
+    required String name,
+    this.visible = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<PlanCollection> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<bool>? visible,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (visible != null) 'visible': visible,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  PlanCollectionsTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<bool>? visible,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return PlanCollectionsTableCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      visible: visible ?? this.visible,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (visible.present) {
+      map['visible'] = Variable<bool>(visible.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PlanCollectionsTableCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('visible: $visible, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -8409,6 +8827,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $PlanOverridesTableTable(this);
   late final $BudgetTxTemplatesTableTable budgetTxTemplatesTable =
       $BudgetTxTemplatesTableTable(this);
+  late final $PlanCollectionsTableTable planCollectionsTable =
+      $PlanCollectionsTableTable(this);
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -8478,6 +8898,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     planItemsTable,
     planOverridesTable,
     budgetTxTemplatesTable,
+    planCollectionsTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxActionsStart,
@@ -15272,6 +15693,7 @@ typedef $$PlanItemsTableTableCreateCompanionBuilder =
       Value<bool> forever,
       Value<bool> paused,
       Value<String> rule,
+      Value<String?> collections,
       required String createdAt,
       required String updatedAt,
       Value<int> rowid,
@@ -15287,6 +15709,7 @@ typedef $$PlanItemsTableTableUpdateCompanionBuilder =
       Value<bool> forever,
       Value<bool> paused,
       Value<String> rule,
+      Value<String?> collections,
       Value<String> createdAt,
       Value<String> updatedAt,
       Value<int> rowid,
@@ -15373,6 +15796,11 @@ class $$PlanItemsTableTableFilterComposer
 
   ColumnFilters<String> get rule => $composableBuilder(
     column: $table.rule,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get collections => $composableBuilder(
+    column: $table.collections,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -15466,6 +15894,11 @@ class $$PlanItemsTableTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get collections => $composableBuilder(
+    column: $table.collections,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -15514,6 +15947,11 @@ class $$PlanItemsTableTableAnnotationComposer
 
   GeneratedColumn<String> get rule =>
       $composableBuilder(column: $table.rule, builder: (column) => column);
+
+  GeneratedColumn<String> get collections => $composableBuilder(
+    column: $table.collections,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -15587,6 +16025,7 @@ class $$PlanItemsTableTableTableManager
                 Value<bool> forever = const Value.absent(),
                 Value<bool> paused = const Value.absent(),
                 Value<String> rule = const Value.absent(),
+                Value<String?> collections = const Value.absent(),
                 Value<String> createdAt = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -15600,6 +16039,7 @@ class $$PlanItemsTableTableTableManager
                 forever: forever,
                 paused: paused,
                 rule: rule,
+                collections: collections,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -15615,6 +16055,7 @@ class $$PlanItemsTableTableTableManager
                 Value<bool> forever = const Value.absent(),
                 Value<bool> paused = const Value.absent(),
                 Value<String> rule = const Value.absent(),
+                Value<String?> collections = const Value.absent(),
                 required String createdAt,
                 required String updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -15628,6 +16069,7 @@ class $$PlanItemsTableTableTableManager
                 forever: forever,
                 paused: paused,
                 rule: rule,
+                collections: collections,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -16385,6 +16827,233 @@ typedef $$BudgetTxTemplatesTableTableProcessedTableManager =
       BudgetTxTemplate,
       PrefetchHooks Function()
     >;
+typedef $$PlanCollectionsTableTableCreateCompanionBuilder =
+    PlanCollectionsTableCompanion Function({
+      required String id,
+      required String name,
+      Value<bool> visible,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$PlanCollectionsTableTableUpdateCompanionBuilder =
+    PlanCollectionsTableCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<bool> visible,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$PlanCollectionsTableTableFilterComposer
+    extends Composer<_$AppDatabase, $PlanCollectionsTableTable> {
+  $$PlanCollectionsTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get visible => $composableBuilder(
+    column: $table.visible,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$PlanCollectionsTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $PlanCollectionsTableTable> {
+  $$PlanCollectionsTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get visible => $composableBuilder(
+    column: $table.visible,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$PlanCollectionsTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PlanCollectionsTableTable> {
+  $$PlanCollectionsTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<bool> get visible =>
+      $composableBuilder(column: $table.visible, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$PlanCollectionsTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PlanCollectionsTableTable,
+          PlanCollection,
+          $$PlanCollectionsTableTableFilterComposer,
+          $$PlanCollectionsTableTableOrderingComposer,
+          $$PlanCollectionsTableTableAnnotationComposer,
+          $$PlanCollectionsTableTableCreateCompanionBuilder,
+          $$PlanCollectionsTableTableUpdateCompanionBuilder,
+          (
+            PlanCollection,
+            BaseReferences<
+              _$AppDatabase,
+              $PlanCollectionsTableTable,
+              PlanCollection
+            >,
+          ),
+          PlanCollection,
+          PrefetchHooks Function()
+        > {
+  $$PlanCollectionsTableTableTableManager(
+    _$AppDatabase db,
+    $PlanCollectionsTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PlanCollectionsTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PlanCollectionsTableTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$PlanCollectionsTableTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<bool> visible = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => PlanCollectionsTableCompanion(
+                id: id,
+                name: name,
+                visible: visible,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                Value<bool> visible = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => PlanCollectionsTableCompanion.insert(
+                id: id,
+                name: name,
+                visible: visible,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$PlanCollectionsTableTable, PlanCollection>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $PlanCollectionsTableTable,
+                    PlanCollection
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$PlanCollectionsTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PlanCollectionsTableTable,
+      PlanCollection,
+      $$PlanCollectionsTableTableFilterComposer,
+      $$PlanCollectionsTableTableOrderingComposer,
+      $$PlanCollectionsTableTableAnnotationComposer,
+      $$PlanCollectionsTableTableCreateCompanionBuilder,
+      $$PlanCollectionsTableTableUpdateCompanionBuilder,
+      (
+        PlanCollection,
+        BaseReferences<
+          _$AppDatabase,
+          $PlanCollectionsTableTable,
+          PlanCollection
+        >,
+      ),
+      PlanCollection,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -16439,4 +17108,6 @@ class $AppDatabaseManager {
         _db,
         _db.budgetTxTemplatesTable,
       );
+  $$PlanCollectionsTableTableTableManager get planCollectionsTable =>
+      $$PlanCollectionsTableTableTableManager(_db, _db.planCollectionsTable);
 }

@@ -299,6 +299,9 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
   bool _loaded = false;
   PlanItem? _existing;
 
+  /// The collections the item is in (ids; unknown ones are kept as they were).
+  List<String> _collectionIds = [];
+
   @override
   void initState() {
     super.initState();
@@ -320,6 +323,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         _end = d.endDate;
         _forever = d.forever;
         _paused = d.paused;
+        _collectionIds = [...d.collectionIds];
         if (d.cycle != null) {
           _cycleDays.text = '${d.cycle!.cycleDays}';
           for (final o in d.cycle!.occurrences) {
@@ -481,9 +485,51 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         cycle: cycle,
         monthly: monthly,
         manualMinutes: manual,
+        collectionIds: _collectionIds,
       ),
     );
     if (nav.mounted) nav.pop(id);
+  }
+
+  /// The collections the item belongs to: a chip per collection and
+  /// '+ New collection'.
+  Widget _collectionChips() {
+    final collections =
+        ref.watch(planCollectionsProvider).value ?? const <PlanCollection>[];
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 2,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('Collections', style: Theme.of(context).textTheme.titleSmall),
+          for (final c in collections)
+            FilterChip(
+              key: ValueKey('plan-editor-collection-${c.id}'),
+              label: Text(c.name),
+              visualDensity: VisualDensity.compact,
+              selected: _collectionIds.contains(c.id),
+              onSelected: (on) => setState(() {
+                on ? _collectionIds.add(c.id) : _collectionIds.remove(c.id);
+              }),
+            ),
+          ActionChip(
+            key: const ValueKey('plan-editor-collection-new'),
+            avatar: const Icon(Icons.add, size: 16),
+            label: const Text('New collection'),
+            visualDensity: VisualDensity.compact,
+            onPressed: () async {
+              final plans = ref.read(planServiceProvider);
+              final name = await _askCollectionName(context, null);
+              if (name == null || name.isEmpty) return;
+              final id = await plans.saveCollection(name: name);
+              if (mounted) setState(() => _collectionIds.add(id));
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _timeButton(Key key, int minutes, ValueChanged<int> set) =>
@@ -1081,6 +1127,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                               setState(() => _name.text = selected.name),
                         ),
                       ),
+                    _collectionChips(),
                     const SizedBox(height: 8),
                     SegmentedButton<PlanKind>(
                       key: const ValueKey('plan-kind'),
@@ -1169,6 +1216,181 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
 
 extension on BuildContext {
   Color get glassFillDialog => glass.fillDialog;
+}
+
+// ---- collections ----------------------------------------------------------------
+
+/// Asks for a collection's name ([initial] null = a new one). Null = cancelled.
+Future<String?> _askCollectionName(BuildContext context, String? initial) {
+  final controller = TextEditingController(text: initial ?? '');
+  return showStackedDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(initial == null ? 'New collection' : 'Rename collection'),
+      content: TextField(
+        key: const ValueKey('plan-collection-name'),
+        controller: controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Name'),
+        onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('plan-collection-name-save'),
+          onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// The plan collections: tick the ones whose ghost blocks planning mode shows,
+/// create / rename / delete them.
+class PlanCollectionsDialog extends ConsumerWidget {
+  const PlanCollectionsDialog({super.key});
+
+  static Future<void> show(BuildContext context) => showStackedDialog<void>(
+    context: context,
+    builder: (_) => const PlanCollectionsDialog(),
+  );
+
+  Future<void> _delete(
+    BuildContext context,
+    WidgetRef ref,
+    PlanCollection c,
+  ) async {
+    final plans = ref.read(planServiceProvider);
+    final overlay = rootOverlayOf(context);
+    final history = ref.read(undoHistoryProvider.notifier);
+    final undo = await plans.deleteCollection(c.id);
+    if (undo == null) return;
+    offerUndo(
+      overlay,
+      history,
+      'Deleted collection "${c.name}"',
+      () => plans.undoDeleteCollection(undo),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plans = ref.read(planServiceProvider);
+    final collections =
+        ref.watch(planCollectionsProvider).value ?? const <PlanCollection>[];
+    final items = ref.watch(planItemsProvider).value ?? const <PlanItem>[];
+    int count(String id) => items
+        .where((r) => decodeCollectionIds(r.collections).contains(id))
+        .length;
+    return AlertDialog(
+      title: const Text('Collections'),
+      content: SizedBox(
+        width: dialogWidth(context, 460),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Tick the collections to show on the calendar. Items that are '
+                'in no collection are always shown.',
+              ),
+              const SizedBox(height: 6),
+              Material(
+                type: MaterialType.transparency,
+                child: Column(
+                  children: [
+                    if (collections.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Text('No collections yet.'),
+                      ),
+                    for (final c in collections)
+                      CheckboxListTile(
+                        key: ValueKey('plan-collection-${c.id}'),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        value: c.visible,
+                        onChanged: (v) =>
+                            plans.setCollectionVisible(c.id, v == true),
+                        title: Text('${c.name} (${count(c.id)})'),
+                        secondary: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              key: ValueKey('plan-collection-rename-${c.id}'),
+                              tooltip: 'Rename',
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                              onPressed: () async {
+                                final name = await _askCollectionName(
+                                  context,
+                                  c.name,
+                                );
+                                if (name != null && name.isNotEmpty) {
+                                  await plans.saveCollection(
+                                    id: c.id,
+                                    name: name,
+                                  );
+                                }
+                              },
+                            ),
+                            IconButton(
+                              key: ValueKey('plan-collection-delete-${c.id}'),
+                              tooltip: 'Delete (its items stay)',
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              onPressed: () => _delete(context, ref, c),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    key: const ValueKey('plan-collection-add'),
+                    icon: const Icon(Icons.add),
+                    label: const Text('New collection'),
+                    onPressed: () async {
+                      final name = await _askCollectionName(context, null);
+                      if (name != null && name.isNotEmpty) {
+                        await plans.saveCollection(name: name);
+                      }
+                    },
+                  ),
+                  if (collections.isNotEmpty) ...[
+                    TextButton(
+                      key: const ValueKey('plan-collections-show-all'),
+                      onPressed: () => plans.setAllCollectionsVisible(true),
+                      child: const Text('Show all'),
+                    ),
+                    TextButton(
+                      key: const ValueKey('plan-collections-hide-all'),
+                      onPressed: () => plans.setAllCollectionsVisible(false),
+                      child: const Text('Hide all'),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
 }
 
 // ---- confirm ----------------------------------------------------------------
@@ -1284,6 +1506,92 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
     if (nav.mounted) nav.pop();
   }
 
+  bool _isOn(String id) => _selected == null || _selected!.contains(id);
+
+  /// Ticks / unticks every id in [ids].
+  void _setOn(Iterable<String> ids, bool on, List<PlanItem> all) {
+    final cur = {..._selected ?? {for (final i in all) i.id}};
+    on ? cur.addAll(ids) : cur.removeAll(ids);
+    setState(
+      () => _selected = cur.length == all.length ? null : cur,
+    );
+    _refresh();
+  }
+
+  /// The item checkboxes. With collections they are grouped: a tri-state header
+  /// per collection ticks all its items, items in no (existing) collection come
+  /// last under 'No collection'; an item in two collections shows under both and
+  /// shares one state.
+  List<Widget> _itemChecklist(List<PlanItem> items) {
+    final collections =
+        ref.watch(planCollectionsProvider).value ?? const <PlanCollection>[];
+    Widget itemTile(PlanItem r, String key, {double indent = 0}) =>
+        CheckboxListTile(
+          key: ValueKey(key),
+          dense: true,
+          contentPadding: EdgeInsets.only(left: indent),
+          title: Text(r.name),
+          value: _isOn(r.id),
+          onChanged: (v) => _setOn([r.id], v == true, items),
+        );
+    if (collections.isEmpty) {
+      return [for (final r in items) itemTile(r, 'plan-confirm-item-${r.id}')];
+    }
+    final members = <String, List<PlanItem>>{
+      for (final c in collections) c.id: [],
+    };
+    final loose = <PlanItem>[];
+    for (final r in items) {
+      final mine = [
+        for (final c in decodeCollectionIds(r.collections))
+          if (members.containsKey(c)) c,
+      ];
+      if (mine.isEmpty) {
+        loose.add(r);
+      } else {
+        for (final c in mine) {
+          members[c]!.add(r);
+        }
+      }
+    }
+    final shown = <String>{};
+    Widget header(String key, String title, List<PlanItem> group) {
+      final on = group.where((r) => _isOn(r.id)).length;
+      return CheckboxListTile(
+        key: ValueKey(key),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        tristate: true,
+        title: Text(
+          '$title (${group.length})',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        value: group.isEmpty || on == 0 ? false : (on == group.length ? true : null),
+        onChanged: group.isEmpty
+            ? null
+            : (_) => _setOn([for (final r in group) r.id], on != group.length, items),
+      );
+    }
+
+    List<Widget> group(String key, String title, List<PlanItem> list) => [
+      header(key, title, list),
+      for (final r in list)
+        itemTile(
+          r,
+          shown.add(r.id)
+              ? 'plan-confirm-item-${r.id}'
+              : 'plan-confirm-item-${r.id}@$key',
+          indent: 20,
+        ),
+    ];
+    return [
+      for (final c in collections)
+        ...group('plan-confirm-collection-${c.id}', c.name, members[c.id]!),
+      if (loose.isNotEmpty)
+        ...group('plan-confirm-collection-none', 'No collection', loose),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = ref.watch(planItemsProvider).value ?? const <PlanItem>[];
@@ -1337,21 +1645,7 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
                 ),
               const SizedBox(height: 10),
               const Text('Plan items'),
-              for (final r in items)
-                CheckboxListTile(
-                  key: ValueKey('plan-confirm-item-${r.id}'),
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(r.name),
-                  value: _selected == null || _selected!.contains(r.id),
-                  onChanged: (v) {
-                    final all = {for (final i in items) i.id};
-                    final cur = {...(_selected ?? all)};
-                    v == true ? cur.add(r.id) : cur.remove(r.id);
-                    setState(() => _selected = cur.length == all.length ? null : cur);
-                    _refresh();
-                  },
-                ),
+              ..._itemChecklist(items),
               const SizedBox(height: 8),
               Text(
                 _toCreate == null
@@ -1383,6 +1677,16 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
 }
 
 // ---- plan items list ----------------------------------------------------------
+
+/// ' · Sport, Gym' for the collections of [r] that still exist ('' = none).
+String _collectionNames(PlanItem r, List<PlanCollection> collections) {
+  final ids = decodeCollectionIds(r.collections);
+  final names = [
+    for (final c in collections)
+      if (ids.contains(c.id)) c.name,
+  ];
+  return names.isEmpty ? '' : ' · ${names.join(', ')}';
+}
 
 class PlanItemsDialog extends ConsumerWidget {
   const PlanItemsDialog({super.key});
@@ -1451,6 +1755,8 @@ class PlanItemsDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final items = ref.watch(planItemsProvider).value ?? const <PlanItem>[];
+    final collections =
+        ref.watch(planCollectionsProvider).value ?? const <PlanCollection>[];
     final plans = ref.read(planServiceProvider);
     return AlertDialog(
       title: const Text('Plan items'),
@@ -1478,7 +1784,8 @@ class PlanItemsDialog extends ConsumerWidget {
                         subtitle: Text(
                           '${describePlan(plans.decode(r))}'
                           '${r.forever ? ' · forever' : ''}'
-                          '${r.paused ? ' · paused' : ''}',
+                          '${r.paused ? ' · paused' : ''}'
+                          '${_collectionNames(r, collections)}',
                         ),
                         onTap: () =>
                             PlanItemEditorDialog.show(context, itemId: r.id),

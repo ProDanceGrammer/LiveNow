@@ -25,7 +25,11 @@ class PlanItemInput {
     this.cycle,
     this.monthly,
     this.manualMinutes,
+    this.collectionIds = const [],
   });
+
+  /// The plan collections the item belongs to.
+  final List<String> collectionIds;
 
   final String? id;
   final String name;
@@ -63,6 +67,15 @@ class PlanConfirmResult {
   /// Links / transactions that could not be made (a cycle, a deleted template or
   /// category, a group category): counted, never fatal.
   final int skipped;
+}
+
+/// What bringing a deleted collection back takes: its row and the membership
+/// (item id -> its collection ids before) of the items that were in it.
+class PlanCollectionDeleteUndo {
+  const PlanCollectionDeleteUndo(this.row, this.members);
+
+  final PlanCollection row;
+  final Map<String, List<String>> members;
 }
 
 /// Everything needed to bring a deleted plan item back.
@@ -106,6 +119,7 @@ class PlanService {
       paused: r.paused,
       cycle: rule.cycle,
       monthly: rule.monthly,
+      collectionIds: decodeCollectionIds(r.collections),
     );
   }
 
@@ -152,6 +166,9 @@ class PlanService {
       forever: Value(i.forever),
       paused: Value(i.paused),
       rule: Value(rule),
+      collections: Value(
+        i.collectionIds.isEmpty ? null : jsonEncode(i.collectionIds),
+      ),
       updatedAt: Value(now),
     );
     if (i.id == null) {
@@ -185,6 +202,100 @@ class PlanService {
         );
     return id;
   }
+
+  // ---- collections -------------------------------------------------------------
+
+  Stream<List<PlanCollection>> watchCollections() =>
+      (db.select(db.planCollectionsTable)
+            ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+          .watch();
+
+  Future<List<PlanCollection>> collections() =>
+      db.select(db.planCollectionsTable).get();
+
+  /// Creates (no [id]) or renames a collection; returns its id.
+  Future<String> saveCollection({String? id, required String name}) async {
+    final clean = name.trim();
+    if (clean.isEmpty) throw ArgumentError('A collection needs a name.');
+    final now = dateTimeToDb(DateTime.now())!;
+    if (id == null) {
+      final nid = newId();
+      await db
+          .into(db.planCollectionsTable)
+          .insert(
+            PlanCollectionsTableCompanion.insert(
+              id: nid,
+              name: clean,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      return nid;
+    }
+    await (db.update(db.planCollectionsTable)..where((t) => t.id.equals(id)))
+        .write(
+          PlanCollectionsTableCompanion(name: Value(clean), updatedAt: Value(now)),
+        );
+    return id;
+  }
+
+  Future<void> setCollectionVisible(String id, bool visible) =>
+      (db.update(db.planCollectionsTable)..where((t) => t.id.equals(id))).write(
+        PlanCollectionsTableCompanion(
+          visible: Value(visible),
+          updatedAt: Value(dateTimeToDb(DateTime.now())!),
+        ),
+      );
+
+  /// Show all / hide all collections in one transaction (rows already in that
+  /// state are not touched).
+  Future<void> setAllCollectionsVisible(bool visible) =>
+      db.transaction(() async {
+        for (final c in await collections()) {
+          if (c.visible != visible) await setCollectionVisible(c.id, visible);
+        }
+      });
+
+  /// Replaces the collections of one plan item.
+  Future<void> setItemCollections(String itemId, List<String> ids) =>
+      (db.update(db.planItemsTable)..where((t) => t.id.equals(itemId))).write(
+        PlanItemsTableCompanion(
+          collections: Value(ids.isEmpty ? null : jsonEncode(ids)),
+          updatedAt: Value(dateTimeToDb(DateTime.now())!),
+        ),
+      );
+
+  /// Deletes a collection (its items stay; they just leave it). Returns what an
+  /// Undo needs (null = it was already gone).
+  Future<PlanCollectionDeleteUndo?> deleteCollection(String id) =>
+      db.transaction(() async {
+        final row = await (db.select(
+          db.planCollectionsTable,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        if (row == null) return null;
+        final before = <String, List<String>>{};
+        for (final r in await items()) {
+          final ids = decodeCollectionIds(r.collections);
+          if (!ids.contains(id)) continue;
+          before[r.id] = ids;
+          await setItemCollections(r.id, [
+            for (final c in ids)
+              if (c != id) c,
+          ]);
+        }
+        await (db.delete(
+          db.planCollectionsTable,
+        )..where((t) => t.id.equals(id))).go();
+        return PlanCollectionDeleteUndo(row, before);
+      });
+
+  Future<void> undoDeleteCollection(PlanCollectionDeleteUndo u) =>
+      db.transaction(() async {
+        await db.into(db.planCollectionsTable).insertOnConflictUpdate(u.row);
+        for (final e in u.members.entries) {
+          await setItemCollections(e.key, e.value);
+        }
+      });
 
   /// "Whole pattern": the occurrence [index] of the plan item takes a new start
   /// time / duration in the RULE itself (every repetition changes), and its

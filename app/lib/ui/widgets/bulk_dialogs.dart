@@ -193,7 +193,7 @@ Future<String?> _askActivityName(BuildContext context) {
         ),
       ],
     ),
-  ).whenComplete(controller.dispose);
+  );
 }
 
 // ---- previous / next --------------------------------------------------------

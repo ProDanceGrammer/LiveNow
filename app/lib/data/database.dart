@@ -28,6 +28,7 @@ part 'database.g.dart';
     PlanItemsTable,
     PlanOverridesTable,
     BudgetTxTemplatesTable,
+    PlanCollectionsTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -37,7 +38,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -146,6 +147,18 @@ class AppDatabase extends _$AppDatabase {
       if (from < 13) {
         // Saved sort / filter views (purely additive).
         await m.createTable(savedViewsTable);
+      }
+      if (from < 16) {
+        // Plan collections: a table and the membership column on plan_items (an
+        // older plan_items table already got the column when it was created).
+        await m.createTable(planCollectionsTable);
+        final cols = await customSelect('PRAGMA table_info(plan_items)').get();
+        // (No plan_items yet = a database older than v14: the from < 14 step
+        // below creates it WITH the column.)
+        if (cols.isNotEmpty &&
+            !cols.any((r) => r.read<String>('name') == 'collections')) {
+          await m.addColumn(planItemsTable, planItemsTable.collections);
+        }
       }
       if (from < 15) {
         // Transaction templates (purely additive).

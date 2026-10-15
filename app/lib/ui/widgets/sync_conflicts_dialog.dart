@@ -22,6 +22,7 @@ const _kinds = {
   'saved_views': 'Saved view',
   'plan_items': 'Plan item',
   'plan_overrides': 'Plan edit',
+  'plan_collections': 'Plan collection',
   'budget_tx_templates': 'Transaction template',
 };
 

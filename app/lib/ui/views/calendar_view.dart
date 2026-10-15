@@ -1084,6 +1084,10 @@ class _CalendarPlanBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final g = context.glass;
     final phone = usePhoneLayout(context);
+    final hidden = [
+      for (final c in ref.watch(planCollectionsProvider).value ?? const [])
+        if (!c.visible) c,
+    ].length;
     Widget action(String key, IconData icon, String label, VoidCallback onTap) =>
         phone
         ? IconButton(
@@ -1117,6 +1121,12 @@ class _CalendarPlanBar extends ConsumerWidget {
               Icons.add,
               'New plan item',
               () => PlanItemEditorDialog.show(context),
+            ),
+            action(
+              'plan-bar-collections',
+              Icons.folder_copy_outlined,
+              hidden == 0 ? 'Collections' : 'Collections ($hidden hidden)',
+              () => PlanCollectionsDialog.show(context),
             ),
             action(
               'plan-bar-items',

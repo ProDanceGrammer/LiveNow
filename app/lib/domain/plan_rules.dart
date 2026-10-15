@@ -261,12 +261,16 @@ class PlanItemData {
     this.paused = false,
     this.cycle,
     this.monthly,
+    this.collectionIds = const [],
   });
 
   final String id;
   final String name;
   final String? templateId;
   final PlanKind kind;
+
+  /// The plan collections the item belongs to (ids; deleted ones may linger).
+  final List<String> collectionIds;
 
   /// First day of the pattern (cycle day 0 / first month), a [planDate].
   final DateTime startDate;
@@ -299,6 +303,34 @@ class PlanItemData {
     }
     return (cycle: null, monthly: null);
   }
+}
+
+/// The ids of the plan items whose ghost blocks planning mode draws. [collections]
+/// maps an existing collection id to whether it is visible. An item is shown
+/// when it belongs to NO existing collection (ids of deleted collections do not
+/// count) or to at least one visible one.
+Set<String> visiblePlanItemIds(
+  Iterable<PlanItemData> items,
+  Map<String, bool> collections,
+) {
+  final out = <String>{};
+  for (final i in items) {
+    final mine = [for (final c in i.collectionIds) if (collections.containsKey(c)) c];
+    if (mine.isEmpty || mine.any((c) => collections[c] == true)) out.add(i.id);
+  }
+  return out;
+}
+
+/// Reads the `collections` column (a JSON list of ids; anything else = none).
+List<String> decodeCollectionIds(String? json) {
+  if (json == null || json.isEmpty) return const [];
+  try {
+    final v = jsonDecode(json);
+    if (v is List) return [for (final x in v) if (x is String) x];
+  } catch (_) {
+    // A damaged value means "no collection".
+  }
+  return const [];
 }
 
 /// "This day only" edits of one occurrence (or its removal).

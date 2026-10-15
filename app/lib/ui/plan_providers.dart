@@ -22,6 +22,10 @@ final planItemsProvider = StreamProvider.autoDispose<List<PlanItem>>(
   (ref) => ref.watch(planServiceProvider).watchItems(),
 );
 
+final planCollectionsProvider = StreamProvider.autoDispose<List<PlanCollection>>(
+  (ref) => ref.watch(planServiceProvider).watchCollections(),
+);
+
 final planOverridesProvider = StreamProvider.autoDispose<List<PlanOverride>>(
   (ref) => ref.watch(planServiceProvider).watchOverrides(),
 );
@@ -31,11 +35,18 @@ final planOverridesProvider = StreamProvider.autoDispose<List<PlanOverride>>(
 final planOccurrencesProvider =
     FutureProvider.autoDispose<List<PlanOccurrence>>((ref) async {
       if (!ref.watch(calendarPlanningProvider)) return const [];
-      ref.watch(planItemsProvider);
+      final rows = await ref.watch(planItemsProvider.future);
+      final collections = await ref.watch(planCollectionsProvider.future);
       ref.watch(planOverridesProvider);
       final start = ref.watch(calendarRangeStartProvider);
       final days = ref.watch(calendarDayCountProvider);
       final from = planDateOf(start);
       final to = planDateOf(calendarAddDays(start, days - 1));
-      return ref.read(planServiceProvider).occurrences(from, to);
+      final plans = ref.read(planServiceProvider);
+      // Only the items of visible collections (and of none) are drawn.
+      final visible = visiblePlanItemIds(
+        [for (final r in rows) plans.decode(r)],
+        {for (final c in collections) c.id: c.visible},
+      );
+      return plans.occurrences(from, to, itemIds: visible);
     });
