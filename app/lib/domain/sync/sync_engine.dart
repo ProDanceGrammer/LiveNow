@@ -1,6 +1,13 @@
 import '../../data/sync/sync_store.dart';
 import 'sync_models.dart';
 
+/// The version two devices must share to sync. It is NOT the database schema
+/// version: the merge already ignores tables and columns it does not know (see
+/// `SyncStore._applyOne` / `_upsert`), so an added table or column needs no
+/// bump. Raise it only for a change the merge cannot tolerate. 15 = what the
+/// first iPhone builds (ios-28 and older) report.
+const kSyncWireVersion = 15;
+
 /// What a device can ask of the one it syncs with. The HTTP client implements
 /// it over the network; tests call a [SyncHost] directly.
 abstract class SyncTransport {

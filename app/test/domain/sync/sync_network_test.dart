@@ -7,6 +7,7 @@ import 'package:livenow/data/sync/http_transport.dart';
 import 'package:livenow/data/sync/sync_peers.dart';
 import 'package:livenow/data/sync/sync_server.dart';
 import 'package:livenow/domain/action_service.dart';
+import 'package:livenow/domain/sync/sync_engine.dart';
 import 'package:livenow/domain/sync/sync_crypto.dart';
 import 'package:livenow/domain/sync/sync_protocol.dart';
 
@@ -326,10 +327,10 @@ void main() {
       expect((await peers.get(peer.deviceId))!.addresses.first, '127.0.0.1');
     });
 
-    test('hello reports the schema version of the PC', () async {
+    test('hello reports the sync version of the PC', () async {
       final (_, transport) = await pair();
       final hello = await transport.hello();
-      expect(hello.schemaVersion, pc.db.schemaVersion);
+      expect(hello.schemaVersion, kSyncWireVersion);
     });
   });
 }

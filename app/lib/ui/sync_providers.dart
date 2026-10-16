@@ -42,17 +42,11 @@ final syncPeersProvider = Provider<SyncPeers>(
 );
 
 final syncHostProvider = Provider<SyncHost>(
-  (ref) => SyncHost(
-    ref.watch(syncStoreProvider),
-    ref.watch(databaseProvider).schemaVersion,
-  ),
+  (ref) => SyncHost(ref.watch(syncStoreProvider), kSyncWireVersion),
 );
 
 final syncEngineProvider = Provider<SyncEngine>(
-  (ref) => SyncEngine(
-    ref.watch(syncStoreProvider),
-    ref.watch(databaseProvider).schemaVersion,
-  ),
+  (ref) => SyncEngine(ref.watch(syncStoreProvider), kSyncWireVersion),
 );
 
 /// How the phone reaches its PC; tests swap in an in-process transport.

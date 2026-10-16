@@ -22,8 +22,8 @@ class SyncDevice {
         }
       },
     );
-    host = SyncHost(store, db.schemaVersion);
-    engine = SyncEngine(store, db.schemaVersion, pageSize: 7);
+    host = SyncHost(store, kSyncWireVersion);
+    engine = SyncEngine(store, kSyncWireVersion, pageSize: 7);
   }
 
   static AppDatabase _open() => AppDatabase.forTesting(
