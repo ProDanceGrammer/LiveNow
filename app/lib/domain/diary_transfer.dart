@@ -88,7 +88,7 @@ DiaryResult buildDiary(Iterable<DiaryAction> actions, List<String> codes) {
     ..sort((a, b) => a.startAt.compareTo(b.startAt));
   final matched = <String>[];
   final seen = <String>{};
-  final groups = <String, List<DiaryItem>>{};
+  final groups = <String, List<({String key, DateTime at, DiaryItem item})>>{};
   final order = <String>[];
   for (final a in sorted) {
     final (_, base) = parseSequencePrefix(a.name);
@@ -107,12 +107,48 @@ DiaryResult buildDiary(Iterable<DiaryAction> actions, List<String> codes) {
     final text = [...subTags, if (sentence.isNotEmpty) sentence].join(' ');
     if (text.isEmpty) continue;
     if (!groups.containsKey(groupTag)) order.add(groupTag);
-    groups.putIfAbsent(groupTag, () => []).add(DiaryItem(text));
+    groups
+        .putIfAbsent(groupTag, () => [])
+        .add((
+          key: subTags.join(' ').toLowerCase(),
+          at: a.startAt,
+          item: DiaryItem(text),
+        ));
   }
+  // Inside a group: by the tags after the group tag (name order, numbers
+  // compared as numbers), then by the time of the action.
+  int byTagThenTime(
+    ({String key, DateTime at, DiaryItem item}) x,
+    ({String key, DateTime at, DiaryItem item}) y,
+  ) {
+    final c = naturalCompare(x.key, y.key);
+    return c != 0 ? c : x.at.compareTo(y.at);
+  }
+
   return DiaryResult(
-    groups: [for (final g in order) DiaryGroup(g, groups[g]!)],
+    groups: [
+      for (final g in order)
+        DiaryGroup(g, [
+          for (final e in (groups[g]!..sort(byTagThenTime))) e.item,
+        ]),
+    ],
     matchedIds: matched,
   );
+}
+
+/// Orders two strings like a person: runs of digits count as numbers
+/// (`cs-999` < `cs-1000`), everything else compares by character.
+int naturalCompare(String a, String b) {
+  final re = RegExp(r'\d+|\D+');
+  final pa = re.allMatches(a).map((m) => m.group(0)!).toList();
+  final pb = re.allMatches(b).map((m) => m.group(0)!).toList();
+  for (var i = 0; i < pa.length && i < pb.length; i++) {
+    final x = pa[i], y = pb[i];
+    final nx = int.tryParse(x), ny = int.tryParse(y);
+    final c = (nx != null && ny != null) ? nx.compareTo(ny) : x.compareTo(y);
+    if (c != 0) return c;
+  }
+  return pa.length.compareTo(pb.length);
 }
 
 /// Turns the first word of [rest] into the past tense and ends with a period.

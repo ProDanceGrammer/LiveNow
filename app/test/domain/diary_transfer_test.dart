@@ -51,14 +51,29 @@ void main() {
         '[Target:Donald]',
       ]);
       expect([for (final i in result.groups[0].items) i.text], [
-        '[JBT:DK-9358] Implemented feature.',
         '[JBT:DK-2004] Implemented feature.',
+        '[JBT:DK-9358] Implemented feature.',
       ]);
       expect([for (final i in result.groups[1].items) i.text], [
         '[JBT:DK-8492] Implemented feature.',
       ]);
       // Every variant becomes a Previous action, duplicates included.
       expect(result.matchedIds.toSet(), {'1', '2', '3', '4'});
+    });
+
+    test('inside a group: by tag name (numbers as numbers), then by time', () {
+      final result = buildDiary([
+        _a('1', '[Client:Kato] [KBT:CS-4852] Check updates', 10),
+        _a('2', '[Client:Kato] [KBT:CS-4853] Build DL', 11),
+        _a('3', '[Client:Kato] [KBT:CS-4852] Fix issue', 13),
+        _a('4', '[Client:Kato] [KBT:CS-999] Look', 14),
+      ], const []);
+      expect([for (final i in result.groups.single.items) i.text], [
+        '[KBT:CS-999] Looked.',
+        '[KBT:CS-4852] Checked updates.',
+        '[KBT:CS-4852] Fixed issue.',
+        '[KBT:CS-4853] Built DL.',
+      ]);
     });
 
     test('untagged actions are left out; codes restrict by key or exact tag', () {
