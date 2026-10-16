@@ -205,6 +205,11 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
         command: 'ctrl+v',
         macOSCommand: 'cmd+v',
         handler: (state) {
+          // Inside a code block every pasted line stays in the block.
+          if (codeBlockAtSelection(state) != null) {
+            _pasteIntoCode();
+            return KeyEventResult.handled;
+          }
           if (NotesCopyMemory.last == null) return KeyEventResult.ignored;
           _pasteInApp(state);
           return KeyEventResult.handled;
@@ -239,6 +244,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
       // The custom blocks' Tab / Backspace commands must run BEFORE the
       // standard ones, or the standard Tab / Backspace handle the key first.
       ...customNotesCommandShortcuts(),
+      ...notesHotkeyCommands,
       ...standardCommandShortcutEvents.where(
         (e) => e.key != pasteTextWithoutFormattingCommand.key,
       ),
@@ -250,7 +256,19 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     });
     _editorState.selectionNotifier.addListener(_rememberSelection);
     WidgetsBinding.instance.addObserver(this);
+    // The selection service exists once the editor is built.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        _editorState.selectionService.registerGestureInterceptor(
+          _tripleClick,
+        );
+      } catch (_) {}
+    });
   }
+
+  late final SelectionGestureInterceptor _tripleClick =
+      notesTripleClickInterceptor(_editorState);
 
   void _rememberSelection() {
     final sel = _editorState.selection;
@@ -301,6 +319,11 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _editorState.selectionNotifier.removeListener(_rememberSelection);
+    try {
+      _editorState.selectionService.unregisterGestureInterceptor(
+        _tripleClick.key,
+      );
+    } catch (_) {}
     if (_timer?.isActive ?? false) _flush();
     _timer?.cancel();
     _sub?.cancel();
@@ -324,6 +347,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (!mounted || text == null || text.trim().isEmpty) return;
+    if (await pasteVerbatimIntoCodeBlock(_editorState, text)) return;
     // What was copied here as a code block is pasted as plain TEXT: converting
     // it would turn indented code back into a code block.
     if (NotesCopyMemory.isCodeBlock && NotesCopyMemory.last!.text == text) {
@@ -490,6 +514,12 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final stored = NotesCopyMemory.last;
     if (!mounted) return;
+    final clip = data?.text;
+    if (clip != null &&
+        clip.isNotEmpty &&
+        await pasteVerbatimIntoCodeBlock(_editorState, clip)) {
+      return;
+    }
     if (stored != null && data?.text == stored.text) {
       await _pasteNodes([for (final j in stored.nodes) Node.fromJson(j)]);
     } else {
@@ -508,6 +538,15 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     await _editorState.apply(transaction);
   }
 
+  /// Ctrl+V inside a code block: the clipboard text goes in unchanged, all its
+  /// lines in the same block.
+  Future<void> _pasteIntoCode() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (!mounted || text == null || text.isEmpty) return;
+    await pasteVerbatimIntoCodeBlock(_editorState, text);
+  }
+
   /// Ctrl+V with something copied here: the stored blocks when the clipboard
   /// still holds their text, else the package's own paste.
   Future<void> _pasteInApp(EditorState state) async {
@@ -523,7 +562,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
         ? null
         : state.getNodeAtPath(state.selection!.start.path);
     if (NotesCopyMemory.isCodeBlock && at?.type == codeBlockType) {
-      pasteCommand.handler(state);
+      await pasteVerbatimIntoCodeBlock(state, stored.text);
       return;
     }
     final nodes = [for (final j in stored.nodes) Node.fromJson(j)];
