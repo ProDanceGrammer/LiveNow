@@ -585,6 +585,40 @@ class PlanService {
             ..where((t) => t.id.equals(overrideId(itemId, date, index))))
           .go();
 
+  /// "Skip this day": hides the occurrence on [date] (index [index] of its
+  /// item) without touching the rule. Returns what was stored for that day
+  /// before (null = nothing) so [undoSkip] can put it back exactly.
+  Future<PlanOverride?> skipOccurrence(
+    String itemId,
+    DateTime date,
+    int index,
+  ) async {
+    final id = overrideId(itemId, date, index);
+    final before = await (db.select(
+      db.planOverridesTable,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
+    await setOverride(
+      itemId: itemId,
+      date: date,
+      index: index,
+      skipped: true,
+    );
+    return before;
+  }
+
+  Future<void> undoSkip(
+    String itemId,
+    DateTime date,
+    int index,
+    PlanOverride? before,
+  ) async {
+    if (before == null) {
+      await clearOverride(itemId, date, index);
+    } else {
+      await db.into(db.planOverridesTable).insertOnConflictUpdate(before);
+    }
+  }
+
   // ---- generating -------------------------------------------------------------
 
   /// The duration an occurrence of [item] gets when it has none of its own: its

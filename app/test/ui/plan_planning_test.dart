@@ -9,9 +9,11 @@ import 'package:livenow/domain/plan_rules.dart';
 import 'package:livenow/domain/plan_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/calendar_allday.dart';
+import 'package:livenow/ui/dialog_stack.dart' show resetStackedDialogsForTest;
 import 'package:livenow/ui/plan_providers.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
+import 'package:livenow/ui/widgets/plan_dialogs.dart' show PlanItemEditorDialog;
 
 /// Planning mode on the calendar: the toggle shows one translucent block per
 /// plan occurrence, dragging one asks "this day only / whole pattern", and the
@@ -533,6 +535,110 @@ void main() {
     // The timed ghosts (Run) are untouched and the all-day ones are not blocks.
     expect(ghosts(), findsNWidgets(7 + 7)); // Run blocks + the chips' keys
     await unmount(tester);
+  });
+
+  group('right click on an all-day plan chip', () {
+    Finder chips() => find.byWidgetPredicate((w) {
+      final k = w.key;
+      return k is ValueKey<String> && k.value.startsWith('plan-ghost-allday-');
+    });
+
+    Future<void> mountRestDay(WidgetTester tester) async {
+      await mount(
+        tester,
+        seed: (plans) async {
+          await plans.saveItem(
+            PlanItemInput(
+              name: 'Rest day',
+              kind: PlanKind.cycle,
+              startDate: planDateOf(
+                DateTime.now(),
+              ).subtract(const Duration(days: 30)),
+              cycle: const CycleRule(
+                cycleDays: 1,
+                occurrences: [CycleOccurrence(day: 0, startMin: 0, allDay: true)],
+              ),
+            ),
+          );
+        },
+      );
+      await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+      await settle(tester);
+      expect(chips(), findsNWidgets(7));
+    }
+
+    Future<void> rightClickFirstChip(WidgetTester tester) async {
+      final g = await tester.startGesture(
+        tester.getCenter(chips().first),
+        kind: PointerDeviceKind.mouse,
+        buttons: kSecondaryMouseButton,
+      );
+      await g.up();
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 500));
+    }
+
+    testWidgets('opens a menu with Edit, Skip this day and Delete', (
+      tester,
+    ) async {
+      await mountRestDay(tester);
+      await rightClickFirstChip(tester);
+      expect(find.byKey(const ValueKey('plan-chip-edit')), findsOneWidget);
+      expect(find.byKey(const ValueKey('plan-chip-skip')), findsOneWidget);
+      expect(find.byKey(const ValueKey('plan-chip-delete')), findsOneWidget);
+      await tester.tapAt(const Offset(5, 5)); // close the menu
+      await tester.pump(const Duration(milliseconds: 400));
+      await unmount(tester);
+    });
+
+    testWidgets('Skip this day only hides that day, Undo brings it back', (
+      tester,
+    ) async {
+      await mountRestDay(tester);
+      await rightClickFirstChip(tester);
+      await tester.tap(find.byKey(const ValueKey('plan-chip-skip')));
+      await settle(tester);
+      expect(chips(), findsNWidgets(6));
+      expect(find.text('Rest day'), findsNWidgets(6));
+      // The timed plan item is untouched.
+      expect(ghosts(), findsNWidgets(6 + 7));
+
+      await tester.tap(find.text('Undo'));
+      await settle(tester);
+      expect(chips(), findsNWidgets(7));
+      await tester.pump(const Duration(seconds: 6)); // the toast timer
+      await unmount(tester);
+    });
+
+    testWidgets('Edit this plan opens the plan item editor', (tester) async {
+      await mountRestDay(tester);
+      await rightClickFirstChip(tester);
+      await tester.tap(find.byKey(const ValueKey('plan-chip-edit')));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PlanItemEditorDialog), findsOneWidget);
+      expect(find.text('Rest day'), findsWidgets);
+      resetStackedDialogsForTest();
+      await unmount(tester);
+    });
+
+    testWidgets('Delete this plan asks, then removes the plan and its chips', (
+      tester,
+    ) async {
+      await mountRestDay(tester);
+      await rightClickFirstChip(tester);
+      await tester.tap(find.byKey(const ValueKey('plan-chip-delete')));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Delete "Rest day"?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('plan-delete-keep')));
+      await settle(tester);
+      expect(chips(), findsNothing);
+      // The other plan item (Run) stays.
+      expect(ghosts(), findsNWidgets(7));
+      await tester.pump(const Duration(seconds: 6));
+      await unmount(tester);
+    });
   });
 
   testWidgets('the ghost follows the grid while it scrolls under the pointer', (

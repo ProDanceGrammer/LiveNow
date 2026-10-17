@@ -50,6 +50,7 @@ import '../urgency_colors.dart';
 import '../widgets/round_check.dart';
 import '../widgets/action_editor.dart';
 import '../widgets/action_tile.dart';
+import '../widgets/app_toast.dart' show rootOverlayOf;
 import '../widgets/bulk_dialogs.dart' show runBulkSetDate, runBulkShift;
 import '../widgets/direction_badge.dart';
 import '../widgets/glass.dart';
@@ -1572,14 +1573,66 @@ class _DirectionChip extends StatelessWidget {
 }
 
 /// A plan occurrence that is all-day (planning mode): a translucent chip in the
-/// all-day strip; double-click (a tap on a phone) opens the plan item.
-class _PlanAllDayChip extends StatelessWidget {
+/// all-day strip; double-click (a tap on a phone) opens the plan item, and on a
+/// desktop a right click opens a menu: Edit this plan, Skip this day only,
+/// Delete this plan.
+class _PlanAllDayChip extends ConsumerWidget {
   const _PlanAllDayChip({required this.occ});
 
   final PlanOccurrence occ;
 
+  Future<void> _menu(BuildContext context, WidgetRef ref, Offset at) async {
+    // What the skip needs afterwards is read BEFORE the await (the strip can be
+    // rebuilt while the menu is open). The chip's own context is used for the
+    // dialogs: it sits below the Overlay, which the Undo toast needs.
+    final box = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final plans = ref.read(planServiceProvider);
+    final overlay = rootOverlayOf(context);
+    final history = ref.read(undoHistoryProvider.notifier);
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(at & Size.zero, Offset.zero & box.size),
+      items: const [
+        PopupMenuItem(
+          key: ValueKey('plan-chip-edit'),
+          value: 'edit',
+          child: Text('Edit this plan'),
+        ),
+        PopupMenuItem(
+          key: ValueKey('plan-chip-skip'),
+          value: 'skip',
+          child: Text('Skip this day only'),
+        ),
+        PopupMenuItem(
+          key: ValueKey('plan-chip-delete'),
+          value: 'delete',
+          child: Text('Delete this plan'),
+        ),
+      ],
+    );
+    if (choice == null || !context.mounted) return;
+    switch (choice) {
+      case 'edit':
+        await PlanItemEditorDialog.show(context, itemId: occ.planItemId);
+      case 'skip':
+        final before = await plans.skipOccurrence(
+          occ.planItemId,
+          occ.date,
+          occ.index,
+        );
+        offerUndo(
+          overlay,
+          history,
+          'Skipped "${occ.name}" on ${occ.date.day}.${occ.date.month}',
+          () => plans.undoSkip(occ.planItemId, occ.date, occ.index, before),
+        );
+      case 'delete':
+        await askAndDeletePlanItem(context, ref, occ.planItemId, occ.name);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final color = Theme.of(context).colorScheme.tertiary;
     final phone = usePhoneLayout(context);
     void open() => PlanItemEditorDialog.show(context, itemId: occ.planItemId);
@@ -1590,6 +1643,9 @@ class _PlanAllDayChip extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onTap: phone ? open : null,
         onDoubleTap: phone ? null : open,
+        onSecondaryTapDown: phone
+            ? null
+            : (d) => _menu(context, ref, d.globalPosition),
         child: Container(
           height: 18,
           padding: const EdgeInsets.symmetric(horizontal: 4),

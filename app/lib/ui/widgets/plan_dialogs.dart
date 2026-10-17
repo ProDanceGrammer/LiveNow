@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
+import '../../domain/plan_item_search.dart';
 import '../../domain/plan_rules.dart';
 import '../../domain/plan_service.dart';
 import '../dialog_stack.dart';
@@ -115,6 +116,43 @@ Future<void> applyGhostChange(
       durationMin: durationMin,
     );
   }
+}
+
+/// Asks whether the plan item's future, never-edited actions go with it, then
+/// deletes it with one Undo. Used by the Plan items list and the right-click menu.
+Future<void> askAndDeletePlanItem(
+  BuildContext context,
+  WidgetRef ref,
+  String id,
+  String name,
+) async {
+  final choice = await showStackedDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text('Delete "$name"?'),
+      content: const Text(
+        'Also remove its future actions that were never edited?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Cancel'),
+        ),
+        OutlinedButton(
+          key: const ValueKey('plan-delete-keep'),
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Keep actions'),
+        ),
+        FilledButton(
+          key: const ValueKey('plan-delete-remove'),
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('Remove them'),
+        ),
+      ],
+    ),
+  );
+  if (choice == null || !context.mounted) return;
+  await runUndoableDeletePlanItem(context, ref, id, removeFuture: choice);
 }
 
 // ---- plan item editor ---------------------------------------------------------
@@ -818,6 +856,21 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     );
   }
 
+  /// Opens a transaction template for editing (a chip was tapped). A template
+  /// is shared by every plan row that uses it, so a change shows in all of them
+  /// (transactions already created from it keep their own values).
+  Future<void> _editTxTemplate(String id) async {
+    final all = ref.read(budgetTxTemplatesProvider).value;
+    final t = (all ?? const <BudgetTxTemplate>[])
+        .where((x) => x.id == id)
+        .firstOrNull;
+    if (t == null || !mounted) return;
+    await TransactionTemplateDialog.show(context, existing: t);
+  }
+
+  static const _editTxTip =
+      'Edit this transaction (every plan row that uses it changes)';
+
   // ---- Previous / Next / Transactions of one row --------------------------------
 
   Widget _extrasEditor(
@@ -839,8 +892,11 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
       children: [
         for (final id in ids)
           InputChip(
+            key: ValueKey('$key-open-$id'),
             label: Text(names[id] ?? 'Deleted template'),
+            tooltip: _editTxTip,
             visualDensity: VisualDensity.compact,
+            onPressed: () => _editTxTemplate(id),
             onDeleted: () => setState(() => ids.remove(id)),
           ),
         ActionChip(
@@ -1060,8 +1116,11 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
             children: [
               for (final id in c.tx)
                 InputChip(
+                  key: ValueKey('$key-tx-open-$id'),
                   label: Text(names[id] ?? 'Deleted template'),
+                  tooltip: _editTxTip,
                   visualDensity: VisualDensity.compact,
+                  onPressed: () => _editTxTemplate(id),
                   onDeleted: () => setState(() => c.tx.remove(id)),
                 ),
               ActionChip(
@@ -1831,17 +1890,22 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
 
 // ---- plan items list ----------------------------------------------------------
 
-/// ' · Sport, Gym' for the collections of [r] that still exist ('' = none).
-String _collectionNames(PlanItem r, List<PlanCollection> collections) {
+/// The names of the collections of [r] that still exist.
+List<String> _collectionNameList(PlanItem r, List<PlanCollection> collections) {
   final ids = decodeCollectionIds(r.collections);
-  final names = [
+  return [
     for (final c in collections)
       if (ids.contains(c.id)) c.name,
   ];
+}
+
+/// ' · Sport, Gym' for the collections of [r] that still exist ('' = none).
+String _collectionNames(PlanItem r, List<PlanCollection> collections) {
+  final names = _collectionNameList(r, collections);
   return names.isEmpty ? '' : ' · ${names.join(', ')}';
 }
 
-class PlanItemsDialog extends ConsumerWidget {
+class PlanItemsDialog extends ConsumerStatefulWidget {
   const PlanItemsDialog({super.key});
 
   static Future<void> show(BuildContext context) => showStackedDialog<void>(
@@ -1849,39 +1913,18 @@ class PlanItemsDialog extends ConsumerWidget {
     builder: (_) => const PlanItemsDialog(),
   );
 
+  @override
+  ConsumerState<PlanItemsDialog> createState() => _PlanItemsDialogState();
+}
+
+class _PlanItemsDialogState extends ConsumerState<PlanItemsDialog> {
+  String _query = '';
+
   Future<void> _delete(
     BuildContext context,
     WidgetRef ref,
     PlanItem item,
-  ) async {
-    final choice = await showStackedDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Delete "${item.name}"?'),
-        content: const Text(
-          'Also remove its future actions that were never edited?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          OutlinedButton(
-            key: const ValueKey('plan-delete-keep'),
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Keep actions'),
-          ),
-          FilledButton(
-            key: const ValueKey('plan-delete-remove'),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Remove them'),
-          ),
-        ],
-      ),
-    );
-    if (choice == null || !context.mounted) return;
-    await runUndoableDeletePlanItem(context, ref, item.id, removeFuture: choice);
-  }
+  ) => askAndDeletePlanItem(context, ref, item.id, item.name);
 
   Future<void> _removeFuture(
     BuildContext context,
@@ -1906,11 +1949,21 @@ class PlanItemsDialog extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final items = ref.watch(planItemsProvider).value ?? const <PlanItem>[];
     final collections =
         ref.watch(planCollectionsProvider).value ?? const <PlanCollection>[];
     final plans = ref.read(planServiceProvider);
+    final shown = [
+      for (final r in items)
+        if (planItemMatchesSearch(
+          _query,
+          name: r.name,
+          description: describePlan(plans.decode(r)),
+          collectionNames: _collectionNameList(r, collections),
+        ))
+          r,
+    ];
     return AlertDialog(
       title: const Text('Plan items'),
       content: SizedBox(
@@ -1921,7 +1974,25 @@ class PlanItemsDialog extends ConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (final r in items)
+                    TextField(
+                      key: const ValueKey('plan-items-search'),
+                      decoration: const InputDecoration(
+                        hintText: 'Search by name or collection',
+                        prefixIcon: Icon(Icons.search),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => setState(() => _query = v),
+                    ),
+                    const SizedBox(height: 8),
+                    if (shown.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'No plan item matches.',
+                          key: ValueKey('plan-items-no-match'),
+                        ),
+                      ),
+                    for (final r in shown)
                       ListTile(
                         key: ValueKey('plan-item-${r.id}'),
                         dense: true,
