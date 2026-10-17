@@ -360,7 +360,14 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('budget-tx-options-toggle')));
       await settle(tester);
       expect(find.byKey(const ValueKey('tx-col-main')), findsNothing);
-      expect(find.byKey(const ValueKey('tx-totals-show')), findsOneWidget);
+      // The totals switch is a toolbar icon left of the templates icon.
+      expect(find.byKey(const ValueKey('tx-totals-show')), findsNothing);
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('tx-totals-toggle'))).dx,
+        lessThan(
+          tester.getCenter(find.byKey(const ValueKey('tx-templates-toggle'))).dx,
+        ),
+      );
       final tile = find.byKey(ValueKey('budget-tx-$txBread'));
       expect(
         find.descendant(of: tile, matching: find.textContaining('TRY')),
@@ -402,13 +409,15 @@ void main() {
     testWidgets('totals can be hidden', (tester) async {
       await pump(tester, tab: 'Transactions');
       expect(find.byKey(const ValueKey('tx-totals-plan')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('budget-tx-options-toggle')));
-      await settle(tester);
-      await tester.tap(find.byKey(const ValueKey('tx-totals-show')));
+      await tester.tap(find.byKey(const ValueKey('tx-totals-toggle')));
       await settle(tester);
       expect(find.byKey(const ValueKey('tx-totals-plan')), findsNothing);
       // The title stays.
       expect(find.textContaining('Total (1)'), findsOneWidget);
+      // And back on.
+      await tester.tap(find.byKey(const ValueKey('tx-totals-toggle')));
+      await settle(tester);
+      expect(find.byKey(const ValueKey('tx-totals-plan')), findsOneWidget);
       await unmount(tester);
     });
 

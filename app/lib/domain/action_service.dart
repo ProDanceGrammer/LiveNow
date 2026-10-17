@@ -1206,17 +1206,20 @@ class ActionService {
       for (final occurrence in snapshot.occurrences) {
         await db
             .into(db.actionOccurrencesTable)
-            .insert(
-              occurrence.toCompanion(false),
-              mode: InsertMode.insertOrReplace,
-            );
+            .insert(occurrence.toCompanion(false));
       }
-      await db
-          .into(db.actionsTable)
-          .insert(
-            snapshot.action.toCompanion(false),
-            mode: InsertMode.insertOrReplace,
-          );
+      // An UPDATE, never insert-or-replace: with foreign keys on, a REPLACE
+      // deletes the old row first and the cascade drops the action's growth
+      // directions, its Previous/Next links and more (the "action lost its
+      // directions after Undo" bug). The row only gets inserted when it is gone.
+      final updated = await (db.update(
+        db.actionsTable,
+      )..where((t) => t.id.equals(snapshot.action.id))).write(
+        snapshot.action.toCompanion(false),
+      );
+      if (updated == 0) {
+        await db.into(db.actionsTable).insert(snapshot.action.toCompanion(false));
+      }
     });
   }
 

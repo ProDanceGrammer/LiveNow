@@ -7,6 +7,7 @@ import '../dialog_stack.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
 import 'action_tile.dart' show formatUrgency;
+import 'direction_badge.dart' show emojiLabelStyle;
 import 'growth_direction_dialog.dart';
 import 'param_icons.dart';
 
@@ -146,7 +147,10 @@ class MetricPicker extends ConsumerWidget {
                   context,
                   stats?[m.id],
                   InputChip(
-                    label: Text(metricLabel(m.name, m.icon)),
+                    label: Text(
+                      metricLabel(m.name, m.icon),
+                      style: emojiLabelStyle,
+                    ),
                     tooltip: onOpen == null ? null : 'Open this direction',
                     onPressed: onOpen == null ? null : () => onOpen!(m),
                     onDeleted: () => onChanged({...selectedIds}..remove(m.id)),
@@ -238,7 +242,10 @@ class _MetricSearchDialogState extends State<_MetricSearchDialog> {
                                     .withValues(alpha: 0.10)
                               : null,
                           value: _selected.contains(m.id),
-                          title: Text(metricLabel(m.name, m.icon)),
+                          title: Text(
+                            metricLabel(m.name, m.icon),
+                            style: emojiLabelStyle,
+                          ),
                           subtitle: Text(_subtitle(m)),
                           onChanged: (on) => setState(() {
                             if (on == true) {

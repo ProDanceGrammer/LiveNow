@@ -327,6 +327,9 @@ List<String> arrangeTransactionIds({
     for (final id in filters.categoryIds) ...(descendants[id] ?? {id}),
   };
 
+  // A quick choice (Last week ...) is worked out from today ONCE per pass.
+  final dateRange = filters.dateRange.resolved();
+
   bool keep(TxRowView t) {
     if (filters.categoryIds.isNotEmpty) {
       final inChosen =
@@ -349,9 +352,7 @@ List<String> arrangeTransactionIds({
       case TxActionLink.unlinked:
         if (t.linked) return false;
     }
-    if (filters.dateRange.active && !filters.dateRange.contains(t.date)) {
-      return false;
-    }
+    if (dateRange.active && !dateRange.contains(t.date)) return false;
     if (q.isNotEmpty) {
       final hit =
           (flags.name && t.name.toLowerCase().contains(q)) ||

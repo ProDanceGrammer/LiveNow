@@ -144,6 +144,76 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('thin grid lines separate the columns and the day names from the cards', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      seed: () async {
+        await service.createAction(
+          name: 'Drink water',
+          isAllDay: true,
+          startAt: day(1),
+        );
+      },
+    );
+    // Six lines between seven columns, in the day names and in the card area.
+    for (var i = 1; i < 7; i++) {
+      expect(find.byKey(ValueKey('allday-strip-vline-head-$i')), findsOneWidget);
+      expect(find.byKey(ValueKey('allday-strip-vline-$i')), findsOneWidget);
+    }
+    expect(find.byKey(const ValueKey('allday-strip-vline-head-0')), findsNothing);
+    // One line under the day names, above the cards.
+    final rule = find.byKey(const ValueKey('allday-strip-hline'));
+    expect(rule, findsOneWidget);
+    final names = tester.getBottomLeft(find.byKey(const ValueKey('allday-strip-day-0')));
+    final firstCard = tester.getTopLeft(
+      find.descendant(of: column(1), matching: find.byType(Material)).first,
+    );
+    expect(tester.getTopLeft(rule).dy, greaterThanOrEqualTo(names.dy));
+    expect(tester.getTopLeft(rule).dy, lessThan(firstCard.dy));
+    // Thin: one pixel.
+    expect(tester.getSize(rule).height, 1);
+    expect(tester.getSize(find.byKey(const ValueKey('allday-strip-vline-3'))).width, 1);
+    // The column lines run the full height of the card area, also beside an
+    // empty column (day 5 has no card).
+    expect(
+      tester.getSize(find.byKey(const ValueKey('allday-strip-vline-5'))).height,
+      greaterThan(30),
+    );
+    await unmount(tester);
+  });
+
+  testWidgets('the columns line up: a column line sits between the same two day names', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      seed: () async {
+        await service.createAction(
+          name: 'Drink water',
+          isAllDay: true,
+          startAt: day(0),
+        );
+      },
+    );
+    for (var i = 1; i < 7; i++) {
+      final head = tester.getCenter(find.byKey(ValueKey('allday-strip-vline-head-$i'))).dx;
+      final body = tester.getCenter(find.byKey(ValueKey('allday-strip-vline-$i'))).dx;
+      expect((head - body).abs(), lessThan(0.5), reason: 'line $i');
+    }
+    await unmount(tester);
+  });
+
+  testWidgets('an empty week has the day names but no rule and no column lines in the body', (
+    tester,
+  ) async {
+    await mount(tester);
+    expect(find.byKey(const ValueKey('allday-strip-hline')), findsNothing);
+    expect(find.byKey(const ValueKey('allday-strip-vline-3')), findsNothing);
+    await unmount(tester);
+  });
+
   testWidgets('done cards are hidden by default; the eye and the setting show them', (
     tester,
   ) async {
@@ -484,6 +554,21 @@ void main() {
         await startOf(tester, id),
         original!.add(const Duration(days: 7)),
       );
+      await unmount(tester);
+    });
+
+    testWidgets('a thin line separates one day from the next', (tester) async {
+      await mount(
+        tester,
+        size: const Size(375, 812),
+        seed: () async {
+          await service.createAction(name: 'A', isAllDay: true, startAt: day(1));
+          await service.createAction(name: 'B', isAllDay: true, startAt: day(4));
+        },
+      );
+      // No line before the first day, one before the second.
+      expect(find.byKey(const ValueKey('allday-strip-hline-1')), findsNothing);
+      expect(find.byKey(const ValueKey('allday-strip-hline-4')), findsOneWidget);
       await unmount(tester);
     });
 

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/form_schedule.dart';
 import '../../domain/postpone_rules.dart';
 import '../../domain/work_hours.dart';
 import '../providers.dart';
@@ -29,6 +30,112 @@ class QuickActionSpec {
     this.onTap, {
     this.enabled = true,
   });
+}
+
+/// The postpone / prolong buttons, in display order, with their icon, colour,
+/// tooltip and the Undo text. One table for the real bar ([quickActionSpecs])
+/// and the form's bar ([formQuickActionSpecs]), so both stay identical.
+typedef _PostponeButton = ({
+  PostponeRule rule,
+  IconData icon,
+  GlassHue hue,
+  String label,
+  String done,
+});
+
+List<_PostponeButton> _postponeButtons(WorkHours hours) => [
+  (
+    rule: PostponeRule.prolongThirtyMinutes,
+    icon: Icons.hourglass_bottom_rounded,
+    hue: GlassHue.lavender,
+    label: 'Prolong 30 min',
+    done: 'Prolonged 30 min',
+  ),
+  (
+    rule: PostponeRule.plusOneHour,
+    icon: Icons.more_time_rounded,
+    hue: GlassHue.cyan,
+    label: 'Postpone +1 hour',
+    done: 'Postponed +1 hour',
+  ),
+  (
+    rule: PostponeRule.plusFiveHours,
+    icon: Icons.update_rounded,
+    hue: GlassHue.cyan,
+    label: 'Postpone +5 hours',
+    done: 'Postponed +5 hours',
+  ),
+  (
+    rule: PostponeRule.afterWork,
+    icon: Icons.nightlight_round,
+    hue: GlassHue.lavender,
+    label: 'Postpone: after work (${WorkHours.format(hours.workEnd)})',
+    done: 'Postponed to after work',
+  ),
+  (
+    rule: PostponeRule.morning,
+    icon: Icons.wb_twilight_rounded,
+    hue: GlassHue.peach,
+    label: 'Postpone: tomorrow morning',
+    done: 'Postponed to tomorrow morning',
+  ),
+  (
+    rule: PostponeRule.workingMorning,
+    icon: Icons.work_history_outlined,
+    hue: GlassHue.cyan,
+    label: 'Postpone: next working morning',
+    done: 'Postponed to next working morning',
+  ),
+  (
+    rule: PostponeRule.nextWeek,
+    icon: Icons.calendar_view_week_rounded,
+    hue: GlassHue.blue,
+    label: 'Postpone: next week',
+    done: 'Postponed to next week',
+  ),
+  (
+    rule: PostponeRule.nextMondayMorning,
+    icon: Icons.event_repeat_rounded,
+    hue: GlassHue.lavender,
+    label: 'Postpone: next Monday morning',
+    done: 'Postponed to next Monday morning',
+  ),
+];
+
+/// The buttons of a NEW action's form: Start, Finish and the postpone / prolong
+/// buttons (Continue and Delete make no sense before the action exists). They
+/// change the form's times only ([apply]); nothing is saved until Save.
+/// [current] reads the form's schedule.
+List<QuickActionSpec> formQuickActionSpecs(
+  WidgetRef ref, {
+  required ActionSchedule Function() current,
+  required void Function(ActionSchedule next) apply,
+}) {
+  final hours = ref.read(workHoursProvider);
+  DateTime now() => DateTime.now().toUtc();
+
+  return [
+    QuickActionSpec(Icons.play_arrow_rounded, GlassHue.blue, 'Start', 0, () async {
+      final c = current();
+      final r = formStartNow(start: c.startAt, end: c.endAt, nowUtc: now());
+      apply(ActionSchedule(startAt: r.start, endAt: r.end));
+    }),
+    QuickActionSpec(Icons.stop_rounded, GlassHue.pink, 'Finish', 0, () async {
+      final c = current();
+      final r = formFinishNow(start: c.startAt, end: c.endAt, nowUtc: now());
+      apply(ActionSchedule(startAt: r.start, endAt: r.end));
+    }),
+    for (final b in _postponeButtons(hours))
+      QuickActionSpec(
+        b.icon,
+        b.hue,
+        b.label,
+        1,
+        () async => apply(
+          applyPostponeRule(b.rule, current(), nowUtc: now(), hours: hours),
+        ),
+      ),
+  ];
 }
 
 /// The quick actions for [actionId], shared by the icon bar (hover toolbar,
@@ -71,68 +178,14 @@ List<QuickActionSpec> quickActionSpecs(
       0,
       () => runUndoableContinue(context, ref, actionId),
     ),
-    QuickActionSpec(
-      Icons.hourglass_bottom_rounded,
-      GlassHue.lavender,
-      'Prolong 30 min',
-      1,
-      () => postpone('Prolonged 30 min', PostponeRule.prolongThirtyMinutes),
-    ),
-    QuickActionSpec(
-      Icons.more_time_rounded,
-      GlassHue.cyan,
-      'Postpone +1 hour',
-      1,
-      () => postpone('Postponed +1 hour', PostponeRule.plusOneHour),
-    ),
-    QuickActionSpec(
-      Icons.update_rounded,
-      GlassHue.cyan,
-      'Postpone +5 hours',
-      1,
-      () => postpone('Postponed +5 hours', PostponeRule.plusFiveHours),
-    ),
-    QuickActionSpec(
-      Icons.nightlight_round,
-      GlassHue.lavender,
-      'Postpone: after work (${WorkHours.format(hours.workEnd)})',
-      1,
-      () => postpone('Postponed to after work', PostponeRule.afterWork),
-    ),
-    QuickActionSpec(
-      Icons.wb_twilight_rounded,
-      GlassHue.peach,
-      'Postpone: tomorrow morning',
-      1,
-      () => postpone('Postponed to tomorrow morning', PostponeRule.morning),
-    ),
-    QuickActionSpec(
-      Icons.work_history_outlined,
-      GlassHue.cyan,
-      'Postpone: next working morning',
-      1,
-      () => postpone(
-        'Postponed to next working morning',
-        PostponeRule.workingMorning,
+    for (final b in _postponeButtons(hours))
+      QuickActionSpec(
+        b.icon,
+        b.hue,
+        b.label,
+        1,
+        () => postpone(b.done, b.rule),
       ),
-    ),
-    QuickActionSpec(
-      Icons.calendar_view_week_rounded,
-      GlassHue.blue,
-      'Postpone: next week',
-      1,
-      () => postpone('Postponed to next week', PostponeRule.nextWeek),
-    ),
-    QuickActionSpec(
-      Icons.event_repeat_rounded,
-      GlassHue.lavender,
-      'Postpone: next Monday morning',
-      1,
-      () => postpone(
-        'Postponed to next Monday morning',
-        PostponeRule.nextMondayMorning,
-      ),
-    ),
     // Set apart from the everyday buttons so it isn't hit by accident;
     // Undo (snackbar / Ctrl+Z) is the safety net, not a confirmation.
     QuickActionSpec(
@@ -180,6 +233,10 @@ class QuickActionBar extends ConsumerWidget {
   /// action editor adds "Set after previous / before next" here.
   final List<QuickActionSpec> extra;
 
+  /// Ready-made tiles instead of the ones for [actionId]: the NEW-action form
+  /// builds its own with [formQuickActionSpecs] (see [QuickActionBar.form]).
+  final List<QuickActionSpec>? formSpecs;
+
   const QuickActionBar({
     super.key,
     required this.actionId,
@@ -192,11 +249,29 @@ class QuickActionBar extends ConsumerWidget {
     this.groups,
     this.spread = false,
     this.extra = const [],
-  });
+  }) : formSpecs = null;
+
+  /// The same bar for [specs] that belong to no saved action (a new action's
+  /// form): same tiles, spacing, wrapping and spreading.
+  const QuickActionBar.form({
+    super.key,
+    required List<QuickActionSpec> specs,
+    this.tileSize = 32,
+    this.iconSize = 20,
+    this.hitExtra = 4,
+    this.spacing = 6,
+    this.wrap = false,
+    this.groups,
+    this.spread = false,
+  }) : formSpecs = specs,
+       actionId = '',
+       onDelete = null,
+       extra = const [];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final base = quickActionSpecs(context, ref, actionId, onDelete: onDelete);
+    final base =
+        formSpecs ?? quickActionSpecs(context, ref, actionId, onDelete: onDelete);
     final all = [
       for (final s in base)
         if (s.group != 2) s,

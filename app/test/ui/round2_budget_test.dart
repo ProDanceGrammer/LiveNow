@@ -332,10 +332,22 @@ void main() {
         a1 = await b.saveAccount(name: 'Euro', currency: 'EUR', rateToBase: 1);
         a2 = await b.saveAccount(name: 'Lira', currency: 'TRY', rateToBase: 40);
         final c1 = await b.saveCategory(
-          CategoryInput(name: 'Food', price: 5, accountCountId: a1),
+          CategoryInput(
+            name: 'Food',
+            price: 5,
+            accountCountId: a1,
+            accountUseId: a1,
+          ),
         );
         final c2 = await b.saveCategory(
-          CategoryInput(name: 'Fuel', price: 7, accountCountId: a2),
+          CategoryInput(
+            name: 'Fuel',
+            price: 7,
+            // Counted in one account, paid through another: the filter
+            // follows the account the money moves through (a2).
+            accountCountId: a1,
+            accountUseId: a2,
+          ),
         );
         await b.createTransaction(categoryId: c1, name: 'Bread');
         await b.createTransaction(categoryId: c2, name: 'Petrol', date: old);
@@ -370,6 +382,26 @@ void main() {
     await settle(tester);
     expect(find.text('Bread'), findsOneWidget);
     expect(find.text('Petrol'), findsNothing);
+
+    // A quick choice replaces the dates: "Today" keeps only the new one.
+    await tester.tap(find.byKey(const ValueKey('tx-date-quick')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tx-date-quick-today')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('tx-date-preset')), findsOneWidget);
+    expect(find.text('Bread'), findsOneWidget);
+    expect(find.text('Petrol'), findsNothing);
+    // "Next year" matches neither.
+    await tester.tap(find.byKey(const ValueKey('tx-date-quick')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tx-date-quick-nextYear')));
+    await settle(tester);
+    expect(find.text('Bread'), findsNothing);
+    // Removing the chip drops the whole date filter.
+    await tester.tap(find.byTooltip('Remove the quick choice'));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('tx-date-preset')), findsNothing);
+    expect(find.text('Bread'), findsOneWidget);
     await unmount(tester);
     expect(a1, isNotEmpty);
   });

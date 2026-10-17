@@ -273,5 +273,82 @@ void main() {
       );
       expect(sort, const [SortKey(SortField.start, ascending: false)]);
     });
+
+    group('quick date choices are saved as a choice, not as dates', () {
+      test('transactions: a choice is stored by name, without any date', () {
+        const f = TxFilters(dateRange: DateRangeFilter(preset: DatePreset.lastWeek));
+        final j = txFilterToJson(f, const TxSearchFlags());
+        expect(j['range'], {'preset': 'lastWeek'});
+        final back = txFilterFromJson(j);
+        expect(back.filters.dateRange.preset, DatePreset.lastWeek);
+        expect(back.filters.dateRange.from, isNull);
+        expect(back.filters.dateRange.until, isNull);
+        expect(back.filters.dateRange, f.dateRange);
+      });
+
+      test('actions All: the same', () {
+        const f = AllActionsFilters(
+          dateRange: DateRangeFilter(preset: DatePreset.monthRest),
+        );
+        final j = allFilterToJson(f, const SearchFlags());
+        expect(j['range'], {'preset': 'monthRest'});
+        expect(allFilterFromJson(j).filters.dateRange.preset, DatePreset.monthRest);
+      });
+
+      test('every choice survives the round trip', () {
+        for (final p in DatePreset.values) {
+          final f = TxFilters(dateRange: DateRangeFilter(preset: p));
+          final back = txFilterFromJson(txFilterToJson(f, const TxSearchFlags()));
+          expect(back.filters.dateRange.preset, p, reason: p.name);
+        }
+      });
+
+      test('reopened a week later it means the NEW week', () {
+        const f = TxFilters(dateRange: DateRangeFilter(preset: DatePreset.lastWeek));
+        final saved = txFilterToJson(f, const TxSearchFlags());
+        final monday = DateTime.utc(2026, 10, 19, 9); // Mon 19 Oct, 12:00 Istanbul
+        final reopened = txFilterFromJson(saved).filters.dateRange;
+
+        final thisWeek = reopened.resolved(monday);
+        final later = reopened.resolved(monday.add(const Duration(days: 7)));
+        expect(DateRangeFilter.dayOf(thisWeek.from!), DateTime(2026, 10, 12));
+        expect(DateRangeFilter.dayOf(thisWeek.until!), DateTime(2026, 10, 18));
+        expect(DateRangeFilter.dayOf(later.from!), DateTime(2026, 10, 19));
+        expect(DateRangeFilter.dayOf(later.until!), DateTime(2026, 10, 25));
+      });
+
+      test('a custom range keeps its two days; old saved views (dates only) still load', () {
+        final f = TxFilters(
+          dateRange: DateRangeFilter(
+            from: DateTime.utc(2026, 1, 1),
+            until: DateTime.utc(2026, 2, 1),
+          ),
+        );
+        final j = txFilterToJson(f, const TxSearchFlags());
+        expect((j['range']! as Map).containsKey('preset'), isFalse);
+        expect(txFilterFromJson(j).filters.dateRange, f.dateRange);
+
+        final old = txFilterFromJson({
+          'range': {
+            'from': '2026-03-01T00:00:00.000Z',
+            'until': '2026-03-31T00:00:00.000Z',
+          },
+        });
+        expect(old.filters.dateRange.preset, isNull);
+        expect(old.filters.dateRange.from, DateTime.utc(2026, 3, 1));
+        expect(old.filters.dateRange.until, DateTime.utc(2026, 3, 31));
+      });
+
+      test('an unknown choice (a view from another build) means no date range', () {
+        final back = txFilterFromJson({
+          'range': {'preset': 'fromTheFuture'},
+        });
+        expect(back.filters.dateRange.active, isFalse);
+        final all = allFilterFromJson({
+          'range': {'preset': 'fromTheFuture', 'from': '2026-03-01T00:00:00.000Z'},
+        });
+        expect(all.filters.dateRange.active, isFalse);
+      });
+    });
   });
 }

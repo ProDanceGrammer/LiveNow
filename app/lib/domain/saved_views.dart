@@ -153,13 +153,22 @@ T? _byName<T extends Enum>(List<T> values, Object? name) {
   return null;
 }
 
-Map<String, Object?> _rangeToJson(DateRangeFilter r) => {
-  if (r.from != null) 'from': r.from!.toUtc().toIso8601String(),
-  if (r.until != null) 'until': r.until!.toUtc().toIso8601String(),
-};
+/// A quick choice (Last week, Today ...) is saved as its NAME, not its dates:
+/// reopening the view applies the same choice with the new dates. A custom range
+/// keeps its two days.
+Map<String, Object?> _rangeToJson(DateRangeFilter r) => r.preset != null
+    ? {'preset': r.preset!.name}
+    : {
+        if (r.from != null) 'from': r.from!.toUtc().toIso8601String(),
+        if (r.until != null) 'until': r.until!.toUtc().toIso8601String(),
+      };
 
 DateRangeFilter _rangeFromJson(Object? j) {
   if (j is! Map) return const DateRangeFilter();
+  final preset = _byName(DatePreset.values, j['preset']);
+  if (preset != null) return DateRangeFilter(preset: preset);
+  // An unknown choice (a view from another build) means no range.
+  if (j['preset'] != null) return const DateRangeFilter();
   DateTime? t(Object? v) => v is String ? DateTime.tryParse(v)?.toUtc() : null;
   return DateRangeFilter(from: t(j['from']), until: t(j['until']));
 }

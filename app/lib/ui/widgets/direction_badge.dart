@@ -21,6 +21,10 @@ final _kEmojiFonts = [
   'Noto Color Emoji',
 ];
 
+/// The emoji font order for a direction's name in chips and lists (same as the
+/// badge), so a flag is drawn as a flag and not as "UA".
+TextStyle get emojiLabelStyle => TextStyle(fontFamilyFallback: _kEmojiFonts);
+
 TextStyle _badgeStyle(double fontSize) => TextStyle(
   fontSize: fontSize,
   height: 1.25,

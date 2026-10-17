@@ -13,6 +13,8 @@ import '../../domain/action_service.dart' show ActionDraft;
 import '../../domain/chain_schedule.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/duration_rules.dart';
+import '../../domain/form_schedule.dart';
+import '../../domain/postpone_rules.dart' show ActionSchedule;
 import '../dialog_back.dart';
 import '../dialog_stack.dart';
 import '../layout.dart';
@@ -153,6 +155,11 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
 
   bool get _isEditing => widget.existing != null;
 
+  /// The times a new form was given by default (now, now + 60 min): what
+  /// "changed" is measured against, so an untouched new form is not "edited".
+  DateTime? _defaultStart;
+  DateTime? _defaultEnd;
+
   /// Id of the action created by a Ctrl+S on a NEW form: later saves update it
   /// instead of creating a duplicate.
   String? _createdId;
@@ -186,6 +193,23 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         _notes != null && !notesDocumentIsEmpty(notesDocumentFromJson(_notes));
     _startAt = widget.initialStart;
     _endAt = widget.initialEnd;
+    // A new action that nothing else schedules (the + button, a direction's
+    // "New action") starts now and lasts an hour; the form's buttons and the
+    // Start / End fields then change it. A time dragged out on the calendar, a
+    // template or a restored draft keep their own; so does a new Previous /
+    // Next action (its times come from the action it belongs to, or none).
+    if (existing == null &&
+        widget.initialDraft == null &&
+        widget.draft == null &&
+        widget.linkTo == null &&
+        widget.initialStart == null &&
+        widget.initialEnd == null) {
+      final d = defaultNewActionSchedule(DateTime.now().toUtc());
+      _startAt = d.start;
+      _endAt = d.end;
+      _defaultStart = d.start;
+      _defaultEnd = d.end;
+    }
     _selectedMetricIds = {...widget.initialMetricIds};
     final pre = widget.initialDraft;
     if (existing == null && pre != null) {
@@ -274,10 +298,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     final pre = base == null ? widget.initialDraft : null;
     if (_nameController.text != (base?.name ?? pre?.name ?? '')) return true;
     final start = base == null
-        ? (pre?.startAt ?? widget.initialStart)
+        ? (pre?.startAt ?? widget.initialStart ?? _defaultStart)
         : dateTimeFromDb(base.startAt);
     final end = base == null
-        ? (pre?.endAt ?? widget.initialEnd)
+        ? (pre?.endAt ?? widget.initialEnd ?? _defaultEnd)
         : dateTimeFromDb(base.endAt);
     if (_startAt != start || _endAt != end) return true;
     if (_isAllDay != (base?.isAllDay ?? pre?.isAllDay ?? false)) return true;
@@ -570,6 +594,39 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     );
   }
 
+  /// Start / Finish / postpone buttons of a NEW action: they move the Start and
+  /// End in the form only (nothing exists to save yet; Continue and Delete are
+  /// left out). Same look as the real row, a phone gets two wrapping groups.
+  Widget _formButtons() {
+    final specs = formQuickActionSpecs(
+      ref,
+      current: () => ActionSchedule(startAt: _startAt, endAt: _endAt),
+      apply: (next) => setState(() {
+        _startAt = next.startAt;
+        _endAt = next.endAt;
+      }),
+    );
+    if (usePhoneLayout(context)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final g in const [0, 1]) ...[
+            if (g == 1) const SizedBox(height: 8),
+            QuickActionBar.form(
+              specs: specs,
+              groups: {g},
+              tileSize: 36,
+              iconSize: 22,
+              hitExtra: 4,
+              wrap: true,
+            ),
+          ],
+        ],
+      );
+    }
+    return QuickActionBar.form(specs: specs, spread: true);
+  }
+
   /// Everything between the Name field and Notes: the button row, the
   /// schedule, time tracking, urgency and the growth directions.
   Widget _buildTopSections(BuildContext context) {
@@ -634,6 +691,12 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                     spread: true,
                     extra: chain,
                   ),
+          )
+        else if (!_isAllDay)
+          // A new action: the same buttons, working on the form's times.
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: _formButtons(),
           ),
         const SizedBox(height: 4),
         SectionBlock(

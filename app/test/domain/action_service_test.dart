@@ -475,6 +475,60 @@ void main() {
     },
   );
 
+  test('restore (Undo of Start/Finish/Postpone) keeps directions and links', () async {
+    // Foreign keys ON like the real app: a REPLACE would cascade them away.
+    await db.close();
+    db = AppDatabase.forTesting(
+      NativeDatabase.memory(
+        setup: (raw) => raw.execute('PRAGMA foreign_keys = ON;'),
+      ),
+    );
+    service = ActionService(db);
+    final metricId = newId();
+    await db
+        .into(db.metricsTable)
+        .insert(MetricsTableCompanion.insert(id: metricId, name: 'Health'));
+    final a = await service.createAction(name: 'A', metricIds: [metricId]);
+    final b = await service.createAction(name: 'B');
+    final c = await service.createAction(name: 'C');
+    await db.into(db.actionDependenciesTable).insert(
+      ActionDependenciesTableCompanion.insert(
+        id: newId(),
+        predecessorId: b,
+        successorId: a,
+      ),
+    );
+    await db.into(db.actionDependenciesTable).insert(
+      ActionDependenciesTableCompanion.insert(
+        id: newId(),
+        predecessorId: a,
+        successorId: c,
+      ),
+    );
+
+    final before = await service.snapshot(a);
+    await service.start(a);
+    await service.finish(a);
+    await service.restore(before);
+
+    final metrics = await (db.select(
+      db.actionMetricsTable,
+    )..where((t) => t.actionId.equals(a))).get();
+    expect(metrics.map((m) => m.metricId), [metricId]);
+    final edges = await db.select(db.actionDependenciesTable).get();
+    expect(edges, hasLength(2));
+
+    // A deleted action is put back (inserted) rather than silently ignored.
+    await service.deleteAction(c);
+    await service.restore(await service.snapshot(a));
+    await db.delete(db.actionsTable).go();
+    await service.restore(before);
+    expect(
+      await (db.select(db.actionsTable)..where((t) => t.id.equals(a))).get(),
+      hasLength(1),
+    );
+  });
+
   test('finish on a task marks it done and closes the occurrence', () async {
     final actionId = await service.createAction(name: 'Pay electricity bill');
     await service.start(actionId);

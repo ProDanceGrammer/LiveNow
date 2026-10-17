@@ -150,9 +150,7 @@ class BudgetTxOptionsPanel extends ConsumerWidget {
                 if (usePhoneLayout(context)) ...[
                   _ValuesRow(),
                   const SizedBox(height: 12),
-                ] else
-                  const _TotalsOnlyRow(),
-                const SizedBox(height: 12),
+                ],
                 Row(
                   children: [
                     Text('Filters', style: theme.textTheme.titleSmall),
@@ -408,7 +406,6 @@ class _ValuesRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final totals = ref.watch(devicePrefBoolProvider((kTxTotalsPref, true)));
     final cols = {
       kTxCountingPref: ref.watch(devicePrefBoolProvider((kTxCountingPref, true))),
       kTxInteractPref: ref.watch(devicePrefBoolProvider((kTxInteractPref, true))),
@@ -439,7 +436,6 @@ class _ValuesRow extends ConsumerWidget {
         chip(kTxCountingPref, 'Counting', cols[kTxCountingPref]!, 'tx-col-counting', TxValue.counting),
         chip(kTxInteractPref, 'Interactional', cols[kTxInteractPref]!, 'tx-col-interact', TxValue.interactional),
         chip(kTxMainPref, 'Main', cols[kTxMainPref]!, 'tx-col-main', TxValue.main),
-        chip(kTxTotalsPref, 'Show totals', totals, 'tx-totals-show'),
       ],
     );
   }
@@ -532,30 +528,6 @@ class _ActionsMultiPickerState extends State<_ActionsMultiPicker> {
           key: const ValueKey('tx-actions-apply'),
           onPressed: () => Navigator.of(context).pop({..._chosen}),
           child: const Text('Apply'),
-        ),
-      ],
-    );
-  }
-}
-
-/// The wide window's only display choice: whether the totals show.
-class _TotalsOnlyRow extends ConsumerWidget {
-  const _TotalsOnlyRow();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final totals = ref.watch(devicePrefBoolProvider((kTxTotalsPref, true)));
-    return Wrap(
-      spacing: 8,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        Text('Display', style: Theme.of(context).textTheme.titleSmall),
-        FilterChip(
-          key: const ValueKey('tx-totals-show'),
-          label: const Text('Show totals'),
-          selected: totals,
-          onSelected: (v) => setDevicePrefBool(ref, kTxTotalsPref, v),
         ),
       ],
     );

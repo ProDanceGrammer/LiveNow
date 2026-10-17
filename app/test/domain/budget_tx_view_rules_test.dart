@@ -127,6 +127,38 @@ void main() {
     );
   });
 
+  test('a quick date choice filters by the dates it means today', () {
+    final today = DatePreset.today.resolve(DateTime.now().toUtc()).from;
+    DateTime noon(DateTime midnight) => midnight.add(const Duration(hours: 12));
+    final year = DateRangeFilter.dayOf(today).year;
+    DateTime inYear(int y) =>
+        noon(DateRangeFilter.dayStart(DateTime(y, 6, 15)));
+    final rows = [
+      tx('yesterday', date: noon(today.subtract(const Duration(days: 1)))),
+      tx('today', date: noon(today)),
+      tx('tomorrow', date: noon(today.add(const Duration(days: 1)))),
+      tx('lastYear', date: inYear(year - 1)),
+      tx('nextYear', date: inYear(year + 1)),
+    ];
+    List<String> pick(DatePreset p) => run(
+      rows,
+      filters: TxFilters(dateRange: DateRangeFilter(preset: p)),
+    );
+    expect(pick(DatePreset.today), ['today']);
+    expect(pick(DatePreset.yesterday), ['yesterday']);
+    expect(pick(DatePreset.tomorrow), ['tomorrow']);
+    expect(pick(DatePreset.lastYear), ['lastYear']);
+    expect(pick(DatePreset.nextYear), ['nextYear']);
+    expect(pick(DatePreset.thisYear), contains('today'));
+    expect(pick(DatePreset.thisYear), isNot(contains('lastYear')));
+    expect(pick(DatePreset.thisYear), isNot(contains('nextYear')));
+    // The choice counts as an active filter (the panel offers "Reset filters").
+    expect(
+      TxFilters(dateRange: DateRangeFilter(preset: DatePreset.today)).active,
+      isTrue,
+    );
+  });
+
   test('search per flag, Cyrillic is case-insensitive', () {
     final rows = [
       tx('1', name: 'Молоко', catName: 'Їжа', action: ''),

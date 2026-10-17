@@ -286,6 +286,9 @@ List<ActionListItem> arrangeActions({
   final nameFilter = filters.nameText.trim().toLowerCase();
   final q = query.trim().toLowerCase();
 
+  // A quick choice (Last week ...) is worked out from today ONCE per pass.
+  final dateRange = filters.dateRange.resolved();
+
   bool keep(ActionListItem a) {
     if (nameFilter.isNotEmpty && !a.name.toLowerCase().contains(nameFilter)) {
       return false;
@@ -321,9 +324,9 @@ List<ActionListItem> arrangeActions({
       if (filters.minMinutes != null && m < filters.minMinutes!) return false;
       if (filters.maxMinutes != null && m > filters.maxMinutes!) return false;
     }
-    if (filters.dateRange.active) {
+    if (dateRange.active) {
       final start = a.startAt;
-      if (start == null || !filters.dateRange.contains(start)) return false;
+      if (start == null || !dateRange.contains(start)) return false;
     }
     if (filters.usesUrgency) {
       final u = urgency[a.id];

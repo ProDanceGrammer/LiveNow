@@ -753,7 +753,9 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
             name: t.row.name,
             categoryId: t.row.categoryId,
             categoryName: cats[t.row.categoryId]?.name ?? '',
-            accountId: t.row.accountCountId,
+            // The account the money moves through (Interactional), the one
+            // the balances use; the Accounts filter and grouping follow it.
+            accountId: t.row.accountUseId,
             actionName: t.actionName ?? '',
             linked: t.row.actionId != null,
             actionId: t.row.actionId,
@@ -869,6 +871,14 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                     onChanged: (v) =>
                         setState(() => _query = v.trim().toLowerCase()),
                   ),
+                ),
+                IconButton(
+                  key: const ValueKey('tx-totals-toggle'),
+                  isSelected: showTotals,
+                  tooltip: showTotals ? 'Hide totals' : 'Show totals',
+                  icon: const Icon(Icons.functions),
+                  onPressed: () =>
+                      setDevicePrefBool(ref, kTxTotalsPref, !showTotals),
                 ),
                 IconButton(
                   key: const ValueKey('tx-templates-toggle'),

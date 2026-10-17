@@ -215,6 +215,39 @@ void main() {
     );
   });
 
+  test('a quick date choice filters by the START day, resolved from today', () {
+    initPostponeTimeZoneData();
+    final today = DatePreset.today.resolve(DateTime.now().toUtc()).from;
+    DateTime noon(DateTime midnight) => midnight.add(const Duration(hours: 12));
+    final year = DateRangeFilter.dayOf(today).year;
+    final items = [
+      _a('yesterday', 'x', start: noon(today.subtract(const Duration(days: 1)))),
+      _a('today', 'x', start: noon(today)),
+      _a('tomorrow', 'x', start: noon(today.add(const Duration(days: 1)))),
+      _a(
+        'lastYear',
+        'x',
+        start: noon(DateRangeFilter.dayStart(DateTime(year - 1, 6, 15))),
+      ),
+      _a('none', 'x'),
+    ];
+    List<String> pick(DatePreset p) => _ids(
+      arrangeActions(
+        items: items,
+        sort: const [],
+        filters: AllActionsFilters(dateRange: DateRangeFilter(preset: p)),
+      ),
+    );
+    expect(pick(DatePreset.today), ['today']);
+    expect(pick(DatePreset.yesterday), ['yesterday']);
+    expect(pick(DatePreset.tomorrow), ['tomorrow']);
+    expect(pick(DatePreset.lastYear), ['lastYear']); // unscheduled never match
+    expect(
+      AllActionsFilters(dateRange: DateRangeFilter(preset: DatePreset.today)).active,
+      isTrue,
+    );
+  });
+
   test(
     'date range filters on the START day; unscheduled actions never match',
     () {

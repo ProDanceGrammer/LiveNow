@@ -137,11 +137,24 @@ class AllDayWeekStrip extends ConsumerWidget {
       ],
     );
 
+    // Thin grid lines: between the day columns and under the day names, so the
+    // columns and the names read apart from the cards.
+    final line = scheme.outlineVariant.withValues(alpha: 0.7);
+
     Widget dayNames() => Padding(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+      child: IntrinsicHeight(
+        child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < 7; i++)
+          for (var i = 0; i < 7; i++) ...[
+            if (i > 0)
+              VerticalDivider(
+                key: ValueKey('allday-strip-vline-head-$i'),
+                width: 1,
+                thickness: 1,
+                color: line,
+              ),
             Expanded(
               child: Container(
                 key: ValueKey('allday-strip-day-$i'),
@@ -168,32 +181,57 @@ class AllDayWeekStrip extends ConsumerWidget {
                 ),
               ),
             ),
+          ],
         ],
       ),
+      ),
+    );
+
+    // The line between the day names and the cards.
+    Widget nameRule() => Divider(
+      key: const ValueKey('allday-strip-hline'),
+      height: 1,
+      thickness: 1,
+      color: line,
     );
 
     Widget columns() => ConstrainedBox(
       constraints: BoxConstraints(maxHeight: cap),
       child: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (var i = 0; i < 7; i++)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: Column(
-                      key: ValueKey('allday-strip-col-$i'),
-                      children: [
-                        for (final a in byDay[i])
-                          _StripCard(key: ValueKey('allday-card-${a.id}'), item: a),
-                      ],
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+          // IntrinsicHeight: the column lines run the full height, also beside
+          // an empty column.
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < 7; i++) ...[
+                  if (i > 0)
+                    VerticalDivider(
+                      key: ValueKey('allday-strip-vline-$i'),
+                      width: 1,
+                      thickness: 1,
+                      color: line,
+                    ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Column(
+                        key: ValueKey('allday-strip-col-$i'),
+                        children: [
+                          for (final a in byDay[i])
+                            _StripCard(
+                              key: ValueKey('allday-card-${a.id}'),
+                              item: a,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+                ],
+              ],
+            ),
           ),
         ),
       ),
@@ -209,6 +247,14 @@ class AllDayWeekStrip extends ConsumerWidget {
             children: [
               for (var i = 0; i < 7; i++)
                 if (byDay[i].isNotEmpty) ...[
+                  // A thin line between one day and the next.
+                  if (i > byDay.indexWhere((l) => l.isNotEmpty))
+                    Divider(
+                      key: ValueKey('allday-strip-hline-$i'),
+                      height: 8,
+                      thickness: 1,
+                      color: line,
+                    ),
                   Padding(
                     key: ValueKey('allday-strip-day-$i'),
                     padding: const EdgeInsets.only(top: 4, bottom: 2),
@@ -250,6 +296,7 @@ class AllDayWeekStrip extends ConsumerWidget {
               if (open && !phone) dayNames(),
               // Nothing to show: just the thin header (and, on the desktop, the
               // day names) - the Current board gets the height back.
+              if (open && !phone && total > 0) nameRule(),
               if (open && total > 0) (phone ? stacked() : columns()),
             ],
           ),
