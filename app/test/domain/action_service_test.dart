@@ -8,6 +8,7 @@ import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 void main() {
   late AppDatabase db;
@@ -776,6 +777,71 @@ void main() {
     );
   });
 
+  test('a template with 0 or negative minutes is treated as having no estimate', () async {
+    for (final minutes in [0, -5]) {
+      for (final useAverage in [true, false]) {
+        final t = await seedTemplate({
+          'name': 'Read $minutes $useAverage',
+          'estimatedMinutes': minutes,
+          'useAverage': useAverage,
+        });
+        expect(
+          await service.templateDuration(t),
+          const Duration(hours: 1),
+          reason: 'minutes $minutes, useAverage $useAverage',
+        );
+        final a = await actionRow(await service.createFromTemplateStarted(t));
+        expect(
+          dateTimeFromDb(a.endAt)!.difference(dateTimeFromDb(a.startAt)!),
+          const Duration(hours: 1),
+          reason: 'minutes $minutes, useAverage $useAverage',
+        );
+      }
+    }
+  });
+
+  test('all-day template: the day is the ISTANBUL day, also after 21:00 UTC', () async {
+    final t = await seedTemplate({'name': 'Rest day', 'isAllDay': true});
+    // 22:30 UTC on 16 Oct is 01:30 on 17 Oct in Istanbul.
+    final late = await actionRow(
+      await service.createFromTemplateAt(t, DateTime.utc(2026, 10, 16, 22, 30)),
+    );
+    expect(late.isAllDay, isTrue);
+    expect(late.endAt, isNull);
+    expect(dateTimeFromDb(late.startAt), DateTime.utc(2026, 10, 16, 21)); // 17 Oct 00:00
+    // 20:59:59 UTC is 23:59:59 on 16 Oct in Istanbul: still the 16th.
+    final early = await actionRow(
+      await service.createFromTemplateAt(t, DateTime.utc(2026, 10, 16, 20, 59, 59)),
+    );
+    expect(dateTimeFromDb(early.startAt), DateTime.utc(2026, 10, 15, 21)); // 16 Oct 00:00
+  });
+
+  test('all-day template started or finished now: today in Istanbul, never the UTC date', () async {
+    final t = await seedTemplate({'name': 'Rest day', 'isAllDay': true});
+    final istanbulNow = tz.TZDateTime.now(tz.getLocation('Europe/Istanbul'));
+    final midnight = tz.TZDateTime(
+      tz.getLocation('Europe/Istanbul'),
+      istanbulNow.year,
+      istanbulNow.month,
+      istanbulNow.day,
+    );
+    // A plain UTC DateTime (a TZDateTime never equals one, even for one instant).
+    final expected = DateTime.fromMillisecondsSinceEpoch(
+      midnight.millisecondsSinceEpoch,
+      isUtc: true,
+    );
+
+    final started = await actionRow(await service.createFromTemplateStarted(t));
+    final finished = await actionRow(await service.createFromTemplateFinished(t));
+
+    expect(dateTimeFromDb(started.startAt), expected);
+    expect(started.done, isFalse);
+    expect(dateTimeFromDb(finished.startAt), expected);
+    expect(finished.done, isTrue);
+    expect(started.endAt, isNull);
+    expect(finished.endAt, isNull);
+  });
+
   test(
     'deleteAction removes the action and everything hanging off it',
     () async {
@@ -810,6 +876,134 @@ void main() {
       expect(await db.select(db.metricsTable).get(), hasLength(1));
     },
   );
+
+  // ---- Start / Finish edge cases (spec: Starting Now / Finished Now) ----------
+
+  Future<ActionRow> rowOf(String id) =>
+      (db.select(db.actionsTable)..where((t) => t.id.equals(id))).getSingle();
+
+  /// An action planned for TOMORROW (90 min) linked to an activity whose only
+  /// finished run lasted 10 minutes: the activity's average is 10, its own
+  /// length is 90.
+  Future<String> tomorrowsReadLinkedToTenMinuteActivity() async {
+    final activityId = await service.createCountableActivity('Reading');
+    final run = await service.createAction(
+      name: 'earlier run',
+      countableActivityId: activityId,
+    );
+    final end = DateTime.now().toUtc().subtract(const Duration(hours: 1));
+    await (db.update(db.actionsTable)..where((t) => t.id.equals(run))).write(
+      ActionsTableCompanion(
+        done: const Value(true),
+        startAt: Value(dateTimeToDb(end.subtract(const Duration(minutes: 10)))),
+        endAt: Value(dateTimeToDb(end)),
+        completedAt: Value(dateTimeToDb(end)),
+      ),
+    );
+    final tomorrow = DateTime.now().toUtc().add(const Duration(days: 1));
+    return service.createAction(
+      name: 'Read',
+      countableActivityId: activityId,
+      startAt: tomorrow,
+      endAt: tomorrow.add(const Duration(minutes: 90)),
+    );
+  }
+
+  Duration lengthOf(ActionRow r) =>
+      dateTimeFromDb(r.endAt)!.difference(dateTimeFromDb(r.startAt)!);
+
+  test('Start keeps the action own length, not the activity average (owner choice)', () async {
+    final id = await tomorrowsReadLinkedToTenMinuteActivity();
+
+    await service.start(id);
+
+    expect(lengthOf(await rowOf(id)), const Duration(minutes: 90)); // not 10
+  });
+
+  test('Finish back-projects with the own length, not the activity average (owner choice)', () async {
+    final id = await tomorrowsReadLinkedToTenMinuteActivity();
+
+    await service.finish(id);
+
+    final r = await rowOf(id);
+    final end = dateTimeFromDb(r.endAt)!;
+    final start = dateTimeFromDb(r.startAt)!;
+    expect(end.difference(start).inSeconds, 90 * 60); // 12:30-14:00, not 13:50
+    expect(DateTime.now().toUtc().difference(end).inSeconds.abs(), lessThan(5));
+  });
+
+  test('Finish: a start one second ago is kept, a start one minute ahead is back-projected', () async {
+    final past = DateTime.now().toUtc().subtract(const Duration(seconds: 1));
+    final started = await service.createAction(
+      name: 'Just started',
+      startAt: past,
+      endAt: past.add(const Duration(minutes: 30)),
+    );
+    await service.finish(started);
+    expect(dateTimeFromDb((await rowOf(started)).startAt), past); // kept
+
+    final ahead = DateTime.now().toUtc().add(const Duration(minutes: 1));
+    final notYet = await service.createAction(
+      name: 'Not yet started',
+      startAt: ahead,
+      endAt: ahead.add(const Duration(minutes: 30)),
+    );
+    await service.finish(notYet);
+    final r = await rowOf(notYet);
+    expect(lengthOf(r).inSeconds, 30 * 60);
+    expect(dateTimeFromDb(r.startAt)!.isBefore(DateTime.now().toUtc()), isTrue);
+  });
+
+  test('an inverted range (end before start) is treated as 60 minutes by Start and Finish', () async {
+    final tomorrow = DateTime.now().toUtc().add(const Duration(days: 1));
+    Future<String> inverted() => service.createAction(
+      name: 'Inverted',
+      startAt: tomorrow,
+      endAt: tomorrow.subtract(const Duration(hours: 3)),
+    );
+
+    final a = await inverted();
+    await service.start(a);
+    expect(lengthOf(await rowOf(a)), const Duration(minutes: 60));
+
+    final b = await inverted();
+    await service.finish(b);
+    expect(lengthOf(await rowOf(b)).inSeconds, 3600);
+  });
+
+  test('(pinned) Finish on an all-day action ticks it done and keeps it all-day', () async {
+    final midnight = DateTime.utc(2026, 10, 16, 21); // 00:00 Istanbul, in the past
+    final id = await service.createAction(
+      name: 'Rest day',
+      isAllDay: true,
+      startAt: midnight,
+    );
+
+    await service.finish(id);
+
+    final r = await rowOf(id);
+    expect(r.done, isTrue);
+    expect(r.isAllDay, isTrue);
+    expect(dateTimeFromDb(r.startAt), midnight); // its day start is kept
+  });
+
+  test('Next week on a done all-day action moves it and it stays ticked (owner choice)', () async {
+    final day = DateTime.utc(2026, 10, 16, 21); // 00:00 Istanbul
+    final id = await service.createAction(
+      name: 'Drink water',
+      isAllDay: true,
+      startAt: day,
+    );
+    await service.toggleDone(id);
+    expect((await rowOf(id)).done, isTrue);
+
+    await service.postpone(id, PostponeRule.nextWeek);
+
+    final r = await rowOf(id);
+    expect(dateTimeFromDb(r.startAt), day.add(const Duration(days: 7)));
+    expect(r.isAllDay, isTrue);
+    expect(r.done, isTrue); // postpone only moves the date
+  });
 
   test('undoDelete restores the action, its links and its history', () async {
     final metricId = newId();

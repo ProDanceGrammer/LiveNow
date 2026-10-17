@@ -48,6 +48,23 @@ void main() {
       );
     });
 
+    // The Notion formula is `end < now`, strictly: an action ending exactly now
+    // is still running its last instant.
+    test('the boundary: end_at exactly now is NOT done, a tick before is', () {
+      final now = DateTime.utc(2026, 10, 17, 12);
+      bool doneWithEnd(DateTime end) => isDoneBefore(
+        startAt: now.subtract(const Duration(hours: 1)),
+        endAt: end,
+        isAllDay: false,
+        done: false,
+        nowUtc: now,
+      );
+      expect(doneWithEnd(now), isFalse);
+      expect(doneWithEnd(now.add(const Duration(microseconds: 1))), isFalse);
+      expect(doneWithEnd(now.subtract(const Duration(microseconds: 1))), isTrue);
+      expect(doneWithEnd(now.subtract(const Duration(seconds: 1))), isTrue);
+    });
+
     test('is not done when scheduled but end_at is null', () {
       expect(
         isDoneBefore(

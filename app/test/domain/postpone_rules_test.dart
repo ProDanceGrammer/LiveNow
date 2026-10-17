@@ -346,6 +346,96 @@ void main() {
     });
   });
 
+  group('edge cases', () {
+    test('Morning at exactly 09:00 goes to the NEXT day (strictly after the start)', () {
+      final next = applyPostponeRule(
+        PostponeRule.morning,
+        hourLong(istanbul(2024, 1, 2, 9)),
+        nowUtc: istanbul(2024, 1, 2, 8),
+      );
+      expect(next.startAt, istanbul(2024, 1, 3, 9));
+      expect(next.endAt, istanbul(2024, 1, 3, 10));
+    });
+
+    test('Next working morning at exactly 09:00 on Friday goes to Monday', () {
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        hourLong(istanbul(2024, 1, 5, 9)),
+        nowUtc: istanbul(2024, 1, 5, 8),
+      );
+      expect(next.startAt, istanbul(2024, 1, 8, 9));
+    });
+
+    test('After work at 17:59 is today 18:00, at exactly 18:00 it is tomorrow', () {
+      DateTime? at(int h, int m) => applyPostponeRule(
+        PostponeRule.afterWork,
+        hourLong(istanbul(2024, 1, 2, h, m)),
+        nowUtc: istanbul(2024, 1, 2, 8),
+      ).startAt;
+      expect(at(17, 59), istanbul(2024, 1, 2, 18));
+      expect(at(18, 0), istanbul(2024, 1, 3, 18));
+    });
+
+    test('Next Monday morning from a Sunday is tomorrow, even at 23:30', () {
+      for (final start in [istanbul(2024, 1, 7, 8), istanbul(2024, 1, 7, 23, 30)]) {
+        final next = applyPostponeRule(
+          PostponeRule.nextMondayMorning,
+          hourLong(start),
+          nowUtc: istanbul(2024, 1, 6, 8),
+        );
+        expect(next.startAt, istanbul(2024, 1, 8, 9), reason: '$start');
+      }
+    });
+
+    test('Next working morning from a Saturday or Sunday is Monday', () {
+      for (final day in [6, 7]) {
+        final next = applyPostponeRule(
+          PostponeRule.workingMorning,
+          hourLong(istanbul(2024, 1, day, 12)),
+          nowUtc: istanbul(2024, 1, 5, 8),
+        );
+        expect(next.startAt, istanbul(2024, 1, 8, 9), reason: 'day $day');
+      }
+    });
+
+    // Istanbul is 3 hours ahead of UTC: 22:00 UTC on 1 Jan is already 01:00 on
+    // 2 Jan there. Every other fixture keeps the same date in both zones.
+    test('the Istanbul date, not the UTC date, decides the day', () {
+      final start = DateTime.utc(2024, 1, 1, 22); // 01:00 Tuesday 2 Jan Istanbul
+      final schedule = ActionSchedule(
+        startAt: start,
+        endAt: start.add(const Duration(hours: 1)),
+      );
+      DateTime? run(PostponeRule rule) => applyPostponeRule(
+        rule,
+        schedule,
+        nowUtc: DateTime.utc(2024, 1, 1, 20),
+      ).startAt;
+
+      // Morning: 09:00 on 2 Jan Istanbul (= 06:00 UTC), not on 1 Jan.
+      expect(run(PostponeRule.morning), DateTime.utc(2024, 1, 2, 6));
+      // After work: 18:00 on 2 Jan Istanbul (= 15:00 UTC).
+      expect(run(PostponeRule.afterWork), DateTime.utc(2024, 1, 2, 15));
+      // Working morning: Tuesday 2 Jan is a working day, 09:00 that day.
+      expect(run(PostponeRule.workingMorning), DateTime.utc(2024, 1, 2, 6));
+      // Next Monday morning: Monday 8 Jan 09:00 Istanbul.
+      expect(run(PostponeRule.nextMondayMorning), DateTime.utc(2024, 1, 8, 6));
+      // +1 h and next week keep the wall clock: 02:00 Istanbul, and 9 Jan 01:00.
+      expect(run(PostponeRule.plusOneHour), DateTime.utc(2024, 1, 1, 23));
+      expect(run(PostponeRule.nextWeek), DateTime.utc(2024, 1, 8, 22));
+    });
+
+    test('Saturday 22:30 UTC is already Sunday in Istanbul: working morning is Monday', () {
+      final start = DateTime.utc(2024, 1, 6, 22, 30); // 01:30 Sunday 7 Jan Istanbul
+      final next = applyPostponeRule(
+        PostponeRule.workingMorning,
+        ActionSchedule(startAt: start, endAt: start.add(const Duration(hours: 1))),
+        nowUtc: DateTime.utc(2024, 1, 6, 12),
+      );
+      expect(next.startAt, DateTime.utc(2024, 1, 8, 6)); // Monday 09:00 Istanbul
+    });
+  });
+
   group('working hours', () {
     const custom = WorkHours(
       workStart: 9 * 60,
