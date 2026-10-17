@@ -211,6 +211,31 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
     });
   }
 
+  /// Calendar popup for the row's DATE; the time of day stays.
+  Future<void> _pickDate(bool onEnd, DateTime value) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: dateOnly(value),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100, 12, 31),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _onEnd = onEnd;
+      _typed = '';
+      _setCurrent(
+        DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          value.hour,
+          value.minute,
+          value.second,
+        ),
+      );
+    });
+  }
+
   void _save() {
     if (_error != null) return;
     DateTime back(DateTime wall, DateTime? initial) {
@@ -371,7 +396,7 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
       child: AlertDialog(
         title: Text(widget.title),
         content: SizedBox(
-          width: 400,
+          width: 440,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -436,6 +461,15 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
             if (unit == TimeUnit.day || unit == TimeUnit.month) const Text('/'),
             if (unit == TimeUnit.minute) const SizedBox(width: 12),
           ],
+          IconButton(
+            key: ValueKey('time-$rowName-calendar'),
+            icon: const Icon(Icons.calendar_month, size: 18),
+            tooltip: 'Pick date',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            onPressed: () => _pickDate(isEnd, value),
+          ),
           if (isEnd)
             IconButton(
               key: const ValueKey('time-end-clear'),
