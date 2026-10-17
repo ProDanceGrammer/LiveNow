@@ -4,11 +4,16 @@ import 'package:drift/drift.dart';
 
 import '../../core/time_codec.dart';
 import '../../domain/notes_plain_text.dart';
+import '../../domain/sync/change_validation.dart';
 import '../../domain/sync/cycle_repair.dart';
 import '../../domain/sync/hlc.dart';
 import '../../domain/sync/sync_models.dart';
 import '../database.dart';
 import 'sync_schema.dart';
+
+/// Most rows a single peer may have waiting in the inbox (a push that never
+/// sends its last page would otherwise grow it without end).
+const maxInboxRows = 400000;
 
 /// "Row A of this table may only link B once": on a clash the LOWER row id
 /// wins on every device (both devices created the link independently).
@@ -108,39 +113,48 @@ class SyncStore {
     int limit = 500,
     String? excludeOrigin,
   }) async {
-    final rows = await db
-        .customSelect(
-          'SELECT tbl, row_id, hlc, origin, deleted, seq FROM sync_versions '
-          'WHERE seq > ? AND seq <= ? '
-          '${excludeOrigin == null ? '' : 'AND origin <> ? '}'
-          'ORDER BY seq LIMIT ?',
-          variables: [
-            Variable.withInt(since),
-            Variable.withInt(until),
-            if (excludeOrigin != null) Variable.withString(excludeOrigin),
-            Variable.withInt(limit),
-          ],
-        )
-        .get();
     final out = <SyncChange>[];
-    for (final r in rows) {
-      final table = r.read<String>('tbl');
-      final id = r.read<String>('row_id');
-      final deleted = r.read<int>('deleted') != 0;
-      final data = deleted ? null : await _rowData(table, id);
-      // Removed since the log was read: its tombstone follows.
-      if (!deleted && data == null) continue;
-      out.add(
-        SyncChange(
-          table: table,
-          rowId: id,
-          hlc: r.read<String>('hlc'),
-          origin: r.read<String>('origin'),
-          deleted: deleted,
-          data: data,
-          seq: r.read<int>('seq'),
-        ),
-      );
+    var pos = since;
+    // A short list means "the log ends here" to the callers, so a log entry
+    // whose row is gone (skipped below) must not shorten a page: keep reading
+    // until the page is full or the log really ends.
+    while (out.length < limit) {
+      final want = limit - out.length;
+      final rows = await db
+          .customSelect(
+            'SELECT tbl, row_id, hlc, origin, deleted, seq FROM sync_versions '
+            'WHERE seq > ? AND seq <= ? '
+            '${excludeOrigin == null ? '' : 'AND origin <> ? '}'
+            'ORDER BY seq LIMIT ?',
+            variables: [
+              Variable.withInt(pos),
+              Variable.withInt(until),
+              if (excludeOrigin != null) Variable.withString(excludeOrigin),
+              Variable.withInt(want),
+            ],
+          )
+          .get();
+      for (final r in rows) {
+        pos = r.read<int>('seq');
+        final table = r.read<String>('tbl');
+        final id = r.read<String>('row_id');
+        final deleted = r.read<int>('deleted') != 0;
+        final data = deleted ? null : await _rowData(table, id);
+        // Removed since the log was read: its tombstone follows.
+        if (!deleted && data == null) continue;
+        out.add(
+          SyncChange(
+            table: table,
+            rowId: id,
+            hlc: r.read<String>('hlc'),
+            origin: r.read<String>('origin'),
+            deleted: deleted,
+            data: data,
+            seq: pos,
+          ),
+        );
+      }
+      if (rows.length < want) break; // the log is exhausted
     }
     return out;
   }
@@ -247,7 +261,19 @@ class SyncStore {
   /// is in: [applyStaged] then merges everything at once. Survives a crash.
   Future<void> stage(String peerId, List<SyncChange> changes) =>
       db.transaction(() async {
+        final held =
+            (await db
+                    .customSelect(
+                      'SELECT COUNT(*) AS n FROM sync_inbox WHERE peer = ?',
+                      variables: [Variable.withString(peerId)],
+                    )
+                    .getSingle())
+                .read<int>('n');
+        // A peer that never sends its last page cannot grow the inbox forever.
+        if (held > maxInboxRows) throw StateError('sync inbox is full');
         for (final c in changes) {
+          // A malformed or hostile change is dropped here, never staged.
+          if (validateChange(c) != null) continue;
           await db.customStatement(
             'INSERT INTO sync_inbox (peer, tbl, row_id, hlc, origin, deleted, data) '
             'VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (peer, tbl, row_id) '
@@ -330,12 +356,24 @@ class SyncStore {
       await db.customStatement('PRAGMA defer_foreign_keys = ON');
       await source((changes) async {
         for (final c in changes) {
-          final r = await _applyOne(c, unsyncedAfterSeq, repairs);
-          if (r.applied) {
-            applied++;
-            touched.add(c.table);
+          // Rows staged by an older version were never validated; one bad row
+          // is skipped and reported, it must not abort (and so wedge) the
+          // whole merge. A failed statement leaves the transaction usable.
+          if (validateChange(c) != null) {
+            repairs.add(SyncRepair('rejected-change', c.table, c.rowId));
+            continue;
           }
-          if (r.conflict) conflicts++;
+          try {
+            final r = await _applyOne(c, unsyncedAfterSeq, repairs);
+            if (r.applied) {
+              applied++;
+              touched.add(c.table);
+            }
+            if (r.conflict) conflicts++;
+          } on Object {
+            await _setApplying(true); // an _asLocalEdit may have been cut short
+            repairs.add(SyncRepair('rejected-change', c.table, c.rowId));
+          }
         }
       });
       if (applied > 0) {
@@ -450,6 +488,10 @@ class SyncStore {
     final pair = _uniqueLinks[c.table];
     if (pair == null) return true;
     final (a, b) = pair;
+    // A link row without its two ends cannot be matched against the others.
+    if (c.data![a] is! String || c.data![b] is! String) {
+      throw const FormatException('link row without its ends');
+    }
     final existing = await db
         .customSelect(
           'SELECT id FROM ${c.table} WHERE $a = ? AND $b = ? AND id <> ?',
@@ -477,7 +519,8 @@ class SyncStore {
   }
 
   Future<void> _upsert(SyncChange c, String pk) async {
-    final data = c.data!;
+    // The write always lands on the row the change names (and was stamped for).
+    final data = {...c.data!, pk: c.rowId};
     final cols = [
       for (final col in await _syncedColumns(c.table))
         if (data.containsKey(col)) col,
@@ -523,6 +566,21 @@ class SyncStore {
       'WHEN ? = last_wall THEN max(counter, ?) ELSE counter END, '
       'last_wall = max(last_wall, ?) WHERE id = 1',
       [wall, counter, wall, counter, wall],
+    );
+  }
+
+  /// Forgets what is held for [peerId] (the phone was removed or re-paired):
+  /// its staged rows and the cursors kept for it. The data itself stays.
+  Future<void> forgetPeer(String peerId) async {
+    await db.customStatement('DELETE FROM sync_inbox WHERE peer = ?', [peerId]);
+    await db.customStatement(
+      'DELETE FROM sync_state WHERE key IN (?, ?, ?, ?)',
+      [
+        'pulled:$peerId',
+        'pushed:$peerId',
+        'served:$peerId',
+        'fullpull:$peerId',
+      ],
     );
   }
 

@@ -75,6 +75,8 @@ class BackupImportService {
         safetyBackupDir,
         label: 'before-import',
       );
+      // Safety copies must not pile up for ever (they hold all the data).
+      await pruneBackups(safetyBackupDir);
     }
 
     final counts = <String, TableImportCount>{};

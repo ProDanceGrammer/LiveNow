@@ -101,7 +101,9 @@ Map<String, String> parseNotionIcons(
     final emoji = _emojiImg.firstMatch(cell);
     if (emoji != null) {
       final alt = _decodeEntities(emoji.group(1) ?? emoji.group(2) ?? '');
-      if (alt.isNotEmpty) icon = alt;
+      // An emoji (even a ZWJ family sequence) is a few code units; a longer
+      // "alt" is not an icon and must not be stored as one.
+      if (alt.isNotEmpty && alt.length <= 32) icon = alt;
     } else {
       final built = _builtinImg.firstMatch(cell);
       if (built != null) {
@@ -127,15 +129,27 @@ String _titleOf(String cell) {
   return '';
 }
 
+/// A numeric character reference as text; one that is not a real code point
+/// (too big, a lone surrogate, NUL) is left as it was written, never thrown.
+String _codePoint(Match m, int? value) {
+  if (value == null ||
+      value <= 0 ||
+      value > 0x10FFFF ||
+      (value >= 0xD800 && value <= 0xDFFF)) {
+    return m.group(0)!;
+  }
+  return String.fromCharCode(value);
+}
+
 String _decodeEntities(String s) {
   return s
       .replaceAllMapped(
-        RegExp(r'&#x([0-9a-fA-F]+);'),
-        (m) => String.fromCharCode(int.parse(m.group(1)!, radix: 16)),
+        RegExp(r'&#x([0-9a-fA-F]{1,8});'),
+        (m) => _codePoint(m, int.tryParse(m.group(1)!, radix: 16)),
       )
       .replaceAllMapped(
-        RegExp(r'&#(\d+);'),
-        (m) => String.fromCharCode(int.parse(m.group(1)!)),
+        RegExp(r'&#(\d{1,10});'),
+        (m) => _codePoint(m, int.tryParse(m.group(1)!)),
       )
       .replaceAll('&quot;', '"')
       .replaceAll('&lt;', '<')

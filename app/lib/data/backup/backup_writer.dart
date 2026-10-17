@@ -2,10 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Variable;
-import 'package:sqlite3/sqlite3.dart' as sqlite;
-
 import '../../domain/full_backup.dart';
 import '../database.dart';
+import '../sync/sync_backup.dart' show blankDeviceLocalSyncTables;
 import '../sync/sync_schema.dart';
 
 /// Writes the user data in the three backup formats. Rows are read in
@@ -145,26 +144,7 @@ class BackupWriter {
     final tmp = File('${out.path}.tmp');
     if (await tmp.exists()) await tmp.delete();
     await db.customStatement("VACUUM INTO '${tmp.path.replaceAll("'", "''")}'");
-    final copy = sqlite.sqlite3.open(tmp.path);
-    try {
-      for (final t in const [
-        'sync_peers',
-        'sync_state',
-        'sync_inbox',
-        'sync_conflicts',
-        'sync_versions',
-        'sync_clock',
-      ]) {
-        try {
-          copy.execute('DELETE FROM $t');
-        } catch (_) {
-          // The table may not exist in an older schema.
-        }
-      }
-      copy.execute('VACUUM');
-    } finally {
-      copy.close();
-    }
+    blankDeviceLocalSyncTables(tmp.path);
     if (await out.exists()) await out.delete();
     await tmp.rename(out.path);
   }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../domain/sync/network_rules.dart';
 import '../../domain/sync/sync_crypto.dart';
 import '../../domain/sync/sync_engine.dart';
 import '../../domain/sync/sync_models.dart';
@@ -19,10 +20,39 @@ class _Offer {
   int attempts = 0;
 }
 
+/// Largest request body per route, counted while it streams in (the phone's
+/// client sends chunked bodies, so no length is declared up front). Only a
+/// push can be big: one page of changes with their notes.
+const _maxBody = {
+  '/v1/pair': 64 * 1024,
+  '/v1/hello': 64 * 1024,
+  '/v1/pull': 64 * 1024,
+  '/v1/push': 32 * 1024 * 1024,
+};
+
+/// Whole-request deadline for reading a body: a trickle (slowloris) is cut.
+const _smallBodyDeadline = Duration(seconds: 20);
+const _pushBodyDeadline = Duration(minutes: 2);
+
+/// Requests handled at once; more are refused rather than queued.
+const _maxInFlight = 16;
+
+/// Failed pairing guesses (from anyone) after which the offer is burned. One
+/// source is banned long before this (see [FailureThrottle]).
+const _offerFailureCap = 100;
+
+/// A phone that proved it knows the pairing code and asks to be paired.
+class PairRequest {
+  const PairRequest({required this.deviceId, required this.name});
+  final String deviceId;
+  final String name;
+}
+
 /// The PC side of the sync: a small HTTP server that answers encrypted
 /// requests from paired phones (`/v1/hello`, `/v1/pull`, `/v1/push`) and
 /// accepts a new phone through `/v1/pair` while a pairing code is showing.
-/// Nothing is served in clear text and nothing without a known device key.
+/// Nothing is served in clear text and nothing without a known device key, and
+/// only clients on a private / VPN / hotspot address are answered at all.
 class SyncServer {
   SyncServer({
     required this.store,
@@ -36,8 +66,15 @@ class SyncServer {
   final SyncPeers peers;
   final String deviceName;
 
+  /// Asked before a phone gets the long-term key: knowing the code is not
+  /// enough (it may have been photographed), the owner must say yes. Null =
+  /// approve at once (tests); the app always sets it.
+  Future<bool> Function(PairRequest request)? approvePairing;
+
   HttpServer? _http;
   _Offer? _offer;
+  int _inFlight = 0;
+  final _throttle = FailureThrottle();
   final _paired = StreamController<SyncPeer>.broadcast();
 
   /// A phone finished pairing.
@@ -46,10 +83,12 @@ class SyncServer {
   bool get running => _http != null;
   int get port => _http!.port;
 
-  /// Starts listening on all interfaces ([port] 0 = any free port).
+  /// Starts listening on all interfaces ([port] 0 = any free port). Clients
+  /// outside the private ranges are dropped in [_handle].
   Future<void> start({int port = syncPort}) async {
     if (_http != null) return;
     final http = await HttpServer.bind(InternetAddress.anyIPv4, port);
+    http.idleTimeout = const Duration(seconds: 30);
     _http = http;
     http.listen(_handle, onError: (_) {});
   }
@@ -84,36 +123,81 @@ class SyncServer {
       _offer != null && DateTime.now().isBefore(_offer!.expiresAt);
 
   Future<void> _handle(HttpRequest req) async {
+    final source = req.connectionInfo?.remoteAddress.address ?? '';
     var status = HttpStatus.ok;
     String body = '';
-    try {
-      if (req.method != 'POST') {
-        status = HttpStatus.notFound;
-      } else if (req.contentLength > 64 * 1024 * 1024) {
-        status = HttpStatus.requestEntityTooLarge;
-      } else {
-        final text = await utf8.decoder.bind(req).join();
-        body = switch (req.uri.path) {
-          '/v1/pair' => await _pair(text),
-          '/v1/hello' ||
-          '/v1/pull' ||
-          '/v1/push' => await _call(req.uri.path, text),
-          _ => throw const _NotFound(),
-        };
-      }
-    } on _NotFound {
+    if (!isPrivateAddress(source) || _throttle.isBanned(source)) {
+      // A stranger, or a source that keeps failing: answered like an unknown
+      // path, so it learns nothing and costs nothing.
       status = HttpStatus.notFound;
-    } on SyncAuthException {
-      status = HttpStatus.unauthorized; // never says why
-    } on Object {
-      status = HttpStatus.internalServerError;
+    } else if (_inFlight >= _maxInFlight) {
+      status = HttpStatus.serviceUnavailable;
+    } else {
+      _inFlight++;
+      try {
+        if (req.method != 'POST') {
+          status = HttpStatus.notFound;
+        } else {
+          final path = req.uri.path;
+          final max = _maxBody[path];
+          if (max == null) throw const _NotFound();
+          final text = await _readBody(req, max, path == '/v1/push');
+          body = path == '/v1/pair'
+              ? await _pair(text, source)
+              : await _call(path, text);
+          _throttle.succeeded(source);
+        }
+      } on _NotFound {
+        status = HttpStatus.notFound;
+      } on _TooLarge {
+        status = HttpStatus.requestEntityTooLarge;
+      } on _BadRequest {
+        status = HttpStatus.badRequest;
+      } on TimeoutException {
+        status = HttpStatus.requestTimeout;
+      } on SyncAuthException {
+        _throttle.failed(source);
+        status = HttpStatus.unauthorized; // never says why
+      } on Object {
+        status = HttpStatus.internalServerError;
+      } finally {
+        _inFlight--;
+      }
     }
-    req.response.statusCode = status;
-    if (body.isNotEmpty) req.response.write(body);
-    await req.response.close();
+    try {
+      req.response.statusCode = status;
+      if (body.isNotEmpty) req.response.write(body);
+      await req.response.close();
+    } on Object {
+      // The client went away.
+    }
   }
 
-  Future<String> _pair(String text) async {
+  /// Reads the body while counting its bytes, so an endless or oversized
+  /// stream is cut as soon as it passes [max] (before anything is decoded or
+  /// authenticated), and a slow trickle hits the deadline.
+  Future<String> _readBody(HttpRequest req, int max, bool big) async {
+    if (req.contentLength > max) throw const _TooLarge();
+    Future<Uint8List> read() async {
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in req) {
+        bytes.add(chunk);
+        if (bytes.length > max) throw const _TooLarge();
+      }
+      return bytes.takeBytes();
+    }
+
+    final raw = await read().timeout(
+      big ? _pushBodyDeadline : _smallBodyDeadline,
+    );
+    try {
+      return utf8.decode(raw);
+    } on FormatException {
+      throw const _BadRequest();
+    }
+  }
+
+  Future<String> _pair(String text, String source) async {
     final offer = _offer;
     if (offer == null || DateTime.now().isAfter(offer.expiresAt)) {
       _offer = null;
@@ -124,15 +208,25 @@ class SyncServer {
     try {
       request = await env.open(offer.key, '/v1/pair');
     } on SyncAuthException {
-      if (++offer.attempts >= pairingMaxAttempts) _offer = null;
+      // One source is banned by the throttle; only a flood from many sources
+      // burns the code for everyone.
+      if (++offer.attempts >= _offerFailureCap) _offer = null;
       rethrow;
     }
     // The code is single use: it is burned before the long-term key leaves.
     _offer = null;
+    final name = _cleanName(request['name']);
+    if (approvePairing != null) {
+      final approved = await _ask(
+        PairRequest(deviceId: env.deviceId, name: name),
+      ).timeout(pairApprovalTimeout, onTimeout: () => false);
+      // Declined, or nobody answered: the phone just sees a refusal.
+      if (!approved) throw const SyncAuthException('pairing declined');
+    }
     final key = SyncCrypto.randomBytes(32);
     final peer = SyncPeer(
       deviceId: env.deviceId,
-      name: (request['name'] as String?) ?? 'Phone',
+      name: name,
       key: key,
       lastCounter: 0,
       addresses: const [],
@@ -147,6 +241,17 @@ class SyncServer {
     });
   }
 
+  /// Asks the owner; anything that goes wrong in the callback (it throws, or
+  /// returns a failed future) counts as "no". Async on purpose: the error is
+  /// absorbed here, so no failed future is ever left without a listener.
+  Future<bool> _ask(PairRequest request) async {
+    try {
+      return await approvePairing!(request);
+    } on Object {
+      return false;
+    }
+  }
+
   Future<String> _call(String path, String text) async {
     final env = SyncEnvelope.decode(text);
     final peer = await peers.get(env.deviceId);
@@ -155,28 +260,78 @@ class SyncServer {
       throw const SyncAuthException('replay');
     }
     final request = await env.open(peer.key, path);
-    // Recorded before the work starts: a copy of this request is a replay.
-    await peers.setCounter(peer.deviceId, env.counter);
+    // Recorded before the work starts, in one atomic statement: of several
+    // copies of this request only the first wins; the rest are replays.
+    if (!await peers.advanceCounter(peer.deviceId, env.counter)) {
+      throw const SyncAuthException('replay');
+    }
 
     final Map<String, Object?> answer = switch (path) {
       '/v1/hello' => (await host.hello()).toJson(),
       '/v1/pull' => (await host.pull(
         peer.deviceId,
-        request['since']! as int,
-        request['limit']! as int,
+        _intField(request, 'since', min: 0),
+        _intField(request, 'limit', min: 1, max: 1000),
       )).toJson(),
-      '/v1/push' => (await host.push(peer.deviceId, [
-        for (final c in (request['changes']! as List))
-          SyncChange.fromJson((c as Map).cast<String, Object?>()),
-      ], last: request['last']! as bool)).toJson(),
+      '/v1/push' => (await host.push(peer.deviceId, _changes(request),
+          last: _boolField(request, 'last'))).toJson(),
       _ => throw const _NotFound(),
     };
     return SyncReply.seal(peer.key, path, env.counter, answer);
+  }
+
+  static int _intField(
+    Map<String, Object?> m,
+    String key, {
+    required int min,
+    int? max,
+  }) {
+    final v = m[key];
+    if (v is! int || v < min || (max != null && v > max)) {
+      throw const _BadRequest();
+    }
+    return v;
+  }
+
+  static bool _boolField(Map<String, Object?> m, String key) {
+    final v = m[key];
+    if (v is! bool) throw const _BadRequest();
+    return v;
+  }
+
+  static List<SyncChange> _changes(Map<String, Object?> m) {
+    final list = m['changes'];
+    if (list is! List) throw const _BadRequest();
+    try {
+      return [
+        for (final c in list)
+          SyncChange.fromJson((c as Map).cast<String, Object?>()),
+      ];
+    } on Object {
+      throw const _BadRequest();
+    }
+  }
+
+  /// A peer's display name: trimmed, control characters dropped, short.
+  static String _cleanName(Object? raw) {
+    final s = raw is String
+        ? raw.replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), '').trim()
+        : '';
+    if (s.isEmpty) return 'Phone';
+    return s.length > 60 ? s.substring(0, 60) : s;
   }
 }
 
 class _NotFound implements Exception {
   const _NotFound();
+}
+
+class _TooLarge implements Exception {
+  const _TooLarge();
+}
+
+class _BadRequest implements Exception {
+  const _BadRequest();
 }
 
 /// This machine's IPv4 addresses, home-network ones first (a Tailscale 100.x

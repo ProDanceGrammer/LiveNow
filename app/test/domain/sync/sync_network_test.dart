@@ -175,7 +175,8 @@ void main() {
     });
 
     test(
-      'a wrong pairing secret is refused and the code dies after five',
+      'a source that keeps guessing the pairing secret is shut out, the code '
+      'stays valid for everybody else',
       () async {
         final code = await server.startPairing(hosts: ['127.0.0.1']);
         final bad = PairingUri(
@@ -184,8 +185,8 @@ void main() {
           hosts: code.hosts,
           secret: SyncCrypto.randomBytes(16),
         );
-        for (var i = 0; i < pairingMaxAttempts; i++) {
-          expect(
+        for (var i = 0; i < 8; i++) {
+          await expectLater(
             pairWithServer(
               code: bad,
               peers: SyncPeers(phone.db),
@@ -194,11 +195,9 @@ void main() {
             ),
             throwsA(isA<SyncAuthException>()),
           );
-          await Future<void>.delayed(const Duration(milliseconds: 50));
         }
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-        expect(server.pairingOpen, isFalse);
-        // Even the right secret no longer works.
+        // This source is now banned: even the right secret gets nothing
+        // (answered like an unknown path), but the code is not burned.
         await expectLater(
           pairWithServer(
             code: code,
@@ -206,11 +205,194 @@ void main() {
             myDeviceId: await phone.id,
             myName: 'Late',
           ),
-          throwsA(isA<SyncAuthException>()),
+          throwsA(isA<HttpException>()),
         );
+        expect(server.pairingOpen, isTrue);
         expect(await SyncPeers(pc.db).all(), isEmpty);
       },
     );
+
+    group('pairing approval', () {
+      test('a declined phone gets nothing and the code is burned', () async {
+        PairRequest? asked;
+        server.approvePairing = (r) async {
+          asked = r;
+          return false;
+        };
+        final code = await server.startPairing(hosts: ['127.0.0.1']);
+        await expectLater(
+          pairWithServer(
+            code: code,
+            peers: SyncPeers(phone.db),
+            myDeviceId: await phone.id,
+            myName: 'Stranger',
+          ),
+          throwsA(isA<SyncAuthException>()),
+        );
+        expect(asked?.name, 'Stranger');
+        expect(asked?.deviceId, await phone.id);
+        expect(await SyncPeers(pc.db).all(), isEmpty);
+        expect(await SyncPeers(phone.db).all(), isEmpty);
+        expect(server.pairingOpen, isFalse);
+      });
+
+      test('an approved phone is paired as before', () async {
+        server.approvePairing = (r) async => r.name == 'My iPhone';
+        final (peer, transport) = await pair(name: 'My iPhone');
+        expect(peer.deviceId, await pc.id);
+        expect((await SyncPeers(pc.db).all()).single.name, 'My iPhone');
+        expect((await transport.hello()).deviceId, await pc.id);
+      });
+
+      test('an approval that throws counts as no', () async {
+        server.approvePairing = (r) async => throw StateError('no ui');
+        final code = await server.startPairing(hosts: ['127.0.0.1']);
+        await expectLater(
+          pairWithServer(
+            code: code,
+            peers: SyncPeers(phone.db),
+            myDeviceId: await phone.id,
+            myName: 'Phone',
+          ),
+          throwsA(isA<SyncAuthException>()),
+        );
+        expect(await SyncPeers(pc.db).all(), isEmpty);
+      });
+
+      test('a name is cleaned before it is shown or stored', () async {
+        PairRequest? asked;
+        server.approvePairing = (r) async {
+          asked = r;
+          return true;
+        };
+        await pair(name: '  Phone\u0007\n${'x' * 100} ');
+        expect(asked!.name.length, 60);
+        expect(asked!.name.startsWith('Phone'), isTrue);
+        expect(asked!.name.codeUnits.every((u) => u >= 0x20), isTrue);
+      });
+    });
+
+    group('what a phone accepts from a code', () {
+      test('a code that points outside the local network is refused', () async {
+        final code = await server.startPairing(hosts: ['127.0.0.1']);
+        final forged = PairingUri(
+          deviceId: code.deviceId,
+          port: code.port,
+          hosts: const ['8.8.8.8', 'evil.example.com'],
+          secret: code.secret,
+        );
+        await expectLater(
+          pairWithServer(
+            code: forged,
+            peers: SyncPeers(phone.db),
+            myDeviceId: await phone.id,
+            myName: 'Phone',
+          ),
+          throwsA(isA<FormatException>()),
+        );
+        expect(await SyncPeers(phone.db).all(), isEmpty);
+        expect(server.pairingOpen, isTrue); // nothing was even sent
+      });
+
+      test('a PC that is not the one in the code is refused', () async {
+        final code = await server.startPairing(hosts: ['127.0.0.1']);
+        final wrongId = PairingUri(
+          deviceId: 'some-other-pc',
+          port: code.port,
+          hosts: code.hosts,
+          secret: code.secret,
+        );
+        await expectLater(
+          pairWithServer(
+            code: wrongId,
+            peers: SyncPeers(phone.db),
+            myDeviceId: await phone.id,
+            myName: 'Phone',
+          ),
+          throwsA(isA<SyncAuthException>()),
+        );
+        expect(await SyncPeers(phone.db).all(), isEmpty);
+      });
+    });
+
+    group('hostile requests', () {
+      Future<int> rawPost(String path, String body) async {
+        final client = HttpClient();
+        try {
+          final req = await client.postUrl(
+            Uri.http('127.0.0.1:${server.port}', path),
+          );
+          req.write(body);
+          final res = await req.close();
+          await res.drain<void>();
+          return res.statusCode;
+        } finally {
+          client.close(force: true);
+        }
+      }
+
+      test('an oversized body is cut before it is read or decrypted', () async {
+        // 100 KB sent chunked (no length declared) to a route that takes 64 KB:
+        // answered 413 or simply cut off while the sender is still uploading.
+        try {
+          expect(await rawPost('/v1/hello', 'x' * (100 * 1024)), 413);
+        } on HttpException {
+          // connection closed by the server: also fine
+        } on SocketException {
+          // reset by the server: also fine
+        }
+        // The server still answers afterwards.
+        final (_, transport) = await pair();
+        expect((await transport.hello()).deviceId, await pc.id);
+      });
+
+      test('of many copies of one valid request only one is served', () async {
+        final (peer, _) = await pair();
+        final id = await phone.id;
+        final env = await SyncEnvelope.seal(
+          key: peer.key,
+          path: '/v1/hello',
+          deviceId: id,
+          counter: 50,
+          body: const {},
+        );
+        final codes = await Future.wait([
+          for (var i = 0; i < 8; i++) rawPost('/v1/hello', env.encode()),
+        ]);
+        expect(codes.where((c) => c == 200), hasLength(1));
+        expect(codes.where((c) => c == 401), hasLength(7));
+      });
+
+      test('a pull with a bad field is a 400, not a crash or a wedge', () async {
+        final (peer, _) = await pair();
+        final id = await phone.id;
+        final bodies = [
+          {'since': 0, 'limit': -5},
+          {'since': -1, 'limit': 10},
+          {'since': 'zero', 'limit': 10},
+          {'since': 0},
+        ];
+        for (var i = 0; i < bodies.length; i++) {
+          final env = await SyncEnvelope.seal(
+            key: peer.key,
+            path: '/v1/pull',
+            deviceId: id,
+            counter: 100 + i, // each newer than the last, so none is a replay
+            body: bodies[i],
+          );
+          expect(await rawPost('/v1/pull', env.encode()), 400);
+        }
+        // A well-formed pull right after is still served.
+        final ok = await SyncEnvelope.seal(
+          key: peer.key,
+          path: '/v1/pull',
+          deviceId: id,
+          counter: 200,
+          body: const {'since': 0, 'limit': 10},
+        );
+        expect(await rawPost('/v1/pull', ok.encode()), 200);
+      });
+    });
 
     test('a pairing code works once', () async {
       final code = await server.startPairing(hosts: ['127.0.0.1']);

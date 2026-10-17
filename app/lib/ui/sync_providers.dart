@@ -113,11 +113,16 @@ class SyncHostState {
     this.pairing,
     this.pairingExpires,
     this.lastPaired,
+    this.pendingPair,
     this.error,
   });
 
   final bool running;
   final int? port;
+
+  /// A phone that knows the code and waits for the owner to approve it; the
+  /// sync panel shows the approval dialog while this is set.
+  final PairRequest? pendingPair;
 
   /// The code on screen while a phone is being paired.
   final PairingUri? pairing;
@@ -133,8 +138,10 @@ class SyncHostState {
     PairingUri? pairing,
     DateTime? pairingExpires,
     SyncPeer? lastPaired,
+    PairRequest? pendingPair,
     String? error,
     bool clearPairing = false,
+    bool clearPendingPair = false,
     bool clearError = false,
   }) => SyncHostState(
     running: running ?? this.running,
@@ -144,6 +151,7 @@ class SyncHostState {
         ? null
         : (pairingExpires ?? this.pairingExpires),
     lastPaired: lastPaired ?? this.lastPaired,
+    pendingPair: clearPendingPair ? null : (pendingPair ?? this.pendingPair),
     error: clearError ? null : (error ?? this.error),
   );
 }
@@ -157,6 +165,8 @@ class SyncHostController extends Notifier<SyncHostState> {
   SyncServer? _server;
   StreamSubscription<SyncPeer>? _sub;
   Timer? _expiry;
+  Completer<bool>? _approval;
+  Timer? _approvalTimer;
 
   @override
   SyncHostState build() {
@@ -164,8 +174,38 @@ class SyncHostController extends Notifier<SyncHostState> {
       _expiry?.cancel();
       _sub?.cancel();
       _server?.stop();
+      _settleApproval(false);
     });
     return const SyncHostState();
+  }
+
+  /// The server asks here before it hands a phone the long-term key. The
+  /// answer comes from the approval dialog ([answerPair]).
+  Future<bool> _requestApproval(PairRequest request) {
+    _settleApproval(false); // only one request at a time
+    final c = Completer<bool>();
+    _approval = c;
+    state = state.copyWith(pendingPair: request);
+    // Nobody answered (no panel open to show the dialog): the request lapses
+    // and does not linger in the state.
+    _approvalTimer = Timer(pairApprovalTimeout, () {
+      if (identical(_approval, c)) answerPair(false);
+    });
+    return c.future;
+  }
+
+  void _settleApproval(bool ok) {
+    _approvalTimer?.cancel();
+    _approvalTimer = null;
+    final c = _approval;
+    _approval = null;
+    if (c != null && !c.isCompleted) c.complete(ok);
+  }
+
+  /// The owner's answer to the approval dialog.
+  void answerPair(bool approved) {
+    _settleApproval(approved);
+    state = state.copyWith(clearPendingPair: true);
   }
 
   Future<bool> enabled() async =>
@@ -197,7 +237,7 @@ class SyncHostController extends Notifier<SyncHostState> {
       host: ref.read(syncHostProvider),
       peers: ref.read(syncPeersProvider),
       deviceName: ref.read(syncDeviceNameProvider),
-    );
+    )..approvePairing = _requestApproval;
     try {
       await server.start(port: ref.read(syncServerPortProvider));
     } on SocketException catch (e) {
@@ -218,6 +258,7 @@ class SyncHostController extends Notifier<SyncHostState> {
 
   Future<void> stop() async {
     _expiry?.cancel();
+    _settleApproval(false);
     await _sub?.cancel();
     await _server?.stop();
     _server = null;
@@ -244,6 +285,8 @@ class SyncHostController extends Notifier<SyncHostState> {
 
   Future<void> removePeer(String deviceId) async {
     await ref.read(syncPeersProvider).remove(deviceId);
+    // Its half-sent pages and cursors go too, so nothing of it lingers.
+    await ref.read(syncStoreProvider).forgetPeer(deviceId);
     ref.read(syncRevisionProvider.notifier).bump();
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../../domain/sync/network_rules.dart';
 import '../../domain/sync/sync_crypto.dart';
 import '../../domain/sync/sync_engine.dart';
 import '../../domain/sync/sync_models.dart';
@@ -157,6 +158,15 @@ Future<SyncPeer> pairWithServer({
   HttpClient? client,
   Duration connectTimeout = const Duration(seconds: 3),
 }) async {
+  // A code may only point at a machine on a local, VPN or hotspot network. A
+  // forged QR naming a public host would make this phone wipe itself and take
+  // data from a stranger's server.
+  final hosts = [...code.hosts.where(isAllowedPairingHost)];
+  if (hosts.isEmpty) {
+    throw const FormatException(
+      'This code points outside your local network, so it is refused.',
+    );
+  }
   final http = client ?? HttpClient();
   try {
     final key = await SyncCrypto.deriveKey(code.secret, 'livenow-pair-v1');
@@ -170,18 +180,22 @@ Future<SyncPeer> pairWithServer({
     final answer = await postFirstReachable(
       http,
       connectTimeout,
-      code.hosts,
+      hosts,
       code.port,
       '/v1/pair',
       env.encode(),
     );
     final reply = await SyncReply.open(key, '/v1/pair', 0, answer);
+    // The PC that answers must be the one the code named.
+    if (reply['device'] != code.deviceId) {
+      throw const SyncAuthException('The PC is not the one in the code.');
+    }
     final peer = SyncPeer(
       deviceId: reply['device']! as String,
       name: reply['name']! as String,
       key: base64.decode(reply['key']! as String),
       lastCounter: 0,
-      addresses: code.hosts,
+      addresses: hosts,
       port: code.port,
     );
     await peers.save(peer);

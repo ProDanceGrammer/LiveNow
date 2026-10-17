@@ -4,6 +4,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/capped_read.dart';
 import '../../domain/action_import_service.dart';
 import '../calendar_fullscreen.dart';
 import '../current_icons.dart';
@@ -34,7 +35,7 @@ final actionsCsvPickerProvider = Provider<Future<String?> Function()>(
         ),
       ],
     );
-    return file?.readAsString();
+    return file == null ? null : readTextCapped(file);
   },
 );
 

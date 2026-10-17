@@ -46,6 +46,56 @@ void main() {
   }
 
   group('replication', () {
+    test('a wiped phone gets back the rows it had written itself', () async {
+      // a = PC (serves), b = phone. The phone's own rows reached the PC before
+      // the phone was wiped by re-pairing; the PC must send them back.
+      await ActionService(a.db).createAction(name: 'From the PC');
+      await ActionService(b.db).createAction(name: 'From the phone');
+      await syncWith(b, a);
+      expect(await a.count('actions'), 2);
+
+      await b.store.wipeForReplace();
+      expect(await b.count('actions'), 0);
+      await syncWith(b, a);
+
+      expect(await b.count('actions'), 2);
+      expect(await b.dump(), equals(await a.dump()));
+    });
+
+    test('a wiped phone gets its own rows back over several pages', () async {
+      // The harness pages by 7: 30 phone rows span several pages, and every
+      // page after the first starts above position 0.
+      final svc = ActionService(b.db);
+      for (var i = 0; i < 30; i++) {
+        await svc.createAction(name: 'Phone $i');
+      }
+      await syncWith(b, a);
+      expect(await a.count('actions'), 30);
+
+      await b.store.wipeForReplace();
+      await syncWith(b, a);
+
+      expect(await b.count('actions'), 30);
+      expect(await b.dump(), equals(await a.dump()));
+    });
+
+    test('a stale log entry does not cut the rest of a pull short', () async {
+      final svc = ActionService(a.db);
+      final ids = <String>[];
+      for (var i = 0; i < 20; i++) {
+        ids.add(await svc.createAction(name: 'PC $i'));
+      }
+      // Remove one data row without a tombstone (a silent delete): its log
+      // entry now points at nothing.
+      await a.exec('UPDATE sync_applying SET flag = 1');
+      await a.exec("DELETE FROM actions WHERE id = '${ids.first}'");
+      await a.exec('UPDATE sync_applying SET flag = 0');
+
+      await syncWith(b, a);
+
+      expect(await b.count('actions'), 19);
+    });
+
     test('rows and their links reach the other device, derived values too', () async {
       final metrics = MetricService(a.db);
       final m = await metrics.saveMetric(
@@ -119,15 +169,18 @@ void main() {
     });
 
     test('the local clock moves past a stamp that is ahead', () async {
-      const future = '2099-01-01T00:00:00.000Z-0000-feed';
-      await b.store.apply(const [
+      // A device whose clock runs an hour fast (a far-future stamp is refused
+      // on purpose, see change_validation_test.dart).
+      final ahead = DateTime.now().toUtc().add(const Duration(hours: 1));
+      final future = '${ahead.toIso8601String().substring(0, 19)}.000Z-0000-feed';
+      await b.store.apply([
         SyncChange(
           table: 'action_templates',
           rowId: 't1',
           hlc: future,
           origin: 'feed',
           deleted: false,
-          data: {'id': 't1', 'name': 'n', 'payload': '{}'},
+          data: const {'id': 't1', 'name': 'n', 'payload': '{}'},
         ),
       ], unsyncedAfterSeq: 0);
       await b.exec(

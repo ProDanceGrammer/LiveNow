@@ -39,14 +39,23 @@ class SyncHost {
     // A peer asking "after N" confirms it holds everything up to N: later,
     // anything of ours stamped after N that it did not see is an unsynced edit.
     await store.setState('served:$peerId', '$sinceSeq');
+    // Rows the peer wrote itself are skipped (it already has them) - except
+    // during a pull from 0: a peer asking for everything holds nothing, e.g. a
+    // phone just wiped by re-pairing, whose own earlier edits live only here.
+    // The later pages of that pull start above 0, so the state is remembered
+    // until a page says "done" (an interrupted pull that resumes is covered).
+    final fullKey = 'fullpull:$peerId';
+    if (sinceSeq == 0) await store.setState(fullKey, '1');
+    final full = await store.getState(fullKey) == '1';
     final until = await store.currentSeq();
     final changes = await store.changesSince(
       sinceSeq,
       until: until,
       limit: limit,
-      excludeOrigin: peerId,
+      excludeOrigin: full ? null : peerId,
     );
     final more = changes.length >= limit;
+    if (!more && full) await store.setState(fullKey, '0');
     return SyncPullPage(
       await store.withDependencies(changes),
       nextSeq: more ? changes.last.seq : until,

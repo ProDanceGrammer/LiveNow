@@ -2,6 +2,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/capped_read.dart';
 import '../../domain/growth_rules.dart';
 import '../calendar_fullscreen.dart';
 import '../layout.dart';
@@ -34,7 +35,7 @@ final notionPagesPickerProvider = Provider<Future<List<String>> Function()>(
         ),
       ],
     );
-    return [for (final f in files) await f.readAsString()];
+    return [for (final f in files) await readTextCapped(f)];
   },
 );
 
@@ -57,7 +58,7 @@ final growthCsvPickerProvider = Provider<Future<String?> Function()>(
         ),
       ],
     );
-    return file?.readAsString();
+    return file == null ? null : readTextCapped(file);
   },
 );
 

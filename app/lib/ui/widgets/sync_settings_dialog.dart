@@ -7,12 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../data/sync/http_transport.dart';
+import '../../domain/sync/network_rules.dart';
 import '../../domain/sync/sync_crypto.dart';
 import '../../domain/sync/sync_protocol.dart';
 import '../dialog_stack.dart';
 import '../sync_providers.dart';
 import 'app_toast.dart';
 import 'sync_conflicts_dialog.dart';
+import 'sync_pair_approval_dialog.dart';
 import 'sync_scan_dialog.dart';
 
 /// "5 min ago" style text for the last sync.
@@ -113,6 +115,16 @@ class _HostPanel extends ConsumerWidget {
       }
     });
 
+    // A phone that knows the code waits here for the owner's yes or no.
+    ref.listen(syncHostControllerProvider.select((s) => s.pendingPair), (
+      prev,
+      next,
+    ) async {
+      if (next == null || prev != null) return;
+      final approved = await SyncPairApprovalDialog.show(context, next);
+      controller.answerPair(approved);
+    });
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -190,6 +202,20 @@ class _PairingCode extends ConsumerStatefulWidget {
 
 class _PairingCodeState extends ConsumerState<_PairingCode> {
   Timer? _tick;
+  bool _copied = false;
+
+  /// The code on the clipboard (Windows keeps a clipboard history) is useless
+  /// once pairing ends: clear it, but only if it is still this code.
+  Future<void> _clearClipboard(String text) async {
+    try {
+      final now = await Clipboard.getData(Clipboard.kTextPlain);
+      if (now?.text == text) {
+        await Clipboard.setData(const ClipboardData(text: ''));
+      }
+    } on Object {
+      // No clipboard access: nothing to clear.
+    }
+  }
 
   @override
   void initState() {
@@ -203,6 +229,7 @@ class _PairingCodeState extends ConsumerState<_PairingCode> {
   @override
   void dispose() {
     _tick?.cancel();
+    if (_copied) _clearClipboard(widget.code.toString());
     super.dispose();
   }
 
@@ -244,7 +271,10 @@ class _PairingCodeState extends ConsumerState<_PairingCode> {
               key: const ValueKey('sync-copy-code'),
               icon: const Icon(Icons.copy, size: 16),
               label: const Text('Copy code'),
-              onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+              onPressed: () {
+                _copied = true;
+                Clipboard.setData(ClipboardData(text: text));
+              },
             ),
             Text(
               'valid for ${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}',
@@ -311,7 +341,8 @@ class _ClientPanelState extends ConsumerState<_ClientPanel> {
         context,
         title: 'Replace the data on this phone?',
         text:
-            'The PC\'s data will replace everything on this phone '
+            'The data of the PC at ${code.hosts.firstWhere(isAllowedPairingHost, orElse: () => '?')} '
+            'will replace everything on this phone '
             '(${counts['actions']} actions, ${counts['metrics']} growth '
             'directions, ${counts['budget_transactions']} transactions). A '
             'backup copy of the phone\'s data is kept for 30 days.',
@@ -328,8 +359,10 @@ class _ClientPanelState extends ConsumerState<_ClientPanel> {
       _code.clear();
     } on SyncAuthException {
       _error =
-          'The code was wrong or has expired. Show a new one on the PC. '
-          'Also check that both clocks are right.';
+          'The code was wrong or has expired, or the PC declined. Show a '
+          'new one on the PC. Also check that both clocks are right.';
+    } on FormatException catch (e) {
+      _error = e.message;
     } on SyncUnreachable {
       _error =
           'Could not reach the PC. Is LiveNow open on it, and are both '

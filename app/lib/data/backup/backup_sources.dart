@@ -17,15 +17,49 @@ abstract class BackupSource {
   Stream<TableChunk> chunks();
 }
 
+/// A backup file is untrusted input: these bounds stop a decompression bomb, one
+/// endless line or a giant cell from eating all memory. Real backups are far
+/// below them (5,000 actions with notes = about 1 MB unpacked).
+const kMaxBackupUnpackedBytes = 1024 * 1024 * 1024; // 1 GiB of JSON in total
+const kMaxBackupLineBytes = 8 * 1024 * 1024; // one row / header line
+const kMaxBackupBatchBytes = 32 * 1024 * 1024; // rows held before a flush
+const kMaxBackupCsvFileBytes = 1024 * 1024 * 1024;
+const kMaxBackupMetaBytes = 1024 * 1024;
+
+/// Passes bytes through while counting them; throws a [BackupFormatException]
+/// as soon as the total or a single line passes its bound.
+Stream<List<int>> _bounded(Stream<List<int>> bytes) async* {
+  var total = 0;
+  var line = 0;
+  await for (final chunk in bytes) {
+    total += chunk.length;
+    if (total > kMaxBackupUnpackedBytes) {
+      throw const BackupFormatException('The backup file is too large.');
+    }
+    for (final b in chunk) {
+      if (b == 0x0A) {
+        line = 0;
+      } else if (++line > kMaxBackupLineBytes) {
+        throw const BackupFormatException('The backup file is damaged.');
+      }
+    }
+    yield chunk;
+  }
+}
+
+Future<void> _checkFileSize(File file, int max) async {
+  if (await file.length() > max) {
+    throw const BackupFormatException('The backup file is too large.');
+  }
+}
+
 /// The compact `.livenow` file (gzip of line-delimited JSON).
 class CompactBackupSource implements BackupSource {
   CompactBackupSource(this.file);
 
   final File file;
 
-  Stream<String> _lines() => file
-      .openRead()
-      .transform(gzip.decoder)
+  Stream<String> _lines() => _bounded(file.openRead().transform(gzip.decoder))
       .transform(utf8.decoder)
       .transform(const LineSplitter());
 
@@ -49,8 +83,10 @@ class CompactBackupSource implements BackupSource {
     String? table;
     List<String> columns = const [];
     var rows = <List<Object?>>[];
+    var heldChars = 0;
 
     TableChunk? flush() {
+      heldChars = 0;
       if (table == null || rows.isEmpty) return null;
       final c = TableChunk(table, columns, rows);
       rows = <List<Object?>>[];
@@ -71,7 +107,11 @@ class CompactBackupSource implements BackupSource {
             throw const BackupFormatException('A row in the backup is damaged.');
           }
           rows.add(row);
-          if (rows.length >= kBackupBatchRows) yield flush()!;
+          heldChars += line.length;
+          if (rows.length >= kBackupBatchRows ||
+              heldChars >= kMaxBackupBatchBytes) {
+            yield flush()!;
+          }
           continue;
         }
         final c = flush();
@@ -118,6 +158,7 @@ class CsvFolderBackupSource implements BackupSource {
   Future<BackupHeader> header() async {
     final meta = _files['_meta.csv'];
     if (meta == null) return const BackupHeader();
+    await _checkFileSize(meta, kMaxBackupMetaBytes);
     final p = CsvRowParser();
     final rows = [...p.add(await meta.readAsString()), ...p.close()];
     int? schema;
@@ -140,6 +181,7 @@ class CsvFolderBackupSource implements BackupSource {
     for (final table in backupTableOrder) {
       final file = _files['$table.csv'];
       if (file == null) continue;
+      await _checkFileSize(file, kMaxBackupCsvFileBytes);
       final parser = CsvRowParser();
       List<String>? columns;
       var rows = <List<Object?>>[];
@@ -192,11 +234,19 @@ class SqliteBackupSource implements BackupSource {
 
   sqlite.Database _open() {
     try {
-      return sqlite.sqlite3.open(file.path, mode: sqlite.OpenMode.readOnly);
+      final db = sqlite.sqlite3.open(file.path, mode: sqlite.OpenMode.readOnly);
+      // The file is somebody else's: its views, triggers and virtual tables
+      // must not run, and a damaged page layout is refused rather than read.
+      db.execute('PRAGMA trusted_schema = OFF');
+      db.execute('PRAGMA cell_size_check = ON');
+      return db;
     } catch (_) {
       throw const BackupFormatException('This is not a LiveNow database.');
     }
   }
+
+  /// A column name taken from the file, quoted so it can only be a name.
+  static String _q(String name) => '"${name.replaceAll('"', '""')}"';
 
   bool _hasTable(sqlite.Database db, String t) => db
       .select("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", [t])
@@ -233,7 +283,7 @@ class SqliteBackupSource implements BackupSource {
         String? last;
         while (true) {
           final result = db.select(
-            'SELECT ${cols.join(', ')} FROM $table '
+            'SELECT ${cols.map(_q).join(', ')} FROM $table '
             '${last == null ? '' : 'WHERE $pk > ? '}'
             'ORDER BY $pk LIMIT $kBackupBatchRows',
             [?last],

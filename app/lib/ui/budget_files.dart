@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../core/capped_read.dart';
 import '../domain/budget_io_service.dart';
 import 'providers.dart';
 
@@ -38,7 +39,7 @@ class BudgetFiles {
   /// Any number of CSV/JSON files; empty when cancelled.
   Future<List<PickedFile>> pickImportFiles() async {
     final files = await openFiles(acceptedTypeGroups: _types);
-    return [for (final f in files) PickedFile(f.name, await f.readAsString())];
+    return [for (final f in files) PickedFile(f.name, await readTextCapped(f))];
   }
 
   /// A phone has no "save as" dialog: files go to a temp folder and the system
@@ -56,9 +57,21 @@ class BudgetFiles {
       await f.writeAsString(e.value);
       paths.add(f.path);
     }
-    await SharePlus.instance.share(
-      ShareParams(files: [for (final p in paths) XFile(p)]),
-    );
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [for (final p in paths) XFile(p)]),
+      );
+    } finally {
+      // On iOS share() returns once the sheet is done: the copy of the user's
+      // budget in the temp folder is not needed (or wanted) any more.
+      if (Platform.isIOS) {
+        for (final p in paths) {
+          try {
+            await File(p).delete();
+          } catch (_) {}
+        }
+      }
+    }
     return dir.path;
   }
 

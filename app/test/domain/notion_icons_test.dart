@@ -29,6 +29,20 @@ void main() {
     expect(skipped, ['Невідомо']);
   });
 
+  test('hostile character references and long alt text never throw', () {
+    final html =
+        '${_row('<img class="notion-emoji" alt="&#99999999999;&#xFFFFFFFFF;&#0;&#xD800;ok">', 'Bad refs')}'
+        '${_row('<img class="notion-emoji" alt="${'🙂' * 40}">', 'Too long')}'
+        '${_row('<img class="notion-emoji" alt="🚓">', 'Fine')}';
+    late Map<String, String> icons;
+    expect(() => icons = parseNotionIcons(html), returnsNormally);
+    // A reference that is not a real code point stays as written, so the
+    // text is not an emoji any more but nothing crashes; an absurdly long alt
+    // is not stored as an icon.
+    expect(icons.containsKey('Too long'), isFalse);
+    expect(icons['Fine'], '🚓');
+  });
+
   test('the saved Notion page in dev/references yields its 17 rows', () {
     final f = File(
       '../dev/references/GrowthDirections/(9+) Growth Directions _ Flat _ Notion.htm',

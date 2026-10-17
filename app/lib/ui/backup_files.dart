@@ -50,6 +50,15 @@ class BackupFiles {
     return dir.create(recursive: true);
   }
 
+  /// On iOS share() returns once the share sheet is done, so the full backup in
+  /// the temp folder is deleted at once (elsewhere the next export clears it).
+  static Future<void> _removeAfterShare(Directory dir) async {
+    if (!Platform.isIOS) return;
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    } catch (_) {}
+  }
+
   /// Asks where to save one file, lets [write] fill it, returns its path
   /// (null when cancelled).
   Future<String?> exportFile(
@@ -59,8 +68,12 @@ class BackupFiles {
     if (_usesShareSheet) {
       final dir = await _tempDir('file');
       final f = File('${dir.path}${Platform.pathSeparator}$suggestedName');
-      await write(f);
-      await SharePlus.instance.share(ShareParams(files: [XFile(f.path)]));
+      try {
+        await write(f);
+        await SharePlus.instance.share(ShareParams(files: [XFile(f.path)]));
+      } finally {
+        await _removeAfterShare(dir);
+      }
       return f.path;
     }
     final ext = suggestedName.split('.').last;
@@ -81,10 +94,14 @@ class BackupFiles {
   ) async {
     if (_usesShareSheet) {
       final dir = await _tempDir(name);
-      final files = await write(dir);
-      await SharePlus.instance.share(
-        ShareParams(files: [for (final f in files) XFile(f.path)]),
-      );
+      try {
+        final files = await write(dir);
+        await SharePlus.instance.share(
+          ShareParams(files: [for (final f in files) XFile(f.path)]),
+        );
+      } finally {
+        await _removeAfterShare(dir);
+      }
       return dir.path;
     }
     final base = await getDirectoryPath();

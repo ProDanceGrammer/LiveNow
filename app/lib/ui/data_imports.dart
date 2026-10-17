@@ -32,9 +32,9 @@ import 'widgets/budget_import_summary_dialog.dart';
 Future<void> importActionsCsv(BuildContext context, WidgetRef ref) async {
   final messenger = ScaffoldMessenger.of(context);
   final service = ref.read(actionImportServiceProvider);
-  final text = await ref.read(actionsCsvPickerProvider)();
-  if (text == null || !context.mounted) return;
   try {
+    final text = await ref.read(actionsCsvPickerProvider)();
+    if (text == null || !context.mounted) return;
     final result = await service.importCsv(text);
     if (!context.mounted) return;
     await ActionImportSummaryDialog.show(context, result);
@@ -49,9 +49,9 @@ Future<void> importActionsCsv(BuildContext context, WidgetRef ref) async {
 Future<void> importTemplatesCsv(BuildContext context, WidgetRef ref) async {
   final messenger = ScaffoldMessenger.of(context);
   final service = ref.read(templateImportServiceProvider);
-  final text = await ref.read(actionsCsvPickerProvider)();
-  if (text == null || !context.mounted) return;
   try {
+    final text = await ref.read(actionsCsvPickerProvider)();
+    if (text == null || !context.mounted) return;
     final result = await service.importCsv(text);
     if (!context.mounted) return;
     await TemplateImportSummaryDialog.show(context, result);
@@ -68,9 +68,9 @@ Future<void> importGrowthCsv(BuildContext context, WidgetRef ref) async {
   final pick = ref.read(growthCsvPickerProvider);
   final service = ref.read(metricServiceProvider);
 
-  final text = await pick();
-  if (text == null) return;
   try {
+    final text = await pick();
+    if (text == null) return;
     final s = await service.importGrowthDirections(text);
     final notes = [
       if (s.skippedBlank > 0) '${s.skippedBlank} empty rows skipped',
@@ -99,23 +99,29 @@ Future<void> importGrowthCsv(BuildContext context, WidgetRef ref) async {
 Future<void> importGrowthIcons(BuildContext context, WidgetRef ref) async {
   final messenger = ScaffoldMessenger.of(context);
   final service = ref.read(metricServiceProvider);
-  final pages = await ref.read(notionPagesPickerProvider)();
-  if (pages.isEmpty) return;
-  final icons = <String, String>{};
-  final skipped = <String>[];
-  for (final html in pages) {
-    icons.addAll(parseIconsFile(html, skippedBuiltin: skipped));
-  }
-  final s = await service.applyIcons(icons);
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(
-        'Set ${s.matched} icons'
-        '${s.unmatched.isEmpty ? '' : ' (${s.unmatched.length} not in your directions)'}'
-        '${skipped.isEmpty ? '' : ', ${skipped.length} with an unknown built-in icon skipped'}.',
+  try {
+    final pages = await ref.read(notionPagesPickerProvider)();
+    if (pages.isEmpty) return;
+    final icons = <String, String>{};
+    final skipped = <String>[];
+    for (final html in pages) {
+      icons.addAll(parseIconsFile(html, skippedBuiltin: skipped));
+    }
+    final s = await service.applyIcons(icons);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Set ${s.matched} icons'
+          '${s.unmatched.isEmpty ? '' : ' (${s.unmatched.length} not in your directions)'}'
+          '${skipped.isEmpty ? '' : ', ${skipped.length} with an unknown built-in icon skipped'}.',
+        ),
       ),
-    ),
-  );
+    );
+  } on FormatException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Import failed: ${e.message}')),
+    );
+  }
 }
 
 /// Budget: one JSON backup, or any of the three Notion CSVs (recognised by
@@ -123,7 +129,13 @@ Future<void> importGrowthIcons(BuildContext context, WidgetRef ref) async {
 Future<void> importBudgetData(BuildContext context, WidgetRef ref) async {
   final overlay = rootOverlayOf(context);
   final io = ref.read(budgetIoServiceProvider);
-  final files = await ref.read(budgetFilesProvider).pickImportFiles();
+  final List<PickedFile> files;
+  try {
+    files = await ref.read(budgetFilesProvider).pickImportFiles();
+  } on FormatException catch (e) {
+    showInfoToast(overlay, 'Import failed: ${e.message}');
+    return;
+  }
   if (files.isEmpty || !context.mounted) return;
 
   String? backup, accounts, categories, transactions;

@@ -1,22 +1,98 @@
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:sqlite3/sqlite3.dart' as sqlite;
 
 import '../database.dart';
 
-/// Where backups go: `livenow_backups` in the documents folder (the data
-/// folder when `LIVENOW_DATA_DIR` is set, so automated runs stay isolated).
+/// The tables that belong to THIS device, not to the user's data: the pairing
+/// keys (`sync_peers`), the device id and cursors, and the change log. A copy of
+/// the database that leaves the app must not carry them: the keys let whoever
+/// holds the file impersonate the paired phone.
+const deviceLocalSyncTables = [
+  'sync_peers',
+  'sync_state',
+  'sync_inbox',
+  'sync_conflicts',
+  'sync_versions',
+  'sync_clock',
+];
+
+/// Empties [deviceLocalSyncTables] in the database COPY at [path] and compacts
+/// it. Plain `sqlite3`, never the app's schema (nothing is migrated or stamped).
+void blankDeviceLocalSyncTables(String path) {
+  final copy = sqlite.sqlite3.open(path);
+  try {
+    for (final t in deviceLocalSyncTables) {
+      try {
+        copy.execute('DELETE FROM $t');
+      } catch (_) {
+        // The table may not exist in an older schema.
+      }
+    }
+    copy.execute('VACUUM');
+  } finally {
+    copy.close();
+  }
+}
+
+/// Where backups go: `livenow_backups` in the app's own data folder, next to
+/// the database (not in Documents, which Windows often syncs to OneDrive). With
+/// `LIVENOW_DATA_DIR` set it goes into that folder, so automated runs stay
+/// isolated. Backups an older version left in Documents are moved here once.
 Future<Directory> defaultBackupDirectory() async {
   final override = Platform.environment['LIVENOW_DATA_DIR'];
-  final base = override != null && override.isNotEmpty
-      ? Directory(override)
-      : await getApplicationDocumentsDirectory();
-  return Directory('${base.path}${Platform.pathSeparator}livenow_backups')
-      .create(recursive: true);
+  if (override != null && override.isNotEmpty) {
+    return Directory(
+      '$override${Platform.pathSeparator}livenow_backups',
+    ).create(recursive: true);
+  }
+  final support = await getApplicationSupportDirectory();
+  final dir = await Directory(
+    '${support.path}${Platform.pathSeparator}livenow_backups',
+  ).create(recursive: true);
+  try {
+    final docs = await getApplicationDocumentsDirectory();
+    await moveLegacyBackups(
+      Directory('${docs.path}${Platform.pathSeparator}livenow_backups'),
+      dir,
+    );
+  } catch (_) {
+    // Best effort: a failed move leaves the old files where they were.
+  }
+  return dir;
+}
+
+/// Moves the `.sqlite` backups of [from] into [to] (rename, else copy and
+/// delete), strips the pairing keys from each moved copy, and removes [from]
+/// when it is empty. A file that already exists in [to] is left alone.
+Future<int> moveLegacyBackups(Directory from, Directory to) async {
+  if (!await from.exists() || from.absolute.path == to.absolute.path) return 0;
+  var moved = 0;
+  await for (final f in from.list()) {
+    if (f is! File || !f.path.endsWith('.sqlite')) continue;
+    final target = File('${to.path}${Platform.pathSeparator}${f.uri.pathSegments.last}');
+    if (await target.exists()) continue;
+    try {
+      await f.rename(target.path);
+    } on FileSystemException {
+      await f.copy(target.path);
+      await f.delete();
+    }
+    try {
+      blankDeviceLocalSyncTables(target.path);
+    } catch (_) {
+      // Not a readable database: leave it as it is.
+    }
+    moved++;
+  }
+  if (await from.list().isEmpty) await from.delete();
+  return moved;
 }
 
 /// Writes a consistent copy of the whole database into [dir] (`VACUUM INTO`:
 /// safe while the app runs and the WAL journal is in use) and returns its path.
+/// The copy has no pairing keys or other device-local sync data.
 Future<String> backupDatabase(
   AppDatabase db,
   Directory dir, {
@@ -31,6 +107,7 @@ Future<String> backupDatabase(
   final path =
       '${dir.path}${Platform.pathSeparator}livenow-$label-$stamp.sqlite';
   await db.customStatement("VACUUM INTO '${path.replaceAll("'", "''")}'");
+  blankDeviceLocalSyncTables(path);
   return path;
 }
 

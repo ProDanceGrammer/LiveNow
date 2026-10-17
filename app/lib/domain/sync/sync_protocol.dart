@@ -9,9 +9,14 @@ const syncPort = 47653;
 /// How far a request's timestamp may be from the receiver's clock.
 const syncMaxClockSkew = Duration(minutes: 5);
 
-/// How long a pairing code stays valid, and how many wrong tries it survives.
-const pairingLifetime = Duration(minutes: 5);
-const pairingMaxAttempts = 5;
+/// How long a pairing code stays valid: long enough to scan it, short enough
+/// that a photographed or shoulder-surfed code is worthless a moment later.
+const pairingLifetime = Duration(seconds: 90);
+
+/// How long the PC waits for its owner to approve a phone that proved it knows
+/// the code (the approval dialog gives up sooner, at 60 s; the phone's request
+/// itself times out at 2 minutes).
+const pairApprovalTimeout = Duration(seconds: 75);
 
 /// What the QR code (or the typed code) carries: who to talk to and the
 /// one-time secret that proves the phone saw the PC's screen.

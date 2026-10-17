@@ -11,6 +11,7 @@ import 'package:livenow/data/sync/sync_peers.dart';
 import 'package:livenow/data/sync/sync_server.dart';
 import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/domain/sync/sync_crypto.dart' show SyncAuthException;
 import 'package:livenow/domain/sync/sync_models.dart';
 import 'package:livenow/domain/sync/sync_protocol.dart';
 import 'package:livenow/ui/dialog_stack.dart';
@@ -136,6 +137,11 @@ void main() {
         myDeviceId: phoneId,
         myName: 'Test iPhone',
       );
+      await real(tester, 800);
+      // Knowing the code is not enough: the PC asks its owner first.
+      expect(find.text('Pair this phone?'), findsOneWidget);
+      expect(find.textContaining('Test iPhone'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sync-pair-approve')));
       await real(tester, 1500);
       await pairing;
       await real(tester);
@@ -151,6 +157,48 @@ void main() {
       expect(find.text('Test iPhone'), findsNothing);
       expect(find.text('No phone is paired yet.'), findsOneWidget);
 
+      await tester.runAsync(phone.close);
+      await unmount(tester);
+    });
+
+    testWidgets('a phone the owner denies is not paired', (tester) async {
+      await pumpApp(
+        tester,
+        opener(SyncSettingsDialog.show),
+        overrides: overrides,
+      );
+      await open(tester);
+      await tester.tap(find.byKey(const ValueKey('sync-pair-phone')));
+      await real(tester);
+      final shown = PairingUri.parse(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('sync-code-text')),
+            )
+            .data!,
+      );
+      final phone = SyncDevice();
+      final phoneId = (await tester.runAsync(() => phone.id))!;
+      Object? failure;
+      final pairing = pairWithServer(
+        code: PairingUri(
+          deviceId: shown.deviceId,
+          port: shown.port,
+          hosts: const ['127.0.0.1'],
+          secret: shown.secret,
+        ),
+        peers: SyncPeers(phone.db),
+        myDeviceId: phoneId,
+        myName: 'Intruder',
+      ).then<void>((_) {}, onError: (Object e) => failure = e);
+      await real(tester, 800);
+      expect(find.text('Pair this phone?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('sync-pair-deny')));
+      await real(tester, 1500);
+      await pairing;
+      expect(failure, isA<SyncAuthException>());
+      expect(find.text('Intruder'), findsNothing);
+      expect(find.text('No phone is paired yet.'), findsOneWidget);
       await tester.runAsync(phone.close);
       await unmount(tester);
     });
@@ -386,11 +434,13 @@ void main() {
           until: await me.store.currentSeq(),
         );
         final mine = all.firstWhere((c) => c.table == 'actions');
+        // A stamp a little ahead so it wins (far-future stamps are refused).
+        final ahead = DateTime.now().toUtc().add(const Duration(hours: 1));
         await me.store.apply([
           SyncChange(
             table: 'actions',
             rowId: id,
-            hlc: '2099-01-01T00:00:00.000Z-0000-feed',
+            hlc: '${ahead.toIso8601String().substring(0, 19)}.000Z-0000-feed',
             origin: 'feed',
             deleted: false,
             data: {...mine.data!, 'name': 'From the phone'},

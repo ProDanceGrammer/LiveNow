@@ -73,6 +73,22 @@ class SyncPeers {
     [counter, deviceId],
   );
 
+  /// Records [counter] only if it is newer than the stored one, in ONE
+  /// statement, and says whether it was. Two concurrent copies of the same
+  /// request cannot both win, and an out-of-order older request never lowers
+  /// the stored counter.
+  Future<bool> advanceCounter(String deviceId, int counter) async =>
+      await db.customUpdate(
+        'UPDATE sync_peers SET last_counter = ? '
+        'WHERE device_id = ? AND last_counter < ?',
+        variables: [
+          Variable.withInt(counter),
+          Variable.withString(deviceId),
+          Variable.withInt(counter),
+        ],
+      ) ==
+      1;
+
   /// Reorders the addresses (the one that just worked goes first).
   Future<void> setAddresses(String deviceId, List<String> addresses) =>
       db.customStatement(
