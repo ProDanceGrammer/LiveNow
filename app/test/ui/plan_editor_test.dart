@@ -18,6 +18,9 @@ import 'package:livenow/ui/plan_providers.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/screens/budget_screen.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
+import 'package:livenow/ui/widgets/param_icons.dart' show Param, ParamIcon;
+import 'package:livenow/ui/widgets/tx_templates.dart'
+    show TransactionTemplateDialog;
 
 /// The plan item editor (template name, switch, duplicate, Previous / Next /
 /// transactions) and the transaction templates panel in Budget > Transactions.
@@ -279,6 +282,98 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('Transactions: many templates scroll in a bounded list, no overflow', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.runAsync(() async {
+      final budget = BudgetService(db);
+      String? first;
+      for (var i = 0; i < 40; i++) {
+        final id = await budget.saveTxTemplate(
+          name: 'Template $i',
+          categoryId: catId,
+          unitPrice: 10,
+        );
+        first ??= id;
+      }
+      await budget.createTransactionFromTemplate(first!);
+    });
+    tester.view.physicalSize = const Size(1000, 700);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: const MaterialApp(home: BudgetScreen()),
+      ),
+    );
+    await settle(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('budget-switch')),
+        matching: find.text('Transactions'),
+      ),
+    );
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('tx-templates-toggle')));
+    await settle(tester);
+
+    // A RenderFlex overflow would fail the test by itself; the list is also
+    // capped (30 % of the window) and scrolls to reach the last template.
+    final list = find.byKey(const ValueKey('tx-templates-list'));
+    expect(tester.getSize(list).height, lessThanOrEqualTo(700 * 0.3 + 0.5));
+    // Sorted by name, the last one is 'Template 9': off screen until scrolled to.
+    expect(find.text('Template 9'), findsNothing);
+    await tester.drag(list, const Offset(0, -6000));
+    await tester.pump();
+    expect(find.text('Template 9'), findsOneWidget);
+    // The transaction list below is still on screen.
+    expect(find.byKey(const ValueKey('tx-totals')), findsOneWidget);
+    await unmount(tester);
+  });
+
+  testWidgets('a transaction chip in the plan editor opens its template to edit', (
+    tester,
+  ) async {
+    await mount(tester);
+    final tx = (await tester.runAsync(
+      () => BudgetService(db).saveTxTemplate(
+        name: 'Groceries',
+        categoryId: catId,
+        unitPrice: 600,
+      ),
+    ))!;
+    await pumpCalendar(tester);
+    await openEditor(tester);
+    await tester.tap(find.byKey(const ValueKey('row-0-extras-toggle')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('row-0-tx-add')));
+    await settle(tester, 200);
+    await tester.tap(find.byKey(ValueKey('txt-pick-$tx')));
+    await settle(tester, 200);
+
+    final chip = find.byKey(ValueKey('row-0-tx-add-open-$tx'));
+    expect(chip, findsOneWidget);
+    await tester.tap(chip);
+    await settle(tester, 200);
+    // The template dialog opens on top, filled with the template.
+    expect(
+      tester.widget<TextField>(find.byKey(const ValueKey('txt-name'))).controller!.text,
+      'Groceries',
+    );
+    await tester.enterText(find.byKey(const ValueKey('txt-name')), 'Bazaar food');
+    await tester.tap(find.byKey(const ValueKey('txt-save')));
+    await settle(tester, 300);
+
+    // The chip shows the new name and the template was changed (same id).
+    expect(find.widgetWithText(InputChip, 'Bazaar food'), findsOneWidget);
+    final saved = (await tester.runAsync(
+      () => db.select(db.budgetTxTemplatesTable).getSingle(),
+    ))!;
+    expect(saved.id, tx);
+    expect(saved.name, 'Bazaar food');
+    await unmount(tester);
+  });
+
   testWidgets('the editor fits a 375 px phone with every section open', (
     tester,
   ) async {
@@ -382,6 +477,188 @@ void main() {
       Map<String, Object?>.from(jsonDecode(row.rule) as Map),
     ).occurrences.single;
     expect(occ.allDay, isTrue);
+    await unmount(tester);
+  });
+
+  group('transaction template dialog', () {
+    late String bakeryId;
+
+    Future<void> openDialog(WidgetTester tester) async {
+      await mount(tester);
+      bakeryId = (await tester.runAsync(() async {
+        final acc = await db.select(db.budgetAccountsTable).getSingle();
+        return BudgetService(db).saveCategory(
+          CategoryInput(name: 'Bakery', price: 5, accountCountId: acc.id),
+        );
+      }))!;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [databaseProvider.overrideWithValue(db)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () => TransactionTemplateDialog.show(context),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await settle(tester);
+    }
+
+    Future<void> pick(WidgetTester tester, String id) async {
+      await tester.tap(find.byKey(const ValueKey('txt-category')));
+      await settle(tester);
+      await tester.tap(find.byKey(ValueKey('pick-category-$id')));
+      await settle(tester);
+    }
+
+    String nameText(WidgetTester tester) => tester
+        .widget<TextField>(find.byKey(const ValueKey('txt-name')))
+        .controller!
+        .text;
+
+    testWidgets('the category is the first field and uses the category icon', (
+      tester,
+    ) async {
+      await openDialog(tester);
+      final category = tester.getTopLeft(
+        find.byKey(const ValueKey('txt-category')),
+      );
+      final name = tester.getTopLeft(find.byKey(const ValueKey('txt-name')));
+      expect(category.dy, lessThan(name.dy));
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('txt-category')),
+          matching: find.byWidgetPredicate(
+            (w) => w is ParamIcon && w.param == Param.categories,
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byIcon(Icons.category_outlined), findsNothing);
+      await unmount(tester);
+    });
+
+    testWidgets('picking a category names the transaction after it', (
+      tester,
+    ) async {
+      await openDialog(tester);
+      expect(nameText(tester), '');
+      await pick(tester, catId);
+      expect(nameText(tester), 'Groceries');
+      // Still the auto name: another category replaces it.
+      await pick(tester, bakeryId);
+      expect(nameText(tester), 'Bakery');
+      await unmount(tester);
+    });
+
+    testWidgets('a name the user typed is never overwritten', (tester) async {
+      await openDialog(tester);
+      await tester.enterText(find.byKey(const ValueKey('txt-name')), 'Milk');
+      await tester.pump();
+      await pick(tester, catId);
+      expect(nameText(tester), 'Milk');
+      await unmount(tester);
+    });
+
+    testWidgets('a cleared name can take the category name back in one tap', (
+      tester,
+    ) async {
+      await openDialog(tester);
+      expect(find.byKey(const ValueKey('txt-name-from-category')), findsNothing);
+      await pick(tester, catId);
+      await tester.enterText(find.byKey(const ValueKey('txt-name')), '');
+      await tester.pump();
+      expect(find.byKey(const ValueKey('txt-name-from-category')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('txt-name-from-category')));
+      await tester.pump();
+      expect(nameText(tester), 'Groceries');
+      expect(find.byKey(const ValueKey('txt-name-from-category')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('txt-save')));
+      await settle(tester);
+      final saved = (await tester.runAsync(
+        () => db.select(db.budgetTxTemplatesTable).getSingle(),
+      ))!;
+      expect(saved.name, 'Groceries');
+      expect(saved.categoryId, catId);
+      await unmount(tester);
+    });
+  });
+
+  testWidgets('the Plan items list is searched by name and collection, any case', (
+    tester,
+  ) async {
+    await mount(tester);
+    final ids = (await tester.runAsync(() async {
+      final plans = PlanService(db, ActionService(db));
+      final sport = await plans.saveCollection(name: 'Sport');
+      PlanItemInput item(String name, [List<String> c = const []]) =>
+          PlanItemInput(
+            name: name,
+            kind: PlanKind.cycle,
+            startDate: planDate(2026, 10, 19),
+            cycle: const CycleRule(
+              cycleDays: 1,
+              occurrences: [CycleOccurrence(day: 0, startMin: 540, durationMin: 30)],
+            ),
+            collectionIds: c,
+          );
+      return [
+        await plans.saveItem(item('Gym', [sport])),
+        await plans.saveItem(item('Бігати вранці')),
+        await plans.saveItem(item('Piano')),
+      ];
+    }))!;
+    await pumpCalendar(tester);
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('plan-bar-items')));
+    await settle(tester);
+
+    Finder tile(int i) => find.byKey(ValueKey('plan-item-${ids[i]}'));
+    Future<void> search(String text) async {
+      await tester.enterText(
+        find.byKey(const ValueKey('plan-items-search')),
+        text,
+      );
+      await tester.pump();
+    }
+
+    expect(tile(0), findsOneWidget);
+    expect(tile(1), findsOneWidget);
+    expect(tile(2), findsOneWidget);
+
+    await search('GYM'); // by name, upper case
+    expect(tile(0), findsOneWidget);
+    expect(tile(1), findsNothing);
+    expect(tile(2), findsNothing);
+
+    await search('sport'); // by the collection's name
+    expect(tile(0), findsOneWidget);
+    expect(tile(2), findsNothing);
+
+    await search('БІГ'); // Cyrillic, other case
+    expect(tile(1), findsOneWidget);
+    expect(tile(0), findsNothing);
+
+    await search('  pia  nо '); // every word must match: 'nо' (Cyrillic о) does not
+    expect(find.byKey(const ValueKey('plan-items-no-match')), findsOneWidget);
+    expect(tile(2), findsNothing);
+
+    await search('zzz');
+    expect(find.byKey(const ValueKey('plan-items-no-match')), findsOneWidget);
+
+    await search(''); // cleared: everything is back
+    expect(find.byKey(const ValueKey('plan-items-no-match')), findsNothing);
+    expect(tile(0), findsOneWidget);
+    expect(tile(1), findsOneWidget);
+    expect(tile(2), findsOneWidget);
     await unmount(tester);
   });
 

@@ -9,6 +9,7 @@ import '../layout.dart';
 import '../undo.dart';
 import 'app_toast.dart';
 import 'budget_dialogs.dart' show pickBudgetCategory;
+import 'param_icons.dart' show Param, ParamIcon;
 import 'section_block.dart';
 
 // Transaction templates: a category + quantity + price that can be turned into a
@@ -73,9 +74,23 @@ class _TransactionTemplateDialogState
 
   double? _parse(String s) => double.tryParse(s.trim().replaceAll(',', '.'));
 
+  /// The name this dialog filled in from the category (so a later category
+  /// change may replace it, while a name the user typed is never overwritten).
+  String? _autoName;
+
   Future<void> _pickCategory() async {
     final id = await pickBudgetCategory(context, allowCreate: true);
-    if (id != null && id.isNotEmpty && mounted) setState(() => _categoryId = id);
+    if (id == null || id.isEmpty || !mounted) return;
+    final name = ref.read(budgetViewProvider).value?.categoryById[id]?.name;
+    setState(() {
+      _categoryId = id;
+      // The transaction takes the category's name unless the user chose one.
+      if (name != null &&
+          (_name.text.trim().isEmpty || _name.text == _autoName)) {
+        _name.text = name;
+        _autoName = name;
+      }
+    });
   }
 
   Future<void> _save() async {
@@ -115,21 +130,39 @@ class _TransactionTemplateDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // The category comes first (it also names the transaction), with
+            // the same category icon as everywhere else in the budget.
+            OutlinedButton.icon(
+              key: const ValueKey('txt-category'),
+              autofocus: widget.existing == null,
+              icon: const ParamIcon(Param.categories, size: 20, tooltip: false),
+              label: Text(catName ?? 'Choose a category'),
+              onPressed: _pickCategory,
+            ),
+            const SizedBox(height: 12),
             TextField(
               key: const ValueKey('txt-name'),
               controller: _name,
-              autofocus: widget.existing == null,
+              onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 labelText: 'Name (empty = the action\'s name)',
               ),
             ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              key: const ValueKey('txt-category'),
-              icon: const Icon(Icons.category_outlined),
-              label: Text(catName ?? 'Choose a category'),
-              onPressed: _pickCategory,
-            ),
+            // Cleared the name? One tap puts the category's name back, like in
+            // the transaction dialog.
+            if (_name.text.trim().isEmpty && catName != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const ValueKey('txt-name-from-category'),
+                  icon: const Icon(Icons.subdirectory_arrow_left, size: 16),
+                  label: Text('Use "$catName" as the name'),
+                  onPressed: () => setState(() {
+                    _name.text = catName;
+                    _autoName = catName;
+                  }),
+                ),
+              ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -324,34 +357,59 @@ class TxTemplatesPanel extends ConsumerWidget {
                 padding: EdgeInsets.only(bottom: 8),
                 child: Text('None yet. A plan item can create these with its actions.'),
               ),
-            for (final t in templates)
-              ListTile(
-                key: ValueKey('tx-template-${t.id}'),
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(t.name.isEmpty ? '(action\'s name)' : t.name),
-                subtitle: Text(
-                  txTemplateSummary(
-                    t,
-                    cats?[t.categoryId]?.name ?? 'Deleted category',
+            // The list scrolls inside a bounded area: with many templates an
+            // unbounded Column pushed the transaction list below it off the
+            // screen ("BOTTOM OVERFLOWED" stripe).
+            if (templates.isNotEmpty)
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: (MediaQuery.sizeOf(context).height * 0.3).clamp(
+                    120.0,
+                    320.0,
                   ),
                 ),
-                onTap: () => TransactionTemplateDialog.show(context, existing: t),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: ListView(
+                  key: const ValueKey('tx-templates-list'),
+                  primary: false,
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
                   children: [
-                    IconButton(
-                      key: ValueKey('tx-template-use-${t.id}'),
-                      tooltip: 'Create a transaction now',
-                      icon: const Icon(Icons.add_card, size: 18),
-                      onPressed: () => _createNow(context, ref, t),
-                    ),
-                    IconButton(
-                      key: ValueKey('tx-template-delete-${t.id}'),
-                      tooltip: 'Delete',
-                      icon: const Icon(Icons.delete_outline, size: 18),
-                      onPressed: () => _delete(context, ref, t),
-                    ),
+                    for (final t in templates)
+                      ListTile(
+                        key: ValueKey('tx-template-${t.id}'),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          t.name.isEmpty ? '(action\'s name)' : t.name,
+                        ),
+                        subtitle: Text(
+                          txTemplateSummary(
+                            t,
+                            cats?[t.categoryId]?.name ?? 'Deleted category',
+                          ),
+                        ),
+                        onTap: () => TransactionTemplateDialog.show(
+                          context,
+                          existing: t,
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              key: ValueKey('tx-template-use-${t.id}'),
+                              tooltip: 'Create a transaction now',
+                              icon: const Icon(Icons.add_card, size: 18),
+                              onPressed: () => _createNow(context, ref, t),
+                            ),
+                            IconButton(
+                              key: ValueKey('tx-template-delete-${t.id}'),
+                              tooltip: 'Delete',
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              onPressed: () => _delete(context, ref, t),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
