@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/reminders/local_notifications_sink.dart';
 import '../../data/backup/auto_backup.dart' show AutoBackupOutcome;
+import '../all_day_week.dart' show kShowDoneAllDayKey, showDoneAllDayProvider;
 import '../backup_providers.dart';
 import '../data_imports.dart';
+import '../device_prefs.dart' show setDevicePrefBool;
 import '../reminders.dart';
 import '../notch_side.dart';
 import '../work_hours.dart';
@@ -93,6 +95,21 @@ class SettingsScreen extends ConsumerWidget {
                     onSelectionChanged: (s) =>
                         ref.read(themeModeProvider.notifier).setMode(s.first),
                   ),
+                ),
+              ),
+              title('Actions'),
+              _Panel(
+                child: SwitchListTile(
+                  key: const ValueKey('settings-show-done-all-day'),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  title: const Text('Show done all-day actions in the week strip'),
+                  subtitle: const Text(
+                    'The strip above Current Actions. Off: an all-day action '
+                    'disappears from it when you tick it done',
+                  ),
+                  value: ref.watch(showDoneAllDayProvider),
+                  onChanged: (v) =>
+                      setDevicePrefBool(ref, kShowDoneAllDayKey, v),
                 ),
               ),
               if (LocalNotificationsSink.supported) ...[

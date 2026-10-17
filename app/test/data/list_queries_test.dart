@@ -160,6 +160,56 @@ void main() {
     });
   });
 
+  group('SQL done rule boundary', () {
+    test('end exactly now is not done in SQL either, a microsecond before is', () async {
+      final now = DateTime.utc(2026, 10, 17, 12);
+      String t(Duration d) => dateTimeToDb(now.add(d))!;
+      final start = t(const Duration(hours: -1));
+      await _insert(db, 'equal', startAt: start, endAt: t(Duration.zero));
+      await _insert(
+        db,
+        'one-us-before',
+        startAt: start,
+        endAt: t(const Duration(microseconds: -1)),
+      );
+      await _insert(
+        db,
+        'one-us-after',
+        startAt: start,
+        endAt: t(const Duration(microseconds: 1)),
+      );
+      await _insert(
+        db,
+        'one-second-before',
+        startAt: start,
+        endAt: t(const Duration(seconds: -1)),
+      );
+
+      final sqlDone =
+          (await db
+                  .customSelect(
+                    'SELECT id FROM actions WHERE (${doneBeforeSql('?')})',
+                    variables: [Variable.withString(dateTimeToDb(now)!)],
+                  )
+                  .get())
+              .map((r) => r.read<String>('id'))
+              .toSet();
+      expect(sqlDone, {'one-us-before', 'one-second-before'});
+
+      // The Dart rule gives the same answer for every row.
+      for (final row in await db.select(db.actionsTable).get()) {
+        final dart = done_rule.isDoneBefore(
+          startAt: dateTimeFromDb(row.startAt),
+          endAt: dateTimeFromDb(row.endAt),
+          isAllDay: row.isAllDay,
+          done: row.done,
+          nowUtc: now,
+        );
+        expect(sqlDone.contains(row.id), dart, reason: row.id);
+      }
+    });
+  });
+
   group('Current board queries', () {
     test('match the old Dart filtering on a few hundred mixed rows', () async {
       final rnd = Random(7);
@@ -386,6 +436,53 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(emissions.length, inInclusiveRange(2, 3));
       expect(emissions.last.firstWhere((a) => a.id == 'a').name, 'x3');
+    });
+  });
+
+  group('all-day week query', () {
+    test('returns the all-day rows of [start, end), done or not, in day order', () async {
+      String t(DateTime d) => dateTimeToDb(d)!;
+      final monday = DateTime.utc(2024, 1, 7, 21); // Mon 8 Jan 00:00 Istanbul
+      final nextMonday = DateTime.utc(2024, 1, 14, 21);
+      final sunday = DateTime.utc(2024, 1, 13, 21); // Sun 14 Jan 00:00
+
+      await _insert(db, 'b-sunday-done', startAt: t(sunday), allDay: true, done: true);
+      await _insert(db, 'a-monday', startAt: t(monday), allDay: true);
+      await _insert(db, 'c-monday-too', startAt: t(monday), allDay: true);
+      // Out: one second before the week, exactly at the end, and a TIMED action
+      // inside the week.
+      await _insert(
+        db,
+        'before',
+        startAt: t(monday.subtract(const Duration(seconds: 1))),
+        allDay: true,
+      );
+      await _insert(db, 'next-week', startAt: t(nextMonday), allDay: true);
+      await _insert(
+        db,
+        'timed',
+        startAt: t(monday.add(const Duration(hours: 10))),
+        endAt: t(monday.add(const Duration(hours: 11))),
+      );
+
+      final items = await queries
+          .watchAllDayRange(weekStartUtc: monday, weekEndUtc: nextMonday)
+          .first;
+
+      // Day order first (Monday before Sunday), then by name.
+      expect(items.map((a) => a.id), ['a-monday', 'c-monday-too', 'b-sunday-done']);
+      expect(items.every((a) => a.isAllDay), isTrue);
+    });
+
+    test('a week with no all-day actions gives an empty list', () async {
+      final monday = DateTime.utc(2024, 1, 7, 21);
+      final items = await queries
+          .watchAllDayRange(
+            weekStartUtc: monday,
+            weekEndUtc: monday.add(const Duration(days: 7)),
+          )
+          .first;
+      expect(items, isEmpty);
     });
   });
 

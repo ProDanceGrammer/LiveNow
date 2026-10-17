@@ -11,6 +11,7 @@ import '../theme/glass_theme.dart';
 import '../undo.dart';
 import '../widgets/action_card.dart';
 import '../widgets/glass.dart';
+import 'all_day_week_strip.dart';
 
 /// Tint of the two header blocks: only a little deeper than the cards so they
 /// read as headings without being heavy. Derived from the theme tokens only.
@@ -102,7 +103,9 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
         }
         return;
       }
-      if (w.key == _kHeaderKey || w.key == _kShowMoreKey) {
+      if (w.key == _kHeaderKey ||
+          w.key == _kShowMoreKey ||
+          w.key == kAllDayStripKey) {
         final r = boxRect(e);
         if (r != null) blockers.add(r);
       }
@@ -248,7 +251,13 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
         onPointerCancel: _cancel,
         child: Stack(
           children: [
-            Padding(
+            // The week's all-day actions above the board (it takes some of the
+            // height; with nothing to show it is only a thin row).
+            Column(
+              children: [
+                const AllDayWeekStrip(),
+                Expanded(
+                  child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: landscape
                   ? Column(
@@ -305,6 +314,9 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
                         ),
                       ],
                     ),
+                  ),
+                ),
+              ],
             ),
             Positioned.fill(
               child: IgnorePointer(

@@ -247,6 +247,23 @@ class ViewQueries {
     );
   }
 
+  /// The ALL-DAY actions of one week for the strip above Current Actions: all-day
+  /// rows whose day (`start_at`, the day's local midnight) lies in
+  /// `[weekStartUtc, weekEndUtc)`, done or not (the strip decides what to hide),
+  /// ordered by day then name. Timed actions are never returned.
+  Stream<List<ActionListItem>> watchAllDayRange({
+    required DateTime weekStartUtc,
+    required DateTime weekEndUtc,
+  }) => _items(
+    'SELECT $_itemColumns FROM actions '
+    'WHERE is_all_day = 1 AND start_at >= ? AND start_at < ? '
+    'ORDER BY start_at ASC, name ASC',
+    variables: [
+      Variable.withString(dateTimeToDb(weekStartUtc)!),
+      Variable.withString(dateTimeToDb(weekEndUtc)!),
+    ],
+  );
+
   /// All actions regardless of status, most recently updated first.
   Stream<List<ActionListItem>> watchAllActions() => _items(
     'SELECT $_itemColumns, updated_at, created_at FROM actions '
