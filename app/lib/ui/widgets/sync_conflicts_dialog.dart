@@ -43,16 +43,22 @@ class SyncConflictsDialog extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final conflicts = ref.watch(syncConflictsProvider).value ?? const [];
+    final local = ref.watch(syncConflictsProvider).value ?? const [];
+    // Conflicts the hub found while merging (restored through the hub).
+    final hub = ref.watch(hubConflictsProvider).value ?? const [];
+    final conflicts = [...local, ...hub];
     final me = ref.watch(_deviceIdProvider).value;
     final store = ref.read(syncStoreProvider);
+    final access = ref.read(hubAdminProvider);
     final revision = ref.read(syncRevisionProvider.notifier);
     final width = MediaQuery.sizeOf(context).width;
 
     Future<void> restore(SyncConflict c) async {
       final overlay = rootOverlayOf(context);
       try {
-        final ok = await store.restoreConflict(c.id);
+        final ok = hub.contains(c)
+            ? await access.run((h) => h.restoreConflict(c.id))
+            : await store.restoreConflict(c.id);
         showInfoToast(
           overlay,
           ok ? 'Restored the other version' : 'Nothing to restore',
@@ -84,7 +90,9 @@ class SyncConflictsDialog extends ConsumerWidget {
                   ),
                   for (final c in conflicts)
                     ListTile(
-                      key: ValueKey('conflict-${c.id}'),
+                      key: ValueKey(
+                        hub.contains(c) ? 'conflict-hub-${c.id}' : 'conflict-${c.id}',
+                      ),
                       contentPadding: EdgeInsets.zero,
                       title: Text(
                         '${_kinds[c.table] ?? c.table}'
@@ -100,7 +108,11 @@ class SyncConflictsDialog extends ConsumerWidget {
                       trailing: c.loserData == null
                           ? null
                           : TextButton(
-                              key: ValueKey('conflict-restore-${c.id}'),
+                              key: ValueKey(
+                                hub.contains(c)
+                                    ? 'conflict-restore-hub-${c.id}'
+                                    : 'conflict-restore-${c.id}',
+                              ),
                               onPressed: () => restore(c),
                               child: const Text('Restore'),
                             ),
@@ -121,6 +133,13 @@ class SyncConflictsDialog extends ConsumerWidget {
         TextButton(
           onPressed: () async {
             await store.markConflictsSeen();
+            if (hub.isNotEmpty) {
+              try {
+                await access.run((h) => h.markConflictsSeen());
+              } on Object {
+                // The hub is away; it stays unseen there.
+              }
+            }
             revision.bump();
             if (context.mounted) Navigator.of(context).pop();
           },

@@ -229,8 +229,15 @@ Future<Directory> _databaseDirectory() async {
   if (override != null && override.isNotEmpty) {
     return Directory(override).create(recursive: true);
   }
+  final hub = databaseDirectoryOverride;
+  if (hub != null) return hub.create(recursive: true);
   return getApplicationSupportDirectory();
 }
+
+/// Set by the sync hub (`--hub`) before it opens its database: the hub keeps
+/// its OWN folder next to the app's, never the desktop app's data.
+/// `LIVENOW_DATA_DIR` still wins over it.
+Directory? databaseDirectoryOverride;
 
 DatabaseConnection _openConnection() {
   return driftDatabase(

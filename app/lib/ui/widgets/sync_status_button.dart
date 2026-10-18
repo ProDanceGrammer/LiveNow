@@ -33,7 +33,7 @@ class SyncStatusButton extends ConsumerWidget {
             SyncPhase.syncing => (Icons.sync, 'Syncing…', scheme.primary),
             SyncPhase.offline => (
               Icons.cloud_off,
-              'PC not reachable',
+              'PC (hub) not reachable',
               scheme.outline,
             ),
             SyncPhase.error => (

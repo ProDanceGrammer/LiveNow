@@ -1,5 +1,8 @@
 #include "flutter_window.h"
 
+#include <windows.h>
+
+#include <cwchar>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -26,6 +29,12 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  // The sync hub (`livenow.exe --hub`) has no UI: its window must never show,
+  // not even as an empty frame.
+  if (wcsstr(::GetCommandLineW(), L"--hub") != nullptr) {
+    return true;
+  }
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

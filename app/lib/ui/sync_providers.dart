@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/time_codec.dart';
 import '../data/sync/http_transport.dart';
+import '../data/sync/hub_admin_client.dart';
+import '../hub/hub_main.dart' show hubDirectory;
+import '../hub/hub_runner.dart' show kHubLocalPairFile;
 import '../data/sync/sync_backup.dart';
 import '../data/sync/sync_peers.dart';
 import '../data/sync/sync_server.dart';
@@ -16,13 +19,88 @@ import '../domain/sync/sync_models.dart';
 import '../domain/sync/sync_protocol.dart';
 import 'providers.dart';
 
-/// The PC serves, the phone asks.
+/// The PC serves, the phone asks. A desktop that is connected to the always-on
+/// hub asks too (it is a client of the hub, like the phone).
 enum SyncRole { host, client }
 
-final syncRoleProvider = Provider<SyncRole>(
-  (ref) =>
-      Platform.isIOS || Platform.isAndroid ? SyncRole.client : SyncRole.host,
+final syncRoleProvider = Provider<SyncRole>((ref) {
+  if (Platform.isIOS || Platform.isAndroid) return SyncRole.client;
+  return ref.watch(hubConnectedProvider) ? SyncRole.client : SyncRole.host;
+});
+
+/// True on a desktop whose sync partner is the local hub
+/// (`sync_state.hub_device_id` is set). Loaded at start by [startSyncForRole].
+final hubConnectedProvider = NotifierProvider<HubConnected, bool>(
+  HubConnected.new,
 );
+
+class HubConnected extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  Future<void> refresh() async {
+    final id = await ref.read(syncStoreProvider).getState(_hubIdKey);
+    state = id != null && id.isNotEmpty;
+  }
+
+  void set(bool connected) => state = connected;
+}
+
+/// `sync_state` key holding the device id of the hub this desktop talks to.
+const _hubIdKey = 'hub_device_id';
+
+/// The hub's own data folder (where it leaves its local pairing text); tests
+/// point it at a temp folder.
+final hubDirectoryProvider = Provider<Future<Directory> Function()>(
+  (ref) =>
+      () => hubDirectory(const []),
+);
+
+/// Starts the hub through its scheduled task (installed by
+/// `claude_dev/hub/install_hub.ps1`); true when Windows accepted the request.
+/// Tests replace it so no real process starts.
+final hubStarterProvider = Provider<Future<bool> Function()>(
+  (ref) => () async {
+    if (!Platform.isWindows) return false;
+    try {
+      final r = await Process.run('schtasks', [
+        '/run',
+        '/tn',
+        'LiveNow Hub',
+      ]);
+      return r.exitCode == 0;
+    } on Object {
+      return false;
+    }
+  },
+);
+
+/// Runs calls against the hub's admin routes through a short-lived transport.
+final hubAdminProvider = Provider<HubAdminAccess>(HubAdminAccess.new);
+
+class HubAdminAccess {
+  HubAdminAccess(this._ref);
+  final Ref _ref;
+
+  /// The hub peer this desktop is paired with, or null.
+  Future<SyncPeer?> peer() async {
+    final id = await _ref.read(syncStoreProvider).getState(_hubIdKey);
+    if (id == null || id.isEmpty) return null;
+    return _ref.read(syncPeersProvider).get(id);
+  }
+
+  Future<T> run<T>(Future<T> Function(HubAdminClient hub) body) async {
+    final p = await peer();
+    if (p == null) throw const SyncAuthException('not connected to a hub');
+    final t = await _ref.read(syncTransportFactoryProvider)(p);
+    if (t is! HttpTransport) throw StateError('the hub needs a network link');
+    try {
+      return await body(HubAdminClient(t));
+    } finally {
+      t.close();
+    }
+  }
+}
 
 final syncStoreProvider = Provider<SyncStore>((ref) {
   final db = ref.watch(databaseProvider);
@@ -97,6 +175,29 @@ final syncConflictsProvider = FutureProvider.autoDispose<List<SyncConflict>>((
 ) {
   ref.watch(syncRevisionProvider);
   return ref.watch(syncStoreProvider).conflicts();
+});
+
+/// Conflicts the HUB found while merging (the desktop window shows them next
+/// to its own); empty when no hub is connected or it cannot be reached.
+final hubConflictsProvider = FutureProvider.autoDispose<List<SyncConflict>>((
+  ref,
+) async {
+  ref.watch(syncRevisionProvider);
+  if (!ref.watch(hubConnectedProvider)) return const [];
+  try {
+    return await ref.read(hubAdminProvider).run((h) => h.conflicts());
+  } on Object {
+    return const [];
+  }
+});
+
+/// The devices paired with the hub (phones, and this window itself).
+final hubPeersProvider = FutureProvider.autoDispose<List<HubPeerInfo>>((
+  ref,
+) async {
+  ref.watch(syncRevisionProvider);
+  if (!ref.watch(hubConnectedProvider)) return const [];
+  return ref.read(hubAdminProvider).run((h) => h.peers());
 });
 
 final syncUnseenConflictsProvider = FutureProvider.autoDispose<int>((ref) {
@@ -335,21 +436,32 @@ final syncClientProvider = NotifierProvider<SyncClientController, SyncStatus>(
 class SyncClientController extends Notifier<SyncStatus>
     with WidgetsBindingObserver {
   Timer? _debounce;
+  Timer? _periodic;
   StreamSubscription<Object?>? _changes;
   bool _observing = false;
+
+  /// While the app is open it also syncs this often, so what another device
+  /// sent to the hub arrives without reopening the app.
+  static const periodicSync = Duration(seconds: 60);
 
   @override
   SyncStatus build() {
     ref.onDispose(() {
       _debounce?.cancel();
+      _periodic?.cancel();
       _changes?.cancel();
       if (_observing) WidgetsBinding.instance.removeObserver(this);
     });
     return const SyncStatus();
   }
 
-  Future<SyncPeer?> _peer() async =>
-      (await ref.read(syncPeersProvider).all()).firstOrNull;
+  /// The device this one syncs with: the hub when this desktop is connected
+  /// to one (its old phone pairings stay in the table), else the only peer.
+  Future<SyncPeer?> _peer() async {
+    final hub = await ref.read(hubAdminProvider).peer();
+    if (hub != null) return hub;
+    return (await ref.read(syncPeersProvider).all()).firstOrNull;
+  }
 
   /// Reloads who we are paired with and when we last synced.
   Future<void> refresh() async {
@@ -377,6 +489,12 @@ class SyncClientController extends Notifier<SyncStatus>
           .read(databaseProvider)
           .tableUpdates()
           .listen((_) => _scheduleSync());
+      _periodic = Timer.periodic(periodicSync, (_) {
+        if (state.phase != SyncPhase.unpaired &&
+            state.phase != SyncPhase.syncing) {
+          unawaited(syncNow());
+        }
+      });
     }
     if (state.phase != SyncPhase.unpaired) unawaited(syncNow());
   }
@@ -428,8 +546,8 @@ class SyncClientController extends Notifier<SyncStatus>
       state = state.copyWith(
         phase: SyncPhase.offline,
         message:
-            'The PC is not reachable. Is it on, with LiveNow open, on '
-            'the same Wi-Fi?',
+            'The PC (hub) is not reachable. Is it on, with the LiveNow hub '
+            'or LiveNow running, and are both on the same Wi-Fi or Tailscale?',
       );
     } on SyncAuthException catch (e) {
       state = state.copyWith(phase: SyncPhase.error, message: e.message);
@@ -452,10 +570,17 @@ class SyncClientController extends Notifier<SyncStatus>
   /// phone's rows (every edit it never managed to send) go to the PC and the
   /// PC's rows come here, the newest edit of each row winning. With [replace]
   /// true the PC's data REPLACES this device's: wiped, then pulled from the PC.
+  ///
+  /// [asHub]: the device is the always-on hub of this PC (desktop only, never
+  /// with [replace]): it becomes this desktop's only sync partner, the old
+  /// phone pairings of the host days are forgotten (the data stays) and the
+  /// desktop turns from a server into a client.
   Future<SyncReport?> pairAndReplace(
     PairingUri code, {
     bool replace = true,
+    bool asHub = false,
   }) async {
+    assert(!(asHub && replace), 'the hub never replaces the desktop data');
     final store = ref.read(syncStoreProvider);
     final db = ref.read(databaseProvider);
     final peer = await pairWithServer(
@@ -464,6 +589,17 @@ class SyncClientController extends Notifier<SyncStatus>
       myDeviceId: await store.deviceId(),
       myName: ref.read(syncDeviceNameProvider),
     );
+    if (asHub) {
+      await store.setState(_hubIdKey, peer.deviceId);
+      final peers = ref.read(syncPeersProvider);
+      for (final p in await peers.all()) {
+        if (p.deviceId == peer.deviceId) continue;
+        await peers.remove(p.deviceId);
+        await store.forgetPeer(p.deviceId);
+      }
+      await ref.read(syncHostControllerProvider.notifier).stop();
+      ref.read(hubConnectedProvider.notifier).set(true);
+    }
     final counts = await store.rowCounts();
     if (counts.values.any((n) => n > 0)) {
       final dir = await ref.read(syncBackupDirectoryProvider)();
@@ -478,13 +614,46 @@ class SyncClientController extends Notifier<SyncStatus>
       await store.forgetPeer(peer.deviceId);
     }
     state = SyncStatus(phase: SyncPhase.idle, peerName: peer.name);
+    if (asHub) {
+      // The desktop was a server until now: start watching, resume and the
+      // periodic sync like a phone does (this also runs the first sync).
+      await autoStart();
+      return null;
+    }
     return syncNow();
   }
 
-  /// Forgets the PC (its data stays on the phone).
+  /// Connects this desktop to the always-on hub on this PC: reads the one-time
+  /// pairing text the hub left in its own folder and pairs with "Keep both".
+  /// Throws a [FormatException] with a plain message when there is none (the
+  /// hub is not running, or this desktop is already connected to it).
+  Future<void> connectLocalHub() async {
+    final dir = await ref.read(hubDirectoryProvider)();
+    final file = File('${dir.path}${Platform.pathSeparator}$kHubLocalPairFile');
+    if (!file.existsSync()) {
+      throw const FormatException(
+        'The hub is not running here, or this PC is already connected to it. '
+        'Start the hub first.',
+      );
+    }
+    final code = PairingUri.parse(await file.readAsString());
+    await pairAndReplace(code, replace: false, asHub: true);
+  }
+
+  /// Forgets the PC or hub (its data stays on this device).
   Future<void> forget() async {
     final peer = await _peer();
     if (peer != null) await ref.read(syncPeersProvider).remove(peer.deviceId);
+    final store = ref.read(syncStoreProvider);
+    if ((await store.getState(_hubIdKey))?.isNotEmpty ?? false) {
+      // A desktop without its hub serves phones itself again.
+      await store.setState(_hubIdKey, '');
+      ref.read(hubConnectedProvider.notifier).set(false);
+      state = const SyncStatus();
+      ref.read(syncRevisionProvider.notifier).bump();
+      unawaited(ref.read(syncHostControllerProvider.notifier).autoStart());
+      return;
+    }
     state = const SyncStatus();
     ref.read(syncRevisionProvider.notifier).bump();
   }
@@ -492,6 +661,10 @@ class SyncClientController extends Notifier<SyncStatus>
 
 /// Starts what this device's role needs; called once by the home shell.
 Future<void> startSyncForRole(WidgetRef ref) async {
+  // A desktop that was connected to the hub last time is a client now.
+  if (!Platform.isIOS && !Platform.isAndroid) {
+    await ref.read(hubConnectedProvider.notifier).refresh();
+  }
   switch (ref.read(syncRoleProvider)) {
     case SyncRole.host:
       await ref.read(syncHostControllerProvider.notifier).autoStart();

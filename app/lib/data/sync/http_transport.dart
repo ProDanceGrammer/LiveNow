@@ -58,7 +58,36 @@ class HttpTransport implements SyncTransport {
     }),
   );
 
+  /// One authenticated, encrypted request to the server (the hub's admin
+  /// routes use it; sync itself goes through hello / pull / push).
+  Future<Map<String, Object?>> call(String path, Map<String, Object?> body) =>
+      _call(path, body);
+
+  /// Calls from this device to one peer run one after the other: each takes
+  /// the next request counter from the stored one, so two at once (a sync and
+  /// an admin poll of the hub) would send the same counter and the server
+  /// would refuse the second as a replay.
+  static final _queues = <String, Future<void>>{};
+
   Future<Map<String, Object?>> _call(
+    String path,
+    Map<String, Object?> body,
+  ) async {
+    final key = '$myDeviceId>${server.deviceId}';
+    final previous = _queues[key] ?? Future<void>.value();
+    final mine = Completer<void>();
+    final tail = previous.then((_) => mine.future);
+    _queues[key] = tail;
+    await previous;
+    try {
+      return await _send(path, body);
+    } finally {
+      mine.complete();
+      if (identical(_queues[key], tail)) _queues.remove(key);
+    }
+  }
+
+  Future<Map<String, Object?>> _send(
     String path,
     Map<String, Object?> body,
   ) async {

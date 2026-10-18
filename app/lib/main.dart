@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'domain/postpone_rules.dart';
+import 'hub/hub_main.dart';
 import 'ui/link_launcher.dart';
 import 'ui/root_navigator.dart';
 import 'ui/screens/home_shell.dart';
@@ -11,9 +12,14 @@ import 'ui/widgets/glass.dart';
 import 'ui/theme_mode.dart';
 import 'ui/undo.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   initPostponeTimeZoneData();
+  if (isHubMode(args)) {
+    // The sync hub: no UI (runApp is never called, so nothing is drawn).
+    await runHub(args);
+    return;
+  }
   installNotesLinkLauncher();
   final initialTheme = await loadThemeMode();
   runApp(

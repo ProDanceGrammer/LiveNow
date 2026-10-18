@@ -13,12 +13,31 @@ import 'sync_store.dart';
 
 /// The one-time code shown to the phone while pairing.
 class _Offer {
-  _Offer(this.secret, this.key, this.expiresAt);
+  _Offer(this.secret, this.key, this.expiresAt, {this.local = false});
   final Uint8List secret;
   final Uint8List key;
   final DateTime expiresAt;
+
+  /// The hub's bootstrap offer (written to a file only its owner can read): a
+  /// request that arrives from this very machine with this secret is approved
+  /// at once and becomes the admin device.
+  final bool local;
   int attempts = 0;
 }
+
+/// Prefix of the routes only the local admin device may call (the hub's
+/// pairing, approval, peers and conflicts, driven from the desktop window).
+const adminPrefix = '/v1/admin/';
+
+/// The `sync_state` key flagging [deviceId] as the admin device.
+String adminStateKey(String deviceId) => 'admin:$deviceId';
+
+/// Handles one authenticated admin call ([route] is the part after the prefix).
+typedef AdminHandler =
+    Future<Map<String, Object?>> Function(
+      String route,
+      Map<String, Object?> request,
+    );
 
 /// Largest request body per route, counted while it streams in (the phone's
 /// client sends chunked bodies, so no length is declared up front). Only a
@@ -71,6 +90,9 @@ class SyncServer {
   /// approve at once (tests); the app always sets it.
   Future<bool> Function(PairRequest request)? approvePairing;
 
+  /// The admin routes (the hub sets it; null = every admin path is a 404).
+  AdminHandler? admin;
+
   HttpServer? _http;
   _Offer? _offer;
   int _inFlight = 0;
@@ -102,12 +124,21 @@ class SyncServer {
 
   /// Opens a pairing window and returns what goes into the QR code. [hosts]
   /// defaults to this machine's network addresses.
-  Future<PairingUri> startPairing({List<String>? hosts}) async {
+  ///
+  /// [lifetime] defaults to [pairingLifetime]; with [local] the offer is the
+  /// hub's bootstrap one (see [_Offer.local]) and its holder should keep it
+  /// private (a file in the hub's own folder).
+  Future<PairingUri> startPairing({
+    List<String>? hosts,
+    Duration? lifetime,
+    bool local = false,
+  }) async {
     final secret = SyncCrypto.randomBytes(16);
     _offer = _Offer(
       secret,
       await SyncCrypto.deriveKey(secret, 'livenow-pair-v1'),
-      DateTime.now().add(pairingLifetime),
+      DateTime.now().add(lifetime ?? pairingLifetime),
+      local: local,
     );
     return PairingUri(
       deviceId: await store.deviceId(),
@@ -139,7 +170,13 @@ class SyncServer {
           status = HttpStatus.notFound;
         } else {
           final path = req.uri.path;
-          final max = _maxBody[path];
+          final isAdmin = path.startsWith(adminPrefix);
+          // Admin calls are answered only to this very machine, and only when
+          // the hub set a handler: anything else looks like an unknown path.
+          if (isAdmin && (admin == null || !_isLoopback(source))) {
+            throw const _NotFound();
+          }
+          final max = isAdmin ? 64 * 1024 : _maxBody[path];
           if (max == null) throw const _NotFound();
           final text = await _readBody(req, max, path == '/v1/push');
           body = path == '/v1/pair'
@@ -216,7 +253,16 @@ class SyncServer {
     // The code is single use: it is burned before the long-term key leaves.
     _offer = null;
     final name = _cleanName(request['name']);
-    if (approvePairing != null) {
+    // The hub's bootstrap offer, used from this machine: its owner is the one
+    // who can read the file, so there is nobody to ask, and the device becomes
+    // the admin device.
+    final bootstrap = offer.local && _isLoopback(source);
+    if (offer.local && !bootstrap) {
+      throw const SyncAuthException('local pairing from elsewhere');
+    }
+    if (bootstrap) {
+      await store.setState(adminStateKey(env.deviceId), '1');
+    } else if (approvePairing != null) {
       final approved = await _ask(
         PairRequest(deviceId: env.deviceId, name: name),
       ).timeout(pairApprovalTimeout, onTimeout: () => false);
@@ -275,10 +321,31 @@ class SyncServer {
       )).toJson(),
       '/v1/push' => (await host.push(peer.deviceId, _changes(request),
           last: _boolField(request, 'last'))).toJson(),
+      _ when path.startsWith(adminPrefix) => await _adminCall(
+        path.substring(adminPrefix.length),
+        peer,
+        request,
+      ),
       _ => throw const _NotFound(),
     };
     return SyncReply.seal(peer.key, path, env.counter, answer);
   }
+
+  /// A route only the admin device may call (the call is already
+  /// authenticated; here it must also be the flagged device).
+  Future<Map<String, Object?>> _adminCall(
+    String route,
+    SyncPeer peer,
+    Map<String, Object?> request,
+  ) async {
+    if (await store.getState(adminStateKey(peer.deviceId)) != '1') {
+      throw const SyncAuthException('not the admin device');
+    }
+    return admin!(route, request);
+  }
+
+  static bool _isLoopback(String address) =>
+      InternetAddress.tryParse(address)?.isLoopback ?? false;
 
   static int _intField(
     Map<String, Object?> m,
