@@ -308,9 +308,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('sync-pair-button')));
       await real(tester, 100);
       // The phone has data of its own: it must be confirmed first.
-      expect(find.text('Replace the data on this phone?'), findsOneWidget);
+      expect(find.text('This phone already has data'), findsOneWidget);
       expect(find.textContaining('1 actions'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('sync-confirm')));
+      await tester.tap(find.byKey(const ValueKey('sync-replace')));
       await real(tester, 1500);
       await real(tester, 500);
 
@@ -323,6 +323,47 @@ void main() {
       expect(saved.single.path, contains('before-pairing'));
       expect(find.text('Home PC'), findsOneWidget);
       expect(find.textContaining('Last synced'), findsOneWidget);
+      await unmount(tester);
+    });
+
+    testWidgets('pairing with Keep both deletes nothing on the phone and sends it to the PC', (
+      tester,
+    ) async {
+      await tester.runAsync(() async {
+        await ActionService(pc.db).createAction(name: 'On the PC');
+        await ActionService(me.db).createAction(name: 'Edited on the phone');
+      });
+      final code = (await tester.runAsync(
+        () => server.startPairing(hosts: ['127.0.0.1']),
+      ))!;
+
+      await pumpApp(
+        tester,
+        opener(SyncSettingsDialog.show),
+        overrides: overrides(),
+      );
+      await open(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('sync-code-field')),
+        code.toString(),
+      );
+      await tester.tap(find.byKey(const ValueKey('sync-pair-button')));
+      await real(tester, 100);
+      await tester.tap(find.byKey(const ValueKey('sync-merge')));
+      await real(tester, 1500);
+      await real(tester, 500);
+
+      List<Object?> names(List<Map<String, Object?>> rows) =>
+          [for (final r in rows) r['name']]..sort((a, b) => '$a'.compareTo('$b'));
+      final phone = (await tester.runAsync(
+        () => me.rows('SELECT name FROM actions'),
+      ))!;
+      final pcRows = (await tester.runAsync(
+        () => pc.rows('SELECT name FROM actions'),
+      ))!;
+      const both = ['Edited on the phone', 'On the PC'];
+      expect(names(phone), both);
+      expect(names(pcRows), both);
       await unmount(tester);
     });
 
@@ -351,7 +392,7 @@ void main() {
       );
       await tester.tap(find.byKey(const ValueKey('sync-pair-button')));
       await real(tester, 100);
-      await tester.tap(find.byKey(const ValueKey('sync-confirm')));
+      await tester.tap(find.byKey(const ValueKey('sync-merge')));
       await real(tester, 800);
       expect(find.textContaining('wrong or has expired'), findsOneWidget);
       final names = (await tester.runAsync(

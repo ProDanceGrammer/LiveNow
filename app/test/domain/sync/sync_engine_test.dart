@@ -62,6 +62,35 @@ void main() {
       expect(await b.dump(), equals(await a.dump()));
     });
 
+    test('re-pairing without a wipe loses no edit of either side', () async {
+      // Synced once, then both sides edit and the link breaks (unpaired).
+      final actionsA = ActionService(a.db);
+      final actionsB = ActionService(b.db);
+      final shared = await actionsA.createAction(name: 'Shared');
+      await syncWith(b, a);
+      await b.exec(
+        "UPDATE actions SET name = 'Shared, edited on the phone', "
+        "updated_at = '9999-01-01T00:00:00.000000Z' WHERE id = '$shared'",
+      );
+      await actionsB.createAction(name: 'New on the phone');
+      await actionsA.createAction(name: 'New on the PC');
+      // Re-pair = both forget the cursors for each other, nothing is wiped.
+      await b.store.forgetPeer(await a.store.deviceId());
+      await a.store.forgetPeer(await b.store.deviceId());
+
+      await syncWith(b, a);
+
+      expect(await a.count('actions'), 3);
+      expect(await b.count('actions'), 3);
+      final names = [
+        for (final r in await a.rows('SELECT name FROM actions'))
+          r['name'],
+      ];
+      expect(names, contains('Shared, edited on the phone'));
+      expect(names, contains('New on the phone'));
+      expect(await b.dump(), equals(await a.dump()));
+    });
+
     test('a wiped phone gets its own rows back over several pages', () async {
       // The harness pages by 7: 30 phone rows span several pages, and every
       // page after the first starts above position 0.

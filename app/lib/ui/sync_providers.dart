@@ -445,10 +445,17 @@ class SyncClientController extends Notifier<SyncStatus>
     return null;
   }
 
-  /// Pairs with the PC that showed [code]. The PC's data REPLACES this
-  /// device's: pairing happens first (a failure changes nothing), then a backup
-  /// of the local database is written, the data wiped and pulled from the PC.
-  Future<SyncReport?> pairAndReplace(PairingUri code) async {
+  /// Pairs with the PC that showed [code]. Pairing happens first (a failure
+  /// changes nothing), then a backup of the local database is written (always,
+  /// when there is data). With [replace] false (the default choice) nothing on
+  /// the phone is deleted: the cursors for this PC start from 0, so ALL the
+  /// phone's rows (every edit it never managed to send) go to the PC and the
+  /// PC's rows come here, the newest edit of each row winning. With [replace]
+  /// true the PC's data REPLACES this device's: wiped, then pulled from the PC.
+  Future<SyncReport?> pairAndReplace(
+    PairingUri code, {
+    bool replace = true,
+  }) async {
     final store = ref.read(syncStoreProvider);
     final db = ref.read(databaseProvider);
     final peer = await pairWithServer(
@@ -463,7 +470,13 @@ class SyncClientController extends Notifier<SyncStatus>
       await backupDatabase(db, dir, label: 'before-pairing');
       await pruneBackups(dir);
     }
-    await store.wipeForReplace();
+    if (replace) {
+      await store.wipeForReplace();
+    } else {
+      // Keep every row and its change history; only forget how far the last
+      // meeting with this PC got, so everything is exchanged again.
+      await store.forgetPeer(peer.deviceId);
+    }
     state = SyncStatus(phase: SyncPhase.idle, peerName: peer.name);
     return syncNow();
   }

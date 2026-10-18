@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../data/sync/http_transport.dart';
-import '../../domain/sync/network_rules.dart';
 import '../../domain/sync/sync_crypto.dart';
 import '../../domain/sync/sync_protocol.dart';
 import '../dialog_stack.dart';
@@ -336,26 +335,51 @@ class _ClientPanelState extends ConsumerState<_ClientPanel> {
     }
     final counts = await ref.read(syncStoreProvider).rowCounts();
     if (!mounted) return;
+    var replace = false;
     if (counts.values.any((n) => n > 0)) {
-      final ok = await _confirm(
-        context,
-        title: 'Replace the data on this phone?',
-        text:
-            'The data of the PC at ${code.hosts.firstWhere(isAllowedPairingHost, orElse: () => '?')} '
-            'will replace everything on this phone '
+      final choice = await showStackedDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('This phone already has data'),
+          content: Text(
+            'Keep both: the phone\'s '
             '(${counts['actions']} actions, ${counts['metrics']} growth '
-            'directions, ${counts['budget_transactions']} transactions). A '
-            'backup copy of the phone\'s data is kept for 30 days.',
-        action: 'Replace',
+            'directions, ${counts['budget_transactions']} transactions) and '
+            'the PC\'s data are merged, nothing is deleted, and for an action '
+            'edited on both the newest edit wins. This is the safe choice, '
+            'also after re-pairing.\n\n'
+            'Replace: the PC\'s data replaces everything on this phone, so '
+            'edits not yet sent are lost.\n\n'
+            'A backup copy of the phone\'s data is kept for 30 days either '
+            'way.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              key: const ValueKey('sync-replace'),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Replace'),
+            ),
+            FilledButton(
+              key: const ValueKey('sync-merge'),
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Keep both'),
+            ),
+          ],
+        ),
       );
-      if (!ok || !mounted) return;
+      if (choice == null || !mounted) return;
+      replace = choice;
     }
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      await ref.read(syncClientProvider.notifier).pairAndReplace(code);
+      await ref.read(syncClientProvider.notifier).pairAndReplace(code, replace: replace);
       _code.clear();
     } on SyncAuthException {
       _error =
