@@ -139,10 +139,12 @@ void main() {
     expect(find.textContaining('Shopping ('), findsNothing);
     await tester.tap(find.byKey(const ValueKey('tx-group-account')));
     await settle(tester);
-    expect(find.textContaining('Lira (2)'), findsOneWidget);
+    // Grouped by the account the money moves through (Interactional): these
+    // two transactions are only counted in Lira and have no use account.
+    expect(find.textContaining('No account (2)'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('tx-group-none')));
     await settle(tester);
-    expect(find.textContaining('Lira ('), findsNothing);
+    expect(find.textContaining('No account ('), findsNothing);
     expect(find.byKey(ValueKey('budget-tx-$txBread')), findsOneWidget);
     expect(find.byKey(ValueKey('budget-tx-$txPlain')), findsOneWidget);
     await unmount(tester);

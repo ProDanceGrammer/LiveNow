@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/capped_read.dart';
 import '../../domain/growth_rules.dart';
+import '../../domain/growth_time.dart' show filterDirections;
 import '../calendar_fullscreen.dart';
+import '../growth_filters.dart';
 import '../layout.dart';
 import '../providers.dart';
 import '../saved_views_bar.dart';
@@ -12,9 +14,11 @@ import '../../domain/saved_views.dart' show ViewScreens;
 import '../theme/glass_theme.dart';
 import '../widgets/glass.dart';
 import '../widgets/growth_direction_dialog.dart';
+import '../widgets/growth_filters_bar.dart';
 import '../widgets/metric_picker.dart' show describeDirection;
 import '../widgets/mindmap_view.dart';
 import '../widgets/param_icons.dart';
+import '../widgets/treemap_view.dart';
 
 /// Asks the user for saved Notion pages (.htm) and returns their texts (empty
 /// = cancelled). Several files are allowed: a saved page only contains the
@@ -74,7 +78,7 @@ class GrowthDirectionsScreen extends ConsumerWidget {
     // Phone: a full-screen Mindmap hides the tabs and the new-direction button.
     final full = usePhoneLayout(context) && ref.watch(phoneMindmapFullProvider);
     return DefaultTabController(
-      length: 3,
+      length: 4,
       animationDuration: Duration.zero,
       child: Scaffold(
         body: Column(
@@ -98,6 +102,7 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                             tabs: [
                               for (final (icon, label) in const [
                                 (Icons.balance, 'Balance'),
+                                (Icons.grid_view_rounded, 'Treemap'),
                                 (Icons.view_list_rounded, 'List'),
                                 (Icons.account_tree, 'Mindmap'),
                               ])
@@ -133,7 +138,12 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                 // No swiping between tabs: horizontal drags belong to the
                 // Mindmap (moving boxes, panning).
                 physics: NeverScrollableScrollPhysics(),
-                children: [_BalanceTab(), _ListTab(), MindmapView()],
+                children: [
+                  _BalanceTab(),
+                  TreemapView(),
+                  _ListTab(),
+                  MindmapView(),
+                ],
               ),
             ),
           ],
@@ -504,31 +514,6 @@ class _LevelRing extends StatelessWidget {
 
 enum _Sort { urgency, progress, weight, name }
 
-/// The List tab's filters: one row on a desktop; on a phone the search field
-/// gets a row of its own and the two dropdowns share the next one.
-Widget _filterFlow(bool phone, List<Widget> kids) {
-  if (!phone) return Row(children: kids);
-  final search = (kids.first as Expanded).child;
-  final rest = [
-    for (final w in kids.skip(1))
-      if (w is! SizedBox) w,
-  ];
-  return Column(
-    children: [
-      search,
-      const SizedBox(height: 6),
-      Row(
-        children: [
-          for (var i = 0; i < rest.length; i++) ...[
-            if (i > 0) const SizedBox(width: 12),
-            Expanded(child: rest[i]),
-          ],
-        ],
-      ),
-    ],
-  );
-}
-
 class _ListTab extends ConsumerStatefulWidget {
   const _ListTab();
 
@@ -537,9 +522,7 @@ class _ListTab extends ConsumerStatefulWidget {
 }
 
 class _ListTabState extends ConsumerState<_ListTab> {
-  String _query = '';
   _Sort _sort = _Sort.urgency;
-  MetricKind? _kind;
 
   /// Saved views: the sort is one of four orders, the filter the type.
   SavedViewHooks _viewHooks() => SavedViewHooks(
@@ -552,12 +535,15 @@ class _ListTabState extends ConsumerState<_ListTab> {
       ),
     ),
     clearSort: () => setState(() => _sort = _Sort.urgency),
-    readFilter: () => {'kind': _kind?.name},
-    applyFilter: (j) => setState(() {
+    // The type filter is shared with the Treemap tab.
+    readFilter: () => {'kind': ref.read(growthKindProvider)?.name},
+    applyFilter: (j) {
       final k = j['kind'];
-      _kind = MetricKind.values.where((m) => m.name == k).firstOrNull;
-    }),
-    clearFilter: () => setState(() => _kind = null),
+      ref.read(growthKindProvider.notifier).state = MetricKind.values
+          .where((m) => m.name == k)
+          .firstOrNull;
+    },
+    clearFilter: () => ref.read(growthKindProvider.notifier).state = null,
   );
 
   @override
@@ -575,13 +561,11 @@ class _ListTabState extends ConsumerState<_ListTab> {
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => Center(child: Text('Error: $e')),
           data: (snapshot) {
-            final q = _query.trim().toLowerCase();
-            final items = [
-              for (final m in snapshot.metrics)
-                if ((_kind == null || m.kind == _kind) &&
-                    (q.isEmpty || m.name.toLowerCase().contains(q)))
-                  m,
-            ];
+            final items = filterDirections(
+              snapshot.metrics,
+              query: ref.watch(growthSearchProvider),
+              kind: ref.watch(growthKindProvider),
+            );
             double stat(GrowthMetric m, double Function(MetricStat) f) =>
                 f(snapshot.stats[m.id]!);
             items.sort((a, b) {
@@ -607,67 +591,35 @@ class _ListTabState extends ConsumerState<_ListTab> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                  child: _filterFlow(usePhoneLayout(context), [
-                    Expanded(
-                      child: TextField(
-                        decoration: const InputDecoration(
-                          labelText: 'Search',
-                          prefixIcon: Icon(Icons.search),
-                          isDense: true,
-                        ),
-                        onChanged: (v) => setState(() => _query = v),
+                  child: GrowthFiltersBar(
+                    beforeKind: [
+                      DropdownButton<_Sort>(
+                        isExpanded: usePhoneLayout(context),
+                        dropdownColor: context.glass.fillDialog,
+                        borderRadius: BorderRadius.circular(14),
+                        value: _sort,
+                        items: const [
+                          DropdownMenuItem(
+                            value: _Sort.urgency,
+                            child: Text('Most urgent'),
+                          ),
+                          DropdownMenuItem(
+                            value: _Sort.progress,
+                            child: Text('Highest progress'),
+                          ),
+                          DropdownMenuItem(
+                            value: _Sort.weight,
+                            child: Text('Heaviest'),
+                          ),
+                          DropdownMenuItem(
+                            value: _Sort.name,
+                            child: Text('Name'),
+                          ),
+                        ],
+                        onChanged: (v) => setState(() => _sort = v!),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    DropdownButton<_Sort>(
-                      isExpanded: usePhoneLayout(context),
-                      dropdownColor: context.glass.fillDialog,
-                      borderRadius: BorderRadius.circular(14),
-                      value: _sort,
-                      items: const [
-                        DropdownMenuItem(
-                          value: _Sort.urgency,
-                          child: Text('Most urgent'),
-                        ),
-                        DropdownMenuItem(
-                          value: _Sort.progress,
-                          child: Text('Highest progress'),
-                        ),
-                        DropdownMenuItem(
-                          value: _Sort.weight,
-                          child: Text('Heaviest'),
-                        ),
-                        DropdownMenuItem(
-                          value: _Sort.name,
-                          child: Text('Name'),
-                        ),
-                      ],
-                      onChanged: (v) => setState(() => _sort = v!),
-                    ),
-                    const SizedBox(width: 12),
-                    DropdownButton<MetricKind?>(
-                      isExpanded: usePhoneLayout(context),
-                      dropdownColor: context.glass.fillDialog,
-                      borderRadius: BorderRadius.circular(14),
-                      value: _kind,
-                      items: const [
-                        DropdownMenuItem(value: null, child: Text('All types')),
-                        DropdownMenuItem(
-                          value: MetricKind.count,
-                          child: Text('Actions'),
-                        ),
-                        DropdownMenuItem(
-                          value: MetricKind.hours,
-                          child: Text('Hours'),
-                        ),
-                        DropdownMenuItem(
-                          value: MetricKind.boolean,
-                          child: Text('Boolean'),
-                        ),
-                      ],
-                      onChanged: (v) => setState(() => _kind = v),
-                    ),
-                  ]),
+                    ],
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
