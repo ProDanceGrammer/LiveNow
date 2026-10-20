@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -80,6 +81,7 @@ void main() {
     WidgetTester tester, {
     bool withData = true,
     Size size = const Size(1400, 1800),
+    Future<void> Function(MetricService, ActionService)? seeder,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -88,7 +90,9 @@ void main() {
     addTearDown(db.close);
     ids.clear();
     if (withData) {
-      await tester.runAsync(() => seed(MetricService(db), ActionService(db)));
+      await tester.runAsync(
+        () => (seeder ?? seed)(MetricService(db), ActionService(db)),
+      );
     }
     await tester.pumpWidget(
       ProviderScope(
@@ -122,6 +126,79 @@ void main() {
     await tester.tap(find.text(label).last);
     await tester.pumpAndSettle();
   }
+
+  testWidgets('a block too small for text shows the direction icon instead', (
+    tester,
+  ) async {
+    await pumpScreen(
+      tester,
+      size: const Size(700, 700),
+      seeder: (metrics, actions) async {
+        final main = await metrics.saveMetric(
+          name: 'Main',
+          kind: MetricKind.boolean,
+          isMain: true,
+        );
+        Future<void> dir(String name, String? icon, int minutes) async {
+          final id = await metrics.saveMetric(
+            name: name,
+            kind: MetricKind.hours,
+            window: MetricWindow.week,
+            target: 5,
+            leadsToIds: [main],
+            icon: Value(icon),
+          );
+          ids[name] = id;
+          final start = DateTime.now().toUtc().subtract(const Duration(days: 1));
+          await actions.createAction(
+            name: '$name run',
+            startAt: start,
+            endAt: start.add(Duration(minutes: minutes)),
+            metricIds: [id],
+          );
+        }
+
+        // Shares of the area: Big 59 %, Mid 39 %, Tiny and Plain 1 % each, which
+        // squarifies into small, roughly square blocks (not slivers).
+        await dir('Big', '🏋️', 120);
+        await dir('Mid', '🎯', 80);
+        await dir('Tiny', '🍎', 2);
+        await dir('Plain', null, 2);
+      },
+    );
+    await openTreemap(tester);
+
+    // The big block has room for its text: label (with its icon), no icon-only.
+    expect(
+      find.descendant(of: block('Big'), matching: find.textContaining('Big')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: block('Big'),
+        matching: find.byKey(const ValueKey('treemap-block-icon')),
+      ),
+      findsNothing,
+    );
+
+    // The tiny block cannot fit text: its emoji, and it fits inside the block.
+    final icon = find.descendant(of: block('Tiny'), matching: find.text('🍎'));
+    expect(icon, findsOneWidget);
+    final blockSize = tester.getSize(block('Tiny'));
+    // Really below the text threshold (64 x 36): here wide but too short.
+    expect(blockSize.width < 64 || blockSize.height < 36, isTrue);
+    expect(blockSize.shortestSide, greaterThanOrEqualTo(14)); // room for an emoji
+    final iconSize = tester.getSize(icon);
+    expect(iconSize.width, lessThanOrEqualTo(blockSize.width));
+    expect(iconSize.height, lessThanOrEqualTo(blockSize.height));
+
+    // A direction without an emoji stays plain (the tooltip names it).
+    expect(
+      find.descendant(of: block('Plain'), matching: find.byType(Text)),
+      findsNothing,
+    );
+    await unmount(tester);
+  });
 
   testWidgets('the Treemap tab sits between Balance and List', (tester) async {
     await pumpScreen(tester);

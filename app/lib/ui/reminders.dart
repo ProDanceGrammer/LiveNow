@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:flutter/widgets.dart' show OverlayState;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../core/window_focus.dart';
+import '../data/accounts/profile_paths.dart';
 import '../data/database.dart';
 import '../data/reminders/local_notifications_sink.dart';
 import '../data/reminders/reminder_scheduler.dart';
@@ -20,7 +20,7 @@ const _fileName = 'reminders.txt';
 final bool _underTest = Platform.environment.containsKey('FLUTTER_TEST');
 
 Future<File> _file() async =>
-    File('${(await getApplicationSupportDirectory()).path}/$_fileName');
+    File('${(await profileDirectory()).path}/$_fileName');
 
 /// The Settings switch "Notify me when an action starts or ends". On by
 /// default; saved next to `theme_mode.txt`, best-effort, skipped in tests.

@@ -1,12 +1,19 @@
 import 'dart:async';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, listEquals;
 import 'package:flutter/material.dart' hide Overlay, OverlayEntry;
 import 'package:flutter/services.dart';
 
+// Not part of the package's public API.
+// ignore: implementation_imports
+import 'package:appflowy_editor/src/editor/editor_component/service/selection/mobile_selection_service.dart'
+    show disableIOSSelectWordEdgeOnTap;
+
 import '../layout.dart';
 import 'notes_blocks/notes_blocks.dart';
+import 'notes_blocks/swipe_indent.dart';
 import 'notes_document.dart';
 
 // ---------------------------------------------------------------------------
@@ -163,6 +170,11 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     createdCount++;
+    // iOS places the caret exactly where the finger lands (the package snaps it
+    // to the nearest word edge unless told otherwise).
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      disableIOSSelectWordEdgeOnTap = true;
+    }
     _editorState = EditorState(
       document: notesDocumentFromJson(widget.initialJson),
     );
@@ -641,25 +653,47 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
       _blocksScheme = scheme;
     }
 
-    final style = EditorStyle.desktop(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      cursorColor: scheme.primary,
-      selectionColor: scheme.primary.withValues(alpha: 0.25),
-      textStyleConfiguration: TextStyleConfiguration(
-        text: base,
-        bold: const TextStyle(fontWeight: FontWeight.w700),
-        href: TextStyle(
-          color: scheme.primary,
-          decoration: TextDecoration.underline,
-        ),
-        code: TextStyle(
-          color: scheme.error,
-          fontFamily: 'Consolas',
-          backgroundColor: scheme.surfaceContainerHighest,
-        ),
-        lineHeight: 1.45,
+    final textConfig = TextStyleConfiguration(
+      text: base,
+      bold: const TextStyle(fontWeight: FontWeight.w700),
+      href: TextStyle(
+        color: scheme.primary,
+        decoration: TextDecoration.underline,
       ),
+      code: TextStyle(
+        color: scheme.error,
+        fontFamily: 'Consolas',
+        backgroundColor: scheme.surfaceContainerHighest,
+      ),
+      lineHeight: 1.45,
     );
+    const padding = EdgeInsets.symmetric(horizontal: 8, vertical: 4);
+    final selectionColor = scheme.primary.withValues(alpha: 0.25);
+    // The desktop style makes the selection handles and the magnifier
+    // transparent and zero-sized, which on a real phone left no way to move the
+    // caret or the selection. Touch platforms get the mobile style (visible
+    // handles in the accent colour, a bigger ball to grab); the link decorator
+    // stays the desktop one so links behave as before.
+    final touch =
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    final style = touch
+        ? EditorStyle.mobile(
+            padding: padding,
+            cursorColor: scheme.primary,
+            dragHandleColor: scheme.primary,
+            selectionColor: selectionColor,
+            textStyleConfiguration: textConfig,
+            textSpanDecorator: defaultTextSpanDecoratorForAttribute,
+            mobileDragHandleBallSize: const Size(12, 12),
+            mobileDragHandleWidth: 3,
+          )
+        : EditorStyle.desktop(
+            padding: padding,
+            cursorColor: scheme.primary,
+            selectionColor: selectionColor,
+            textStyleConfiguration: textConfig,
+          );
 
     final toolbarStyle = FloatingToolbarStyle(
       backgroundColor: scheme.surfaceContainerHighest,
@@ -728,7 +762,9 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
 
   /// Phone: clamping physics make the editor's list report the drag it cannot
   /// use ([OverscrollNotification]); that rest moves the OUTER scroll view.
-  Widget _withScrollHandOff(BuildContext context, Widget editor) {
+  Widget _withScrollHandOff(BuildContext context, Widget bare) {
+    // A swipe right / left on a line is Tab / Shift+Tab (touch only).
+    final editor = SwipeIndentDetector(editorState: _editorState, child: bare);
     final outer = widget.outerScroll;
     if (outer == null || !usePhoneLayout(context)) return editor;
     return NotificationListener<OverscrollNotification>(

@@ -44,7 +44,17 @@ class MetricPicker extends ConsumerWidget {
     this.onOpen,
     this.allowCreate = false,
     this.showUrgency = false,
+    this.showNone = true,
+    this.textStyle,
   });
+
+  /// Overrides the text of the chips and of the "Add…" button (the form builder
+  /// sets its own size; null = the app's).
+  final TextStyle? textStyle;
+
+  /// Whether an empty selection reads "None" (the form builder leaves the space
+  /// empty instead: next to "Adds:" it only looked like a value).
+  final bool showNone;
 
   /// Shows each direction's "Urgency to Keep in Balance" before its chip.
   final bool showUrgency;
@@ -135,9 +145,9 @@ class MetricPicker extends ConsumerWidget {
           ),
           const SizedBox(height: 4),
         ],
-        if (chosen.isEmpty)
+        if (chosen.isEmpty && showNone)
           Text('None', style: TextStyle(color: context.glass.textSecondary))
-        else
+        else if (chosen.isNotEmpty)
           Wrap(
             spacing: 8,
             runSpacing: 4,
@@ -149,7 +159,9 @@ class MetricPicker extends ConsumerWidget {
                   InputChip(
                     label: Text(
                       metricLabel(m.name, m.icon),
-                      style: emojiLabelStyle,
+                      style: textStyle == null
+                          ? emojiLabelStyle
+                          : emojiLabelStyle.merge(textStyle),
                     ),
                     tooltip: onOpen == null ? null : 'Open this direction',
                     onPressed: onOpen == null ? null : () => onOpen!(m),
@@ -164,7 +176,7 @@ class MetricPicker extends ConsumerWidget {
             children: [
               TextButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('Add…'),
+                label: Text('Add…', style: textStyle),
                 onPressed: openSearch,
               ),
               if (canCreate)

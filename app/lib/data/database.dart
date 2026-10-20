@@ -5,6 +5,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../domain/notes_plain_text.dart';
+import 'accounts/profile_paths.dart';
 import 'sync/sync_schema.dart';
 import 'tables.dart';
 
@@ -29,16 +30,24 @@ part 'database.g.dart';
     PlanOverridesTable,
     BudgetTxTemplatesTable,
     PlanCollectionsTable,
+    FormsTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(_openConnection());
+  /// The database of the signed-in account ([activeProfileDirectory], captured
+  /// NOW, so a later account switch cannot redirect an already created
+  /// instance), else the app-support folder / `LIVENOW_DATA_DIR` / the hub's.
+  AppDatabase() : super(_openConnection(activeProfileDirectory));
+
+  /// The database file of one account's profile folder.
+  AppDatabase.inDirectory(Directory directory)
+    : super(_openConnection(directory));
 
   /// Lets tests inject an in-memory executor instead of the real file.
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 16;
+  int get schemaVersion => 17;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -164,6 +173,10 @@ class AppDatabase extends _$AppDatabase {
         // Transaction templates (purely additive).
         await m.createTable(budgetTxTemplatesTable);
       }
+      if (from < 17) {
+        // Forms (purely additive).
+        await m.createTable(formsTable);
+      }
       if (from < 14) {
         // Planning: plan items, their per-day overrides, and the link from a
         // generated action back to its plan. (A database older than v8 got the
@@ -239,11 +252,13 @@ Future<Directory> _databaseDirectory() async {
 /// `LIVENOW_DATA_DIR` still wins over it.
 Directory? databaseDirectoryOverride;
 
-DatabaseConnection _openConnection() {
+DatabaseConnection _openConnection(Directory? profile) {
   return driftDatabase(
     name: 'livenow',
     native: DriftNativeOptions(
-      databaseDirectory: _databaseDirectory,
+      databaseDirectory: profile == null
+          ? _databaseDirectory
+          : () => profile.create(recursive: true),
       setup: (db) {
         db.execute('PRAGMA foreign_keys = ON;');
         db.execute('PRAGMA journal_mode = WAL;');

@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import '../data/accounts/profile_paths.dart';
 
 const _fileName = 'notch_side.txt';
 
@@ -9,7 +9,7 @@ const _fileName = 'notch_side.txt';
 final bool _underTest = Platform.environment.containsKey('FLUTTER_TEST');
 
 Future<File> _file() async =>
-    File('${(await getApplicationSupportDirectory()).path}/$_fileName');
+    File('${(await appSupportRoot()).path}/$_fileName');
 
 /// Which side of a phone held SIDEWAYS has the camera notch (true = left).
 /// iOS reports the same safe-area inset on both sides, so the app cannot tell:

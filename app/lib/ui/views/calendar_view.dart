@@ -53,6 +53,7 @@ import '../widgets/action_tile.dart';
 import '../widgets/app_toast.dart' show rootOverlayOf;
 import '../widgets/bulk_dialogs.dart' show runBulkSetDate, runBulkShift;
 import '../widgets/direction_badge.dart';
+import '../widgets/form_actions.dart' show runBulkForm;
 import '../widgets/glass.dart';
 import '../widgets/continue_icon.dart';
 import '../widgets/glass_icon_tile.dart';
@@ -1221,6 +1222,12 @@ class _CalendarBulkBar extends ConsumerWidget {
               Icons.swap_horiz_rounded,
               'Shift by',
               () => runBulkShift(context, ref, chosen),
+            ),
+            action(
+              'cal-bulk-form',
+              Icons.fact_check_outlined,
+              'Form',
+              () => runBulkForm(context, ref, [for (final a in chosen) a.id]),
             ),
             action('cal-bulk-delete', Icons.delete_outline, 'Delete', () {
               final ids = [for (final a in chosen) a.id];

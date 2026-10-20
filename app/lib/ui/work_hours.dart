@@ -2,8 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
-
+import '../data/accounts/profile_paths.dart';
 import '../domain/work_hours.dart';
 
 const _fileName = 'work_hours.json';
@@ -12,7 +11,7 @@ const _fileName = 'work_hours.json';
 final bool _underTest = Platform.environment.containsKey('FLUTTER_TEST');
 
 Future<File> _file() async =>
-    File('${(await getApplicationSupportDirectory()).path}/$_fileName');
+    File('${(await profileDirectory()).path}/$_fileName');
 
 /// The working hours (Settings): work start/end and the morning postpone time.
 /// Saved next to `theme_mode.txt` on THIS device (best-effort, skipped in

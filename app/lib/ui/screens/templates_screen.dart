@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ids.dart';
@@ -505,6 +507,12 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
   bool _useAverage = true;
   Duration? _average;
 
+  /// Notes in full screen (UI only: not part of the draft). The other fields,
+  /// the title and Cancel / Save are hidden meanwhile; Save moves into the notes
+  /// toolbar.
+  bool _notesExpanded = false;
+  final _contentScroll = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -611,22 +619,80 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
     _nameController.dispose();
     _minutesController.dispose();
     _blocksController.dispose();
+    _contentScroll.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final expanded = _notesExpanded;
+    final media = MediaQuery.of(context);
+    final screen = media.size;
+    // Expanded = REALLY full screen, like the action editor's Notes: no insets or
+    // rounding, no title, no other field, the editor takes the screen height
+    // (less the keyboard) and is the only scroll.
+    final width = expanded
+        ? math.max(280.0, screen.width - media.padding.left - media.padding.right - 24)
+        : 560.0;
+    final notesHeight = expanded
+        ? math.max(
+            200.0,
+            screen.height -
+                media.padding.top -
+                media.padding.bottom -
+                media.viewInsets.bottom -
+                120,
+          )
+        : 260.0;
+    // Ctrl+Enter = Save from anywhere in the dialog (the notes editor has its
+    // own command through NotesEditor.onSave).
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter, control: true): _save,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+            _save,
+      },
+      child: _dialog(context, expanded, media, width, notesHeight),
+    );
+  }
+
+  Widget _dialog(
+    BuildContext context,
+    bool expanded,
+    MediaQueryData media,
+    double width,
+    double notesHeight,
+  ) {
     return AlertDialog(
-      title: Text(widget.existing == null ? 'New template' : 'Edit template'),
+      insetPadding: expanded ? EdgeInsets.zero : null,
+      shape: expanded ? const RoundedRectangleBorder() : null,
+      contentPadding: expanded
+          ? EdgeInsets.fromLTRB(
+              12 + media.padding.left,
+              8 + media.padding.top,
+              12 + media.padding.right,
+              4 + media.padding.bottom,
+            )
+          : null,
+      title: expanded
+          ? null
+          : Text(widget.existing == null ? 'New template' : 'Edit template'),
       content: SizedBox(
-        width: 560,
+        width: width,
         child: SingleChildScrollView(
+          controller: _contentScroll,
           child: Form(
             key: _formKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Visibility(
+                  visible: !expanded,
+                  maintainState: true,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
@@ -706,6 +772,9 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
                   selectedIds: _selectedMetricIds,
                   onChanged: (ids) => setState(() => _selectedMetricIds = ids),
                 ),
+                    ],
+                  ),
+                ),
                 // Collapsed unless the template already has notes;
                 // `maintainState: false` keeps the editor out of the tree
                 // until opened (the latest JSON lives in `_notes`).
@@ -722,12 +791,22 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
                     maintainState: false,
                     tilePadding: kSectionTilePadding,
                     childrenPadding: kSectionChildrenPadding,
+                    // Closing the section also leaves the full-screen mode.
+                    onExpansionChanged: (open) {
+                      if (!open && _notesExpanded) {
+                        setState(() => _notesExpanded = false);
+                      }
+                    },
                     children: [
                       NotesEditor(
                         initialJson: _notes,
                         onChanged: (json) => _notes = json,
                         onSave: _save,
-                        height: 260,
+                        outerScroll: _contentScroll,
+                        height: notesHeight,
+                        expanded: expanded,
+                        onToggleExpand: () =>
+                            setState(() => _notesExpanded = !_notesExpanded),
                       ),
                     ],
                   ),
@@ -737,13 +816,15 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(onPressed: _save, child: const Text('Save')),
-      ],
+      actions: expanded
+          ? const []
+          : [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(onPressed: _save, child: const Text('Save')),
+            ],
     );
   }
 

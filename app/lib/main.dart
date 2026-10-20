@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'domain/postpone_rules.dart';
 import 'hub/hub_main.dart';
+import 'ui/accounts/account_gate.dart';
 import 'ui/link_launcher.dart';
 import 'ui/root_navigator.dart';
 import 'ui/screens/home_shell.dart';
@@ -22,12 +23,12 @@ Future<void> main(List<String> args) async {
   }
   installNotesLinkLauncher();
   final initialTheme = await loadThemeMode();
+  // The gate finds / adopts the accounts, signs one in and builds the app in a
+  // ProviderScope keyed by that account (see account_gate.dart).
   runApp(
-    ProviderScope(
-      overrides: [
-        themeModeProvider.overrideWith(() => ThemeModeNotifier(initialTheme)),
-      ],
-      child: const LiveNowApp(),
+    AccountGate(
+      initialTheme: initialTheme,
+      appBuilder: (context, account) => const LiveNowApp(),
     ),
   );
 }

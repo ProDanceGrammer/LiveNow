@@ -24,6 +24,7 @@ const _kinds = {
   'plan_overrides': 'Plan edit',
   'plan_collections': 'Plan collection',
   'budget_tx_templates': 'Transaction template',
+  'forms': 'Form',
 };
 
 final _deviceIdProvider = FutureProvider<String>(

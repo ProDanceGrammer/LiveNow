@@ -30,6 +30,7 @@ import 'action_tile.dart' show formatUrgency;
 import 'app_toast.dart';
 import 'glass_icon_tile.dart' show GlassHue;
 import 'date_time_field.dart';
+import 'form_actions.dart' show fillForm;
 import 'metric_picker.dart';
 import 'notes_document.dart';
 import 'notes_editor.dart';
@@ -805,6 +806,15 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                 onOpen: (m) => openDirectionById(context, ref, m.id),
                 onChanged: (ids) => setState(() => _selectedMetricIds = ids),
               ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const ValueKey('editor-form'),
+                  icon: const Icon(Icons.fact_check_outlined, size: 18),
+                  label: const Text('Form'),
+                  onPressed: _fillForm,
+                ),
+              ),
             ],
           ),
         ),
@@ -938,6 +948,29 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         child: Text(name ?? 'None', softWrap: true),
       ),
     );
+  }
+
+  /// Fills a form for THIS action: its directions are added to the form's
+  /// selection and its activity is set when there is none yet. Nothing is saved
+  /// until Save, like every other field here.
+  Future<void> _fillForm() async {
+    final filled = await fillForm(context, ref, [
+      if (_isEditing) widget.existing!.id,
+    ]);
+    if (filled == null || !mounted) return;
+    final effects = filled.effects;
+    String? activityId;
+    final name = effects.activityName;
+    if (_countableActivityId == null && name != null) {
+      activityId = await ref
+          .read(actionServiceProvider)
+          .countableActivityForTemplate(name);
+      if (!mounted) return;
+    }
+    setState(() {
+      _selectedMetricIds = {..._selectedMetricIds, ...effects.metricIds};
+      if (activityId != null) _countableActivityId = activityId;
+    });
   }
 
   Future<void> _pickActivity(

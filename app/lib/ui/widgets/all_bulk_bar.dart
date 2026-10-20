@@ -8,6 +8,7 @@ import '../undo.dart';
 import '../views/all_actions_view.dart' show filteredAllActionsProvider;
 import 'bulk_dialogs.dart';
 import 'continue_icon.dart';
+import 'form_actions.dart' show runBulkForm;
 
 /// The row above the All list: a tri-state "select all" checkbox (it covers the
 /// WHOLE filtered list, also the rows not on screen), how many are selected and,
@@ -88,6 +89,12 @@ class AllBulkBar extends ConsumerWidget {
                       const Icon(Icons.track_changes),
                       'Activity',
                       () => runBulkActivity(context, ref, ids()),
+                    ),
+                    action(
+                      'bulk-form',
+                      const Icon(Icons.fact_check_outlined),
+                      'Form',
+                      () => runBulkForm(context, ref, ids()),
                     ),
                     action(
                       'bulk-previous',

@@ -74,6 +74,22 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    // Alt belongs to the app (own hotkeys). The window has no classic menu, so
+    // DefWindowProc would open the invisible system menu when Alt is pressed and
+    // released alone (focus is lost and the next key is eaten) and beep on
+    // Alt+letter. The key events themselves already reached Dart through
+    // WM_SYSKEYDOWN / WM_SYSKEYUP; only these two follow-up messages are
+    // swallowed. Alt+Space (system menu) and Alt+F4 (close) are left alone.
+    case WM_SYSCOMMAND:
+      if ((wparam & 0xFFF0) == SC_KEYMENU && lparam != ' ') {
+        return 0;
+      }
+      break;
+    case WM_SYSCHAR:
+      if (wparam != ' ') {
+        return 0;
+      }
+      break;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

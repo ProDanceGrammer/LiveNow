@@ -8794,6 +8794,362 @@ class PlanCollectionsTableCompanion extends UpdateCompanion<PlanCollection> {
   }
 }
 
+class $FormsTableTable extends FormsTable
+    with TableInfo<$FormsTableTable, FormRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FormsTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _payloadMeta = const VerificationMeta(
+    'payload',
+  );
+  @override
+  late final GeneratedColumn<String> payload = GeneratedColumn<String>(
+    'payload',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('{}'),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    name,
+    payload,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'forms';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FormRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    }
+    if (data.containsKey('payload')) {
+      context.handle(
+        _payloadMeta,
+        payload.isAcceptableOrUnknown(data['payload']!, _payloadMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  FormRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FormRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      payload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $FormsTableTable createAlias(String alias) {
+    return $FormsTableTable(attachedDatabase, alias);
+  }
+}
+
+class FormRow extends DataClass implements Insertable<FormRow> {
+  final String id;
+  final String name;
+  final String payload;
+  final String createdAt;
+  final String updatedAt;
+  const FormRow({
+    required this.id,
+    required this.name,
+    required this.payload,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['payload'] = Variable<String>(payload);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  FormsTableCompanion toCompanion(bool nullToAbsent) {
+    return FormsTableCompanion(
+      id: Value(id),
+      name: Value(name),
+      payload: Value(payload),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory FormRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FormRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      payload: serializer.fromJson<String>(json['payload']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'payload': serializer.toJson<String>(payload),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  FormRow copyWith({
+    String? id,
+    String? name,
+    String? payload,
+    String? createdAt,
+    String? updatedAt,
+  }) => FormRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    payload: payload ?? this.payload,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  FormRow copyWithCompanion(FormsTableCompanion data) {
+    return FormRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      payload: data.payload.present ? data.payload.value : this.payload,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FormRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('payload: $payload, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, payload, createdAt, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FormRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.payload == this.payload &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class FormsTableCompanion extends UpdateCompanion<FormRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> payload;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const FormsTableCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.payload = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  FormsTableCompanion.insert({
+    required String id,
+    this.name = const Value.absent(),
+    this.payload = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<FormRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? payload,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (payload != null) 'payload': payload,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  FormsTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String>? payload,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return FormsTableCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      payload: payload ?? this.payload,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (payload.present) {
+      map['payload'] = Variable<String>(payload.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FormsTableCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('payload: $payload, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -8829,6 +9185,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $BudgetTxTemplatesTableTable(this);
   late final $PlanCollectionsTableTable planCollectionsTable =
       $PlanCollectionsTableTable(this);
+  late final $FormsTableTable formsTable = $FormsTableTable(this);
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -8899,6 +9256,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     planOverridesTable,
     budgetTxTemplatesTable,
     planCollectionsTable,
+    formsTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxActionsStart,
@@ -17054,6 +17412,207 @@ typedef $$PlanCollectionsTableTableProcessedTableManager =
       PlanCollection,
       PrefetchHooks Function()
     >;
+typedef $$FormsTableTableCreateCompanionBuilder = FormsTableCompanion Function({
+  required String id,
+  Value<String> name,
+  Value<String> payload,
+  required String createdAt,
+  required String updatedAt,
+  Value<int> rowid,
+});
+typedef $$FormsTableTableUpdateCompanionBuilder = FormsTableCompanion Function({
+  Value<String> id,
+  Value<String> name,
+  Value<String> payload,
+  Value<String> createdAt,
+  Value<String> updatedAt,
+  Value<int> rowid,
+});
+
+class $$FormsTableTableFilterComposer
+    extends Composer<_$AppDatabase, $FormsTableTable> {
+  $$FormsTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FormsTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $FormsTableTable> {
+  $$FormsTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FormsTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FormsTableTable> {
+  $$FormsTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get payload =>
+      $composableBuilder(column: $table.payload, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$FormsTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FormsTableTable,
+          FormRow,
+          $$FormsTableTableFilterComposer,
+          $$FormsTableTableOrderingComposer,
+          $$FormsTableTableAnnotationComposer,
+          $$FormsTableTableCreateCompanionBuilder,
+          $$FormsTableTableUpdateCompanionBuilder,
+          (FormRow, BaseReferences<_$AppDatabase, $FormsTableTable, FormRow>),
+          FormRow,
+          PrefetchHooks Function()
+        > {
+  $$FormsTableTableTableManager(_$AppDatabase db, $FormsTableTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$FormsTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$FormsTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$FormsTableTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> payload = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => FormsTableCompanion(
+                id: id,
+                name: name,
+                payload: payload,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String> name = const Value.absent(),
+                Value<String> payload = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => FormsTableCompanion.insert(
+                id: id,
+                name: name,
+                payload: payload,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$FormsTableTable, FormRow>(table),
+                  BaseReferences<_$AppDatabase, $FormsTableTable, FormRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FormsTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FormsTableTable,
+      FormRow,
+      $$FormsTableTableFilterComposer,
+      $$FormsTableTableOrderingComposer,
+      $$FormsTableTableAnnotationComposer,
+      $$FormsTableTableCreateCompanionBuilder,
+      $$FormsTableTableUpdateCompanionBuilder,
+      (FormRow, BaseReferences<_$AppDatabase, $FormsTableTable, FormRow>),
+      FormRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -17110,4 +17669,6 @@ class $AppDatabaseManager {
       );
   $$PlanCollectionsTableTableTableManager get planCollectionsTable =>
       $$PlanCollectionsTableTableTableManager(_db, _db.planCollectionsTable);
+  $$FormsTableTableTableManager get formsTable =>
+      $$FormsTableTableTableManager(_db, _db.formsTable);
 }

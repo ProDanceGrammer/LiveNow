@@ -374,6 +374,60 @@ void main() {
     await settleAndUnmount(tester);
   });
 
+  testWidgets('the template editor has an Expand button: full screen, only the '
+      'notes, Save inside the notes toolbar, Collapse brings it all back', (
+    tester,
+  ) async {
+    const notes =
+        '{"document":{"type":"page","children":[{"type":"paragraph","data":'
+        '{"delta":[{"insert":"Buy Milk"}]}}]}}';
+    await pump(tester);
+    await seedTemplate(tester, 'Shop', extra: {'notes': notes});
+    await refresh(tester);
+    await tester.tap(find.text('Shop'));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    NotesEditor editor() => tester.widget<NotesEditor>(find.byType(NotesEditor));
+    expect(editor().onToggleExpand, isNotNull);
+    expect(find.text('Edit template'), findsOneWidget);
+    expect(find.byKey(const ValueKey('template-duration')), findsOneWidget);
+    final stateBefore = tester.state(find.byType(NotesEditor));
+
+    editor().onToggleExpand!();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(editor().expanded, isTrue);
+    expect(find.text('Edit template'), findsNothing);
+    expect(find.text('Cancel'), findsNothing);
+    expect(find.byKey(const ValueKey('template-duration')), findsNothing);
+    expect(find.byKey(const ValueKey('notes-save')), findsOneWidget);
+    final box = tester.getSize(find.byType(NotesEditor));
+    expect(box.height, greaterThan(tester.view.physicalSize.height * 0.6));
+    expect(tester.state(find.byType(NotesEditor)), same(stateBefore));
+
+    editor().onToggleExpand!();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(editor().expanded, isFalse);
+    expect(find.text('Edit template'), findsOneWidget);
+    expect(find.byKey(const ValueKey('template-duration')), findsOneWidget);
+
+    // Expanded again: the editor's own Save writes the template and closes.
+    editor().onToggleExpand!();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const ValueKey('notes-save')));
+    for (var i = 0; i < 6; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byType(NotesEditor), findsNothing);
+    final saved = (await tester.runAsync(
+      () => db.select(db.actionTemplatesTable).getSingle(),
+    ))!;
+    expect(jsonDecode(saved.payload)['notes'], isNotNull);
+    await settleAndUnmount(tester);
+  });
+
   Future<List<ActionRow>> allActions(WidgetTester tester) async =>
       (await tester.runAsync(() => db.select(db.actionsTable).get()))!;
 

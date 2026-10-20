@@ -282,6 +282,27 @@ class SavedViewsTable extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// A form (schema v17): a questionnaire the owner fills for a set of selected
+/// actions; every ticked answer adds growth directions (and optionally a
+/// Countable Activity) to them. `payload` is the JSON of `domain/forms.dart`
+/// (questions, options, the directions behind each option); directions and
+/// activities are referenced by id / name inside it, never by foreign key, so a
+/// deleted direction cannot break a synced form. Synced like every other table.
+@DataClassName('FormRow')
+class FormsTable extends Table {
+  @override
+  String get tableName => 'forms';
+
+  TextColumn get id => text()();
+  TextColumn get name => text().withDefault(const Constant(''))();
+  TextColumn get payload => text().withDefault(const Constant('{}'))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// A reusable transaction (schema v15): what a plan item creates next to the
 /// actions it generates, and what the Budget > Transactions screen lists as
 /// "templates". `category_id` is a soft reference (the category may be deleted;

@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../data/accounts/profile_paths.dart';
 import '../data/backup/auto_backup.dart';
 import '../data/backup/backup_import_service.dart';
 import 'backup_files.dart';
@@ -32,10 +32,7 @@ final backupImportServiceProvider = Provider<BackupImportService>((ref) {
 
 final autoBackupStoreProvider = Provider<AutoBackupStore>(
   (ref) => AutoBackupStore.lazy(() async {
-    final override = Platform.environment['LIVENOW_DATA_DIR'];
-    final dir = override != null && override.isNotEmpty
-        ? Directory(override)
-        : await getApplicationSupportDirectory();
+    final dir = await profileDirectory();
     return File('${dir.path}${Platform.pathSeparator}auto_backup.json');
   }),
 );

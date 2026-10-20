@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import '../data/accounts/profile_paths.dart';
 
 const _fileName = 'rail_collapsed.txt';
 
@@ -9,7 +9,7 @@ const _fileName = 'rail_collapsed.txt';
 final bool _underTest = Platform.environment.containsKey('FLUTTER_TEST');
 
 Future<File> _file() async =>
-    File('${(await getApplicationSupportDirectory()).path}/$_fileName');
+    File('${(await profileDirectory()).path}/$_fileName');
 
 /// Whether the navigation rail is collapsed to its icon-only strip, persisted
 /// next to `theme_mode.txt`. Loading and saving are best-effort: in tests the

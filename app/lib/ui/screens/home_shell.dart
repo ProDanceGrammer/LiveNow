@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show ServicesBinding;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../widgets/action_editor.dart';
+import '../accounts/account_providers.dart';
 import '../../data/reminders/reminder_scheduler.dart';
 import '../backup_providers.dart';
 import '../calendar_fullscreen.dart';
@@ -25,6 +26,7 @@ import '../widgets/instant_rail.dart';
 import '../widgets/sync_status_button.dart';
 import 'actions_section.dart';
 import 'budget_screen.dart';
+import 'forms_screen.dart';
 import 'growth_directions_screen.dart';
 import 'settings_screen.dart';
 import 'templates_screen.dart';
@@ -59,7 +61,10 @@ class _HomeShellState extends ConsumerState<HomeShell>
     // Sync starts with the app (the PC opens its server when a phone is
     // paired, a phone syncs). Never under `flutter test`: no sockets there.
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
-      Future<void>.microtask(() => startSyncForRole(ref));
+      // Only the main account syncs (see syncAllowedProvider).
+      if (ref.read(syncAllowedProvider)) {
+        Future<void>.microtask(() => startSyncForRole(ref));
+      }
       // Start/end notifications (iOS, Windows): no polling, see reminders.dart.
       Future<void>.microtask(() => _reminders = startReminders(ref));
       // The 5-hourly backup file (desktop, only when switched on in Settings).
@@ -155,12 +160,19 @@ class _HomeShellState extends ConsumerState<HomeShell>
   /// template while the Templates tab is open.
   Widget _newFab(BuildContext context) {
     final templates = _actionsSub == ActionsSub.templates;
+    final forms = _actionsSub == ActionsSub.forms;
     return FloatingActionButton(
       heroTag: null,
       onPressed: () => templates
           ? TemplatesScreen.showNewTemplate(context)
+          : forms
+          ? FormsScreen.showNewForm(context)
           : ActionEditorDialog.show(context),
-      tooltip: templates ? 'New template' : 'New action',
+      tooltip: templates
+          ? 'New template'
+          : forms
+          ? 'New form'
+          : 'New action',
       child: const Icon(Icons.add),
     );
   }
@@ -402,16 +414,19 @@ class _HomeShellState extends ConsumerState<HomeShell>
                   MenuItemButton(
                     key: const ValueKey('menu-settings'),
                     onPressed: () => SettingsScreen.open(context),
-                    child: const MenuAcceleratorLabel('&Settings…'),
+                    // Plain labels: MenuAcceleratorLabel('&File') makes MenuBar
+                    // own Alt (a lone Alt focuses the bar, Alt+F/V/S/X/D are
+                    // consumed), and Alt is reserved for the owner's own hotkeys.
+                    child: const Text('Settings…'),
                   ),
                   MenuItemButton(
                     onPressed: () => ServicesBinding.instance.exitApplication(
                       ui.AppExitType.required,
                     ),
-                    child: const MenuAcceleratorLabel('E&xit'),
+                    child: const Text('Exit'),
                   ),
                 ],
-                child: const MenuAcceleratorLabel('&File'),
+                child: const Text('File'),
               ),
               SubmenuButton(
                 menuChildren: [
@@ -426,10 +441,10 @@ class _HomeShellState extends ConsumerState<HomeShell>
                       'Ctrl+Shift+L',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    child: const MenuAcceleratorLabel('&Dark mode'),
+                    child: const Text('Dark mode'),
                   ),
                 ],
-                child: const MenuAcceleratorLabel('&View'),
+                child: const Text('View'),
               ),
             ],
           ),

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
+import '../accounts/profile_paths.dart';
 import '../database.dart';
 
 /// The tables that belong to THIS device, not to the user's data: the pairing
@@ -41,16 +42,18 @@ void blankDeviceLocalSyncTables(String path) {
 /// `LIVENOW_DATA_DIR` set it goes into that folder, so automated runs stay
 /// isolated. Backups an older version left in Documents are moved here once.
 Future<Directory> defaultBackupDirectory() async {
-  final override = Platform.environment['LIVENOW_DATA_DIR'];
-  if (override != null && override.isNotEmpty) {
-    return Directory(
-      '$override${Platform.pathSeparator}livenow_backups',
-    ).create(recursive: true);
-  }
-  final support = await getApplicationSupportDirectory();
+  // The signed-in account's own folder (the root while no account is active).
+  final base = await profileDirectory();
   final dir = await Directory(
-    '${support.path}${Platform.pathSeparator}livenow_backups',
+    '${base.path}${Platform.pathSeparator}livenow_backups',
   ).create(recursive: true);
+  // The one-time move of old Documents backups belongs to the real data only:
+  // not to an isolated run and not to a second account's folder.
+  final override = Platform.environment['LIVENOW_DATA_DIR'];
+  if ((override != null && override.isNotEmpty) ||
+      activeProfileDirectory != null) {
+    return dir;
+  }
   try {
     final docs = await getApplicationDocumentsDirectory();
     await moveLegacyBackups(

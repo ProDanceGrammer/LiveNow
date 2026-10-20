@@ -14,6 +14,7 @@ import '../views/all_actions_view.dart';
 import '../views/calendar_view.dart';
 import '../views/current_actions_view.dart';
 import '../widgets/glass.dart';
+import 'forms_screen.dart';
 import 'templates_screen.dart';
 
 /// Asks the user for the Notion actions export and returns its text (null =
@@ -48,7 +49,8 @@ enum ActionsSub {
   current('Current Actions', 'Current Actions', Icons.bolt_rounded),
   calendar('Calendar', 'Calendar', Icons.event),
   all('All', 'All Actions', Icons.list_alt_rounded),
-  templates('Templates', 'Templates', Icons.dashboard_customize);
+  templates('Templates', 'Templates', Icons.dashboard_customize),
+  forms('Forms', 'Forms', Icons.fact_check_outlined);
 
   const ActionsSub(this.label, this.title, this.icon);
 
@@ -90,6 +92,7 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
     ActionsSub.calendar => const CalendarView(),
     ActionsSub.all => const AllActionsView(),
     ActionsSub.templates => const TemplatesScreen(embedded: true),
+    ActionsSub.forms => const FormsScreen(),
   };
 
   @override

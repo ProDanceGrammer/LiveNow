@@ -109,6 +109,31 @@ class BulkEditService {
     return BulkActivityUndo(before);
   });
 
+  /// Gives [activityId] to every action in [actionIds] that has NO countable
+  /// activity yet, in ONE transaction (an action that already has one, whichever
+  /// it is, is left alone). Only the actions that changed are remembered for Undo.
+  Future<BulkActivityUndo> setActivityIfEmptyMany(
+    Iterable<String> actionIds,
+    String activityId,
+  ) => db.transaction(() async {
+    final before = <String, String?>{};
+    final now = dateTimeToDb(DateTime.now())!;
+    for (final id in actionIds) {
+      final row = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(id))).getSingleOrNull();
+      if (row == null || row.countableActivityId != null) continue;
+      before[id] = null;
+      await (db.update(db.actionsTable)..where((t) => t.id.equals(id))).write(
+        ActionsTableCompanion(
+          countableActivityId: Value(activityId),
+          updatedAt: Value(now),
+        ),
+      );
+    }
+    return BulkActivityUndo(before);
+  });
+
   Future<void> undoSetActivityMany(BulkActivityUndo undo) =>
       db.transaction(() async {
         final now = dateTimeToDb(DateTime.now())!;

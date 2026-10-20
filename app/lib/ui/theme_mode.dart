@@ -2,12 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import '../data/accounts/profile_paths.dart';
 
 const _fileName = 'theme_mode.txt';
 
 Future<File> _file() async =>
-    File('${(await getApplicationSupportDirectory()).path}/$_fileName');
+    File('${(await appSupportRoot()).path}/$_fileName');
 
 /// Reads the persisted theme choice; any failure (missing file, no plugin
 /// in tests, bad contents) falls back to light.

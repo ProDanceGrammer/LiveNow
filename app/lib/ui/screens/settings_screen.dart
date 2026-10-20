@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/reminders/local_notifications_sink.dart';
 import '../../data/backup/auto_backup.dart' show AutoBackupOutcome;
+import '../accounts/account_settings.dart';
 import '../all_day_week.dart' show kShowDoneAllDayKey, showDoneAllDayProvider;
 import '../backup_providers.dart';
 import '../data_imports.dart';
@@ -64,6 +65,7 @@ class SettingsScreen extends ConsumerWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
             children: [
+              const AccountSettingsSection(),
               title('Sync'),
               const _Panel(
                 child: Padding(

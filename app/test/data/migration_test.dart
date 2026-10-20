@@ -692,6 +692,22 @@ void main() {
     expect(n.read<int>('n'), 1);
   });
 
+  test('an old database gets the v17 forms table and its sync triggers', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db
+        .into(db.formsTable)
+        .insert(FormsTableCompanion.insert(id: 'f1', createdAt: 't', updatedAt: 't'));
+    final f = (await db.select(db.formsTable).get()).single;
+    expect((f.name, f.payload), ('', '{}'));
+    final n = await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = 'forms' AND row_id = 'f1'",
+        )
+        .getSingle();
+    expect(n.read<int>('n'), 1);
+  });
+
   test('an old database gets the v16 plan collections, the membership column and triggers', () async {
     final db = _oldDatabase(version: 1);
     addTearDown(db.close);

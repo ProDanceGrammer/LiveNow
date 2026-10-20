@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../accounts/account_providers.dart';
 import '../sync_providers.dart';
 import 'sync_settings_dialog.dart';
 
@@ -12,6 +13,8 @@ class SyncStatusButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Only the main account syncs: no button, no conflicts badge for the others.
+    if (!ref.watch(syncAllowedProvider)) return const SizedBox.shrink();
     final role = ref.watch(syncRoleProvider);
     final status = ref.watch(syncClientProvider);
     final host = ref.watch(syncHostControllerProvider);

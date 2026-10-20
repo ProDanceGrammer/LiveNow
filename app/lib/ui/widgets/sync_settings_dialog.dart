@@ -9,6 +9,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../data/sync/http_transport.dart';
 import '../../domain/sync/sync_crypto.dart';
 import '../../domain/sync/sync_protocol.dart';
+import '../accounts/account_providers.dart';
 import '../dialog_stack.dart';
 import '../sync_providers.dart';
 import 'app_toast.dart';
@@ -75,6 +76,16 @@ class _SyncPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(syncAllowedProvider)) {
+      return const Padding(
+        key: ValueKey('sync-not-for-account'),
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Text(
+          'Sync with the hub is available for the main account for now. This '
+          'account keeps its data on this device only.',
+        ),
+      );
+    }
     if (ref.watch(syncRoleProvider) == SyncRole.host) return const _HostPanel();
     return ref.watch(hubConnectedProvider)
         ? const _HubPanel()

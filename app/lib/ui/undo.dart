@@ -7,7 +7,9 @@ import 'package:flutter_riverpod/legacy.dart'
 
 import '../domain/action_service.dart' show ScheduleChange;
 import '../domain/bulk_edit_service.dart';
+import '../domain/form_effects.dart' show FormEffects;
 import '../domain/growth_rules.dart' show metricLabel;
+import 'form_providers.dart';
 import 'providers.dart';
 import 'widgets/app_toast.dart';
 
@@ -189,6 +191,54 @@ Future<void> runUndoableSetMetricsMany(
         ? 'Directions changed'
         : 'Directions changed for ${undo.before.length} actions',
     () => service.undoSetMetricsMany(undo),
+  );
+}
+
+/// Applies the [effects] of a filled form (the directions it adds, the Countable
+/// Activity it sets where there is none) to SEVERAL actions: ONE transaction and
+/// ONE Undo for all of it. Nothing needing `ref` / `context` is touched after the
+/// first await.
+Future<void> runUndoableApplyForm(
+  BuildContext context,
+  WidgetRef ref,
+  Iterable<String> actionIds,
+  FormEffects effects,
+  String formName,
+) async {
+  final ids = actionIds.toList();
+  if (ids.isEmpty) return;
+  final service = ref.read(formApplyServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final lastUndo = ref.read(undoHistoryProvider.notifier);
+
+  final result = await service.apply(ids, effects);
+  if (!result.changedAnything) {
+    showInfoToast(
+      overlay,
+      result.directionsSkipped > 0
+          ? 'Nothing to change (${result.directionsSkipped} deleted '
+                'direction${result.directionsSkipped == 1 ? '' : 's'} skipped)'
+          : 'Nothing to change',
+    );
+    return;
+  }
+  final parts = <String>[
+    if (result.directionsAdded > 0)
+      'added ${result.directionsAdded} '
+          'direction${result.directionsAdded == 1 ? '' : 's'}',
+    if (result.activitiesSet > 0)
+      'set the activity on ${result.activitiesSet}',
+  ];
+  final skipped = result.directionsSkipped > 0
+      ? ' (${result.directionsSkipped} deleted skipped)'
+      : '';
+  _offerUndo(
+    overlay,
+    lastUndo,
+    'Form "$formName": ${parts.join(', ')} · '
+        '${result.actionsChanged} action${result.actionsChanged == 1 ? '' : 's'}'
+        '$skipped',
+    () => service.undo(result.undo),
   );
 }
 

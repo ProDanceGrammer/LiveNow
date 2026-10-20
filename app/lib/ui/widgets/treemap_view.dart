@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -266,9 +268,41 @@ class _Block extends StatelessWidget {
                     ],
                   ),
                 )
-              : const SizedBox.expand(),
+              : _iconOnly(m.icon),
         ),
       ),
+    );
+  }
+
+  /// Below this side (px) an emoji is no longer legible: the block stays plain.
+  static const _minIconSide = 14.0;
+
+  /// A block too small for text shows the direction's emoji instead, as large as
+  /// fits (about 60 % of its shorter side, 9-26 px), centred. A direction
+  /// without an emoji, or a block smaller than [_minIconSide], stays empty (the
+  /// tooltip still names it).
+  static Widget _iconOnly(String? icon) {
+    final emoji = icon?.trim() ?? '';
+    if (emoji.isEmpty) return const SizedBox.expand();
+    return LayoutBuilder(
+      builder: (context, box) {
+        final side = math.min(box.maxWidth, box.maxHeight);
+        if (side < _minIconSide) return const SizedBox.expand();
+        return Center(
+          child: Text(
+            emoji,
+            key: const ValueKey('treemap-block-icon'),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.clip,
+            // Dynamic Type must not push it out of a small block.
+            textScaler: TextScaler.noScaling,
+            style: emojiLabelStyle.copyWith(
+              fontSize: (side * 0.6).clamp(9.0, 26.0),
+            ),
+          ),
+        );
+      },
     );
   }
 }

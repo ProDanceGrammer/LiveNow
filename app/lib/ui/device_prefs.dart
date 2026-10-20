@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import '../data/accounts/profile_paths.dart';
 
 const _fileName = 'ui_prefs.json';
 
@@ -10,10 +10,7 @@ const _fileName = 'ui_prefs.json';
 final bool _underTest = Platform.environment.containsKey('FLUTTER_TEST');
 
 Future<File> _file() async {
-  final override = Platform.environment['LIVENOW_DATA_DIR'];
-  final dir = override != null && override.isNotEmpty
-      ? await Directory(override).create(recursive: true)
-      : await getApplicationSupportDirectory();
+  final dir = await (await profileDirectory()).create(recursive: true);
   return File('${dir.path}/$_fileName');
 }
 
