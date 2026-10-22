@@ -103,13 +103,15 @@ List<_PostponeButton> _postponeButtons(WorkHours hours) => [
 ];
 
 /// The buttons of a NEW action's form: Start, Finish and the postpone / prolong
-/// buttons (Continue and Delete make no sense before the action exists). They
+/// buttons (Continue makes no sense before the action exists; Delete, when
+/// [onDelete] is given, cancels the creation). They
 /// change the form's times only ([apply]); nothing is saved until Save.
 /// [current] reads the form's schedule.
 List<QuickActionSpec> formQuickActionSpecs(
   WidgetRef ref, {
   required ActionSchedule Function() current,
   required void Function(ActionSchedule next) apply,
+  VoidCallback? onDelete,
 }) {
   final hours = ref.read(workHoursProvider);
   DateTime now() => DateTime.now().toUtc();
@@ -134,6 +136,15 @@ List<QuickActionSpec> formQuickActionSpecs(
         () async => apply(
           applyPostponeRule(b.rule, current(), nowUtc: now(), hours: hours),
         ),
+      ),
+    // Cancels creating the action (nothing exists yet to delete).
+    if (onDelete != null)
+      QuickActionSpec(
+        Icons.delete_outline_rounded,
+        GlassHue.error,
+        'Cancel creating',
+        2,
+        () async => onDelete(),
       ),
   ];
 }

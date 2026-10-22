@@ -567,4 +567,39 @@ void main() {
     expect(find.byType(GrowthDirectionDialog), findsOneWidget);
     await settleAndUnmount(tester);
   });
+
+  testWidgets('a direction chip in the template editor shows its urgency', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      seed: (db) async {
+        final id = await MetricService(
+          db,
+        ).saveMetric(name: 'Reading', kind: MetricKind.boolean);
+        await db
+            .into(db.actionTemplatesTable)
+            .insert(
+              ActionTemplatesTableCompanion.insert(
+                id: newId(),
+                name: 'Walk',
+                payload: jsonEncode({
+                  'name': 'Walk',
+                  'metricIds': [id],
+                }),
+              ),
+            );
+      },
+    );
+    await refresh(tester);
+    await tester.tap(find.text('Walk'));
+    for (var i = 0; i < 4; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    expect(find.byTooltip('Urgency to Keep in Balance'), findsWidgets);
+    await settleAndUnmount(tester);
+  });
 }

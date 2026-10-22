@@ -105,7 +105,9 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     this.linkTo,
   });
 
-  static Future<void> show(
+  /// Resolves to the id of the action this dialog CREATED (a new action that
+  /// was saved), else null.
+  static Future<String?> show(
     BuildContext context, {
     ActionRow? existing,
     DateTime? initialStart,
@@ -115,7 +117,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     ActionDraft? initialDraft,
     ({String actionId, bool asPredecessor})? linkTo,
   }) {
-    return showStackedDialog<void>(
+    return showStackedDialog<String>(
       context: context,
       builder: (_) => ActionEditorDialog(
         existing: existing,
@@ -165,6 +167,15 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   /// Id of the action created by a Ctrl+S on a NEW form: later saves update it
   /// instead of creating a duplicate.
   String? _createdId;
+
+  /// Previous / next actions picked or made while this NEW action does not exist
+  /// yet: they are linked when it is created (Save / Ctrl+S). Delete before that
+  /// therefore leaves nothing behind.
+  final List<_Neighbor> _pendingPrev = [];
+  final List<_Neighbor> _pendingNext = [];
+
+  /// The action this form edits or created, if it exists in the database.
+  String? get _id => widget.existing?.id ?? _createdId;
 
   /// The directions the form was opened with (once loaded): what "changed"
   /// is measured against.
@@ -452,17 +463,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
             : null,
         title: expanded || compactLandscape
             ? null
-            : _isEditing && usePhoneLayout(context)
-            // Phone: Delete sits in the dialog's top-right corner.
+            : usePhoneLayout(context)
+            // Phone: Delete sits in the dialog's top-right corner (on a new
+            // action it cancels the creation).
             ? Row(
                 children: [
-                  const Expanded(child: Text('Edit action')),
+                  Expanded(
+                    child: Text(_isEditing ? 'Edit action' : 'New action'),
+                  ),
                   IconButton(
                     key: const ValueKey('editor-delete'),
-                    tooltip: 'Delete',
+                    tooltip: _isEditing ? 'Delete' : 'Cancel creating',
                     color: Theme.of(context).colorScheme.error,
                     icon: const Icon(Icons.delete_outline_rounded),
-                    onPressed: _deleteAndClose,
+                    onPressed: _isEditing ? _deleteAndClose : _cancelNew,
                   ),
                 ],
               )
@@ -486,15 +500,14 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                         ),
-                        if (_isEditing)
-                          IconButton(
-                            key: const ValueKey('editor-delete'),
-                            tooltip: 'Delete',
-                            visualDensity: VisualDensity.compact,
-                            color: Theme.of(context).colorScheme.error,
-                            icon: const Icon(Icons.delete_outline_rounded),
-                            onPressed: _deleteAndClose,
-                          ),
+                        IconButton(
+                          key: const ValueKey('editor-delete'),
+                          tooltip: _isEditing ? 'Delete' : 'Cancel creating',
+                          visualDensity: VisualDensity.compact,
+                          color: Theme.of(context).colorScheme.error,
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: _isEditing ? _deleteAndClose : _cancelNew,
+                        ),
                       ],
                     ),
                   Visibility(
@@ -607,6 +620,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         _startAt = next.startAt;
         _endAt = next.endAt;
       }),
+      onDelete: _cancelNew,
     );
     if (usePhoneLayout(context)) {
       return Column(
@@ -616,6 +630,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
             if (g == 1) const SizedBox(height: 8),
             QuickActionBar.form(
               specs: specs,
+              // Delete is in the title on a phone.
               groups: {g},
               tileSize: 36,
               iconSize: 22,
@@ -828,40 +843,42 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_isEditing)
-          SectionBlock(
-            padding: kSectionTileBlockPadding,
-            child: ExpansionTile(
-              title: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const ParamIcon(Param.connected, size: 20),
-                  const SizedBox(width: 8),
-                  const Flexible(
-                    child: Text(
-                      'Connected actions',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              shape: const Border(),
-              collapsedShape: const Border(),
-              tilePadding: kSectionTilePadding,
-              childrenPadding: kSectionChildrenPadding,
-              initiallyExpanded: true,
-              expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        SectionBlock(
+          padding: kSectionTileBlockPadding,
+          child: ExpansionTile(
+            title: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _DependencySection(
-                  actionId: widget.existing!.id,
-                  startAt: _startAt,
-                  endAt: _endAt,
-                  isAllDay: _isAllDay,
+                const ParamIcon(Param.connected, size: 20),
+                const SizedBox(width: 8),
+                const Flexible(
+                  child: Text(
+                    'Connected actions',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
+            shape: const Border(),
+            collapsedShape: const Border(),
+            tilePadding: kSectionTilePadding,
+            childrenPadding: kSectionChildrenPadding,
+            initiallyExpanded: true,
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _DependencySection(
+                actionId: _id,
+                pendingPrev: _pendingPrev,
+                pendingNext: _pendingNext,
+                onPendingChanged: () => setState(() {}),
+                startAt: _startAt,
+                endAt: _endAt,
+                isAllDay: _isAllDay,
+              ),
+            ],
           ),
-        if (_isEditing) ActionBudgetSection(actionId: widget.existing!.id),
+        ),
+        if (_id != null) ActionBudgetSection(actionId: _id!),
         SectionBlock(
           padding: kSectionTileBlockPadding,
           child: ExpansionTile(
@@ -892,6 +909,15 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         ),
       ],
     );
+  }
+
+  /// Delete on a NEW action = cancel creating it: nothing was written yet, so the
+  /// dialog just closes. If Ctrl+S already created it, that action is deleted
+  /// (with Undo) like any other.
+  void _cancelNew() {
+    final id = _createdId;
+    if (id != null) unawaited(runUndoableDelete(context, ref, id));
+    Navigator.of(context).pop();
   }
 
   /// The button row's Delete: run it (Undo snackbar) and close this editor,
@@ -1100,8 +1126,41 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
       );
       await service.setDiaryBlocks(_createdId!, widget.initialDraft?.diaryBlocks);
       await _linkCreated(_createdId!);
+      await _linkPending(_createdId!);
     }
     return true;
+  }
+
+  /// Links the previous / next actions collected while the action did not exist.
+  /// A link that would close a loop is skipped with a toast.
+  Future<void> _linkPending(String newId) async {
+    if (_pendingPrev.isEmpty && _pendingNext.isEmpty) return;
+    final overlay = rootOverlayOf(context);
+    final deps = ref.read(dependencyServiceProvider);
+    var skipped = 0;
+    Future<void> link(String pred, String succ) async {
+      try {
+        await deps.addDependency(predecessorId: pred, successorId: succ);
+      } on DependencyCycleException {
+        skipped++;
+      }
+    }
+
+    for (final n in _pendingPrev) {
+      await link(n.id, newId);
+    }
+    for (final n in _pendingNext) {
+      await link(newId, n.id);
+    }
+    if (mounted) {
+      setState(() {
+        _pendingPrev.clear();
+        _pendingNext.clear();
+      });
+    }
+    if (skipped > 0) {
+      showInfoToast(overlay, 'That would create a dependency cycle.');
+    }
   }
 
   /// A new action made from the Connected actions block becomes the previous /
@@ -1124,7 +1183,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
 
   Future<void> _save() async {
     if (!await _persist()) return;
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) Navigator.of(context).pop(_createdId);
   }
 
   /// Ctrl+S: the same write, but the dialog stays open and a toast confirms.
@@ -1191,7 +1250,13 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
 
 /// Shows and manages an existing action's previous/next action links.
 class _DependencySection extends ConsumerWidget {
-  final String actionId;
+  /// The saved action; null while it is still being created (then the
+  /// [pendingPrev] / [pendingNext] lists of the form are shown and edited, and
+  /// [onPendingChanged] asks the form to rebuild).
+  final String? actionId;
+  final List<_Neighbor> pendingPrev;
+  final List<_Neighbor> pendingNext;
+  final VoidCallback? onPendingChanged;
 
   /// The current form schedule: a NEW previous / next action is placed right
   /// next to it.
@@ -1201,6 +1266,9 @@ class _DependencySection extends ConsumerWidget {
 
   const _DependencySection({
     required this.actionId,
+    this.pendingPrev = const [],
+    this.pendingNext = const [],
+    this.onPendingChanged,
     this.startAt,
     this.endAt,
     this.isAllDay = false,
@@ -1208,11 +1276,16 @@ class _DependencySection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final predecessors =
-        ref.watch(predecessorsOfProvider(actionId)).value ??
-        const <ActionRow>[];
-    final successors =
-        ref.watch(successorsOfProvider(actionId)).value ?? const <ActionRow>[];
+    final id = actionId;
+    List<_Neighbor> rows(List<ActionRow> r) => [
+      for (final a in r) _Neighbor(a.id, a.name),
+    ];
+    final predecessors = id == null
+        ? pendingPrev
+        : rows(ref.watch(predecessorsOfProvider(id)).value ?? const []);
+    final successors = id == null
+        ? pendingNext
+        : rows(ref.watch(successorsOfProvider(id)).value ?? const []);
 
     final previous = _column(
       context,
@@ -1250,7 +1323,7 @@ class _DependencySection extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref, {
     required String title,
-    required List<ActionRow> items,
+    required List<_Neighbor> items,
     required bool isPredecessor,
   }) {
     return Column(
@@ -1290,10 +1363,16 @@ class _DependencySection extends ConsumerWidget {
                 // current editor aren't lost; closing it returns here.
                 onPressed: () => openActionById(context, ref, item.id),
                 onDeleted: () {
+                  final id = actionId;
+                  if (id == null) {
+                    (isPredecessor ? pendingPrev : pendingNext).remove(item);
+                    onPendingChanged?.call();
+                    return;
+                  }
                   final deps = ref.read(dependencyServiceProvider);
                   deps.removeDependency(
-                    predecessorId: isPredecessor ? item.id : actionId,
-                    successorId: isPredecessor ? actionId : item.id,
+                    predecessorId: isPredecessor ? item.id : id,
+                    successorId: isPredecessor ? id : item.id,
                   );
                 },
               ),
@@ -1314,7 +1393,8 @@ class _DependencySection extends ConsumerWidget {
   ) async {
     final service = ref.read(actionServiceProvider);
     final overlay = rootOverlayOf(context);
-    final link = (actionId: actionId, asPredecessor: asPredecessor);
+    final id = actionId;
+    final link = id == null ? null : (actionId: id, asPredecessor: asPredecessor);
     ActionDraft? draft;
     var length = defaultActionDuration;
     if (pick is ActionPickFromTemplate) {
@@ -1347,13 +1427,25 @@ class _DependencySection extends ConsumerWidget {
       isAllDay: isAllDay,
       length: length,
     );
-    await ActionEditorDialog.show(
+    final createdId = await ActionEditorDialog.show(
       context,
       initialStart: sched?.start,
       initialEnd: sched?.end,
       initialDraft: draft,
       linkTo: link,
     );
+    // Not saved yet (this form's action does not exist): keep the new one in the
+    // pending list; it is linked when this form is saved.
+    if (id == null && createdId != null) {
+      final db = ref.read(databaseProvider);
+      final row = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(createdId))).getSingleOrNull();
+      if (row != null) {
+        (asPredecessor ? pendingPrev : pendingNext).add(_Neighbor(row.id, row.name));
+        onPendingChanged?.call();
+      }
+    }
   }
 
   Future<void> _addDependency(
@@ -1363,7 +1455,11 @@ class _DependencySection extends ConsumerWidget {
   }) async {
     final pick = await ActionPickerDialog.showWithCreate(
       context,
-      excludeIds: {actionId},
+      excludeIds: {
+        ?actionId,
+        for (final n in pendingPrev) n.id,
+        for (final n in pendingNext) n.id,
+      },
     );
     if (pick == null || !context.mounted) return;
     if (pick is! ActionPickExisting) {
@@ -1372,18 +1468,20 @@ class _DependencySection extends ConsumerWidget {
     }
     final chosen = pick.item;
 
+    final id = actionId;
+    if (id == null) {
+      (asPredecessor ? pendingPrev : pendingNext).add(
+        _Neighbor(chosen.id, chosen.name),
+      );
+      onPendingChanged?.call();
+      return;
+    }
     final deps = ref.read(dependencyServiceProvider);
     try {
       if (asPredecessor) {
-        await deps.addDependency(
-          predecessorId: chosen.id,
-          successorId: actionId,
-        );
+        await deps.addDependency(predecessorId: chosen.id, successorId: id);
       } else {
-        await deps.addDependency(
-          predecessorId: actionId,
-          successorId: chosen.id,
-        );
+        await deps.addDependency(predecessorId: id, successorId: chosen.id);
       }
     } on DependencyCycleException {
       if (context.mounted) {
@@ -1395,4 +1493,11 @@ class _DependencySection extends ConsumerWidget {
       }
     }
   }
+}
+
+/// A previous / next action as the Connected actions block shows it.
+class _Neighbor {
+  const _Neighbor(this.id, this.name);
+  final String id;
+  final String name;
 }

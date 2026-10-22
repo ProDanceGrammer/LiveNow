@@ -770,6 +770,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
                 const SizedBox(height: 8),
                 MetricPicker(
                   label: 'Growth directions',
+                  showUrgency: true,
                   selectedIds: _selectedMetricIds,
                   onChanged: (ids) => setState(() => _selectedMetricIds = ids),
                   onOpen: (m) => openDirectionById(context, ref, m.id),
