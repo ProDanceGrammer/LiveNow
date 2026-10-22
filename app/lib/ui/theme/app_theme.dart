@@ -371,10 +371,11 @@ class GlassDialogBorder extends RoundedRectangleBorder {
 }
 
 /// Windows (and the other desktops, where the fallbacks still apply) use the
-/// Segoe family; iOS and Android use the platform font.
+/// Segoe family; iOS, Android and macOS use the platform font.
 final _windowsFonts =
     defaultTargetPlatform != TargetPlatform.iOS &&
-    defaultTargetPlatform != TargetPlatform.android;
+    defaultTargetPlatform != TargetPlatform.android &&
+    defaultTargetPlatform != TargetPlatform.macOS;
 
 const _kFontFamily = 'Segoe UI Variable Text';
 // TwemojiFlags first: it only has flag glyphs, and Segoe UI Emoji (the system's

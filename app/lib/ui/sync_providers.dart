@@ -56,24 +56,48 @@ final hubDirectoryProvider = Provider<Future<Directory> Function()>(
       () => hubDirectory(const []),
 );
 
-/// Starts the hub through its scheduled task (installed by
-/// `claude_dev/hub/install_hub.ps1`); true when Windows accepted the request.
-/// Tests replace it so no real process starts.
-final hubStarterProvider = Provider<Future<bool> Function()>(
-  (ref) => () async {
-    if (!Platform.isWindows) return false;
+/// Runs an external command; replaced in tests so no real process starts.
+typedef ProcessRunner =
+    Future<ProcessResult> Function(String exe, List<String> args);
+
+final processRunnerProvider = Provider<ProcessRunner>(
+  (ref) => (exe, args) => Process.run(exe, args),
+);
+
+/// The command that starts the hub's background job, or null where there is
+/// none: Windows = the scheduled task from `claude_dev/hub/install_hub.ps1`,
+/// macOS = the launchd agent `io.livenow.hub` from
+/// `app/macos/hub/install_hub_mac.sh` (`launchctl kickstart -k gui/<uid>/...`).
+Future<(String, List<String>)?> hubStartCommand(
+  ProcessRunner run, {
+  String? os,
+}) async {
+  os ??= Platform.operatingSystem;
+  if (os == 'windows') {
+    return ('schtasks', ['/run', '/tn', 'LiveNow Hub']);
+  }
+  if (os == 'macos') {
+    final uid = (await run('id', ['-u'])).stdout.toString().trim();
+    if (uid.isEmpty) return null;
+    return ('launchctl', ['kickstart', '-k', 'gui/$uid/io.livenow.hub']);
+  }
+  return null;
+}
+
+/// Starts the hub through its background job; true when the system accepted the
+/// request. Tests replace it (or [processRunnerProvider]).
+final hubStarterProvider = Provider<Future<bool> Function()>((ref) {
+  final run = ref.read(processRunnerProvider);
+  return () async {
     try {
-      final r = await Process.run('schtasks', [
-        '/run',
-        '/tn',
-        'LiveNow Hub',
-      ]);
-      return r.exitCode == 0;
+      final cmd = await hubStartCommand(run);
+      if (cmd == null) return false;
+      return (await run(cmd.$1, cmd.$2)).exitCode == 0;
     } on Object {
       return false;
     }
-  },
-);
+  };
+});
 
 /// Runs calls against the hub's admin routes through a short-lived transport.
 final hubAdminProvider = Provider<HubAdminAccess>(HubAdminAccess.new);

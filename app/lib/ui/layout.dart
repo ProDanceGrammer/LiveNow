@@ -15,3 +15,7 @@ double dialogWidth(BuildContext context, double wide) {
   final room = MediaQuery.sizeOf(context).width - 64;
   return room < wide ? room : wide;
 }
+
+/// Bottom padding that keeps content above the round "+" button (56 px plus its
+/// margin), for screens whose last widget would sit under it.
+const kFabClearance = 88.0;

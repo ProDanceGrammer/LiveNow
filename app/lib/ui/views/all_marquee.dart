@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -85,7 +86,7 @@ class _AllMarqueeState extends ConsumerState<AllMarquee> {
       if ((_now - _down).distance < _dragSlop) return;
       _active = true;
       final kb = HardwareKeyboard.instance;
-      _base = kb.isControlPressed || kb.isShiftPressed
+      _base = isPrimaryPressed() || kb.isShiftPressed
           ? {...ref.read(allSelectionProvider)}
           : <String>{};
       _startContent = Offset(_down.dx, _down.dy + _downScroll);
@@ -173,7 +174,7 @@ class _AllMarqueeState extends ConsumerState<AllMarquee> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyA &&
-        HardwareKeyboard.instance.isControlPressed) {
+        isPrimaryPressed()) {
       final items = ref.read(filteredAllActionsProvider).value ?? const [];
       selection.setAll([for (final a in items) a.id]);
       return KeyEventResult.handled;

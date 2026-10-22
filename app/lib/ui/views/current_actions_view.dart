@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,7 +68,7 @@ class _CurrentActionsViewState extends ConsumerState<CurrentActionsView> {
   }
 
   bool get _addModifier =>
-      HardwareKeyboard.instance.isControlPressed ||
+      isPrimaryPressed() ||
       HardwareKeyboard.instance.isShiftPressed;
 
   /// Walks the built subtree once: the (viewport-clipped) global rect of every

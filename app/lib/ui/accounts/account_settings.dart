@@ -577,7 +577,7 @@ class _EnrollDialogState extends State<_EnrollDialog> {
             SelectableText(
               _enrol.typedKey,
               key: const ValueKey('account-2fa-key'),
-              style: const TextStyle(fontFamily: 'Consolas', letterSpacing: 1),
+              style: const TextStyle(fontFamily: 'Consolas', fontFamilyFallback: ['Menlo'], letterSpacing: 1),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -633,7 +633,7 @@ class _RecoveryCodesDialog extends StatelessWidget {
             SelectableText(
               codes.join('\n'),
               key: const ValueKey('account-recovery-codes'),
-              style: const TextStyle(fontFamily: 'Consolas', height: 1.6),
+              style: const TextStyle(fontFamily: 'Consolas', fontFamilyFallback: ['Menlo'], height: 1.6),
             ),
           ],
         ),

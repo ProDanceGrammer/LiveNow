@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
 import 'package:livenow/data/database.dart';
+import 'package:livenow/domain/growth_rules.dart' show MetricKind;
+import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/data_imports.dart' show importTemplatesCsv;
 import 'package:livenow/ui/dialog_stack.dart';
@@ -15,6 +17,7 @@ import 'package:livenow/ui/screens/actions_section.dart';
 import 'package:livenow/ui/screens/templates_screen.dart';
 import 'package:livenow/ui/widgets/action_editor.dart';
 import 'package:livenow/ui/widgets/action_import_summary_dialog.dart';
+import 'package:livenow/ui/widgets/growth_direction_dialog.dart';
 import 'package:livenow/ui/widgets/notes_editor.dart';
 
 import 'import_harness.dart';
@@ -526,6 +529,42 @@ void main() {
       () => db.select(db.actionTemplatesTable).getSingle(),
     ))!;
     expect(jsonDecode(saved.payload).containsKey('notes'), isFalse);
+    await settleAndUnmount(tester);
+  });
+
+  testWidgets('a direction chip in the template editor opens the direction', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      seed: (db) async {
+        final id = await MetricService(
+          db,
+        ).saveMetric(name: 'Reading', kind: MetricKind.boolean);
+        await db
+            .into(db.actionTemplatesTable)
+            .insert(
+              ActionTemplatesTableCompanion.insert(
+                id: newId(),
+                name: 'Walk',
+                payload: jsonEncode({
+                  'name': 'Walk',
+                  'metricIds': [id],
+                }),
+              ),
+            );
+      },
+    );
+    await refresh(tester);
+    await tester.tap(find.text('Walk'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byTooltip('Open this direction'));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 200)),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(GrowthDirectionDialog), findsOneWidget);
     await settleAndUnmount(tester);
   });
 }

@@ -139,4 +139,66 @@ void main() {
     expectTiled(r, 600, 400);
     expect(r.firstWhere((x) => x.id == 'tiny').area, greaterThan(0));
   });
+
+  group('zoom steps', () {
+    test('step in and out through the fixed levels', () {
+      expect(stepTreemapZoom(1, 1), 1.5);
+      expect(stepTreemapZoom(1.5, 1), 2);
+      expect(stepTreemapZoom(4, -1), 3);
+      expect(stepTreemapZoom(8, -1), 6);
+    });
+
+    test('clamps at both ends', () {
+      expect(stepTreemapZoom(1, -1), 1);
+      expect(stepTreemapZoom(8, 1), 8);
+    });
+
+    test('a value between two steps snaps to the nearest first', () {
+      // 2.4 is nearest to 2, so one step in is 3 and one step out is 1.5.
+      expect(stepTreemapZoom(2.4, 1), 3);
+      expect(stepTreemapZoom(2.4, -1), 1.5);
+    });
+  });
+
+  group('visibleTreemapRects', () {
+    const rects = [
+      TreemapRect('in', 10, 10, 50, 50),
+      TreemapRect('part', 90, 10, 50, 50),
+      TreemapRect('out', 300, 300, 50, 50),
+    ];
+
+    test('keeps what overlaps the viewport, drops the rest', () {
+      final ids = visibleTreemapRects(
+        rects,
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 100,
+      ).map((r) => r.id);
+      expect(ids, ['in', 'part']);
+    });
+
+    test('the margin pulls in neighbours just outside', () {
+      final ids = visibleTreemapRects(
+        rects,
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 100,
+        margin: 250,
+      ).map((r) => r.id);
+      expect(ids, ['in', 'part', 'out']);
+    });
+
+    test('touching the edge is not overlapping', () {
+      final ids = visibleTreemapRects(
+        const [TreemapRect('edge', 100, 0, 20, 20)],
+        left: 0,
+        top: 0,
+        width: 100,
+        height: 100,
+      );
+      expect(ids, isEmpty);
+    });
+  });
 }

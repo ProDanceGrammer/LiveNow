@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show listEquals, setEquals;
@@ -537,7 +538,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   // ---- nodes ----------------------------------------------------------------
 
   static bool get _addModifier =>
-      HardwareKeyboard.instance.isControlPressed ||
+      isPrimaryPressed() ||
       HardwareKeyboard.instance.isShiftPressed ||
       HardwareKeyboard.instance.isMetaPressed;
 
@@ -763,7 +764,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyA &&
-        (HardwareKeyboard.instance.isControlPressed ||
+        (isPrimaryPressed() ||
             HardwareKeyboard.instance.isMetaPressed)) {
       _setSelection(_pos.keys.toSet());
       return KeyEventResult.handled;

@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -823,29 +824,19 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
           const SingleActivator(LogicalKeyboardKey.delete): _deleteSelected,
           const SingleActivator(LogicalKeyboardKey.escape): () =>
               clearCalendarSelection(ref),
-          const SingleActivator(LogicalKeyboardKey.keyA, control: true):
+          primaryActivator(LogicalKeyboardKey.keyA):
               _selectAll,
           // Ctrl + "+" is Ctrl+= on most layouts (with or without Shift),
           // plus the numpad keys.
-          const SingleActivator(LogicalKeyboardKey.equal, control: true): () =>
+          primaryActivator(LogicalKeyboardKey.equal): () =>
               zoomCalendar(ref, 1),
-          const SingleActivator(
-            LogicalKeyboardKey.equal,
-            control: true,
-            shift: true,
-          ): () =>
+          primaryActivator(LogicalKeyboardKey.equal, shift: true): () =>
               zoomCalendar(ref, 1),
-          const SingleActivator(
-            LogicalKeyboardKey.numpadAdd,
-            control: true,
-          ): () =>
+          primaryActivator(LogicalKeyboardKey.numpadAdd): () =>
               zoomCalendar(ref, 1),
-          const SingleActivator(LogicalKeyboardKey.minus, control: true): () =>
+          primaryActivator(LogicalKeyboardKey.minus): () =>
               zoomCalendar(ref, -1),
-          const SingleActivator(
-            LogicalKeyboardKey.numpadSubtract,
-            control: true,
-          ): () =>
+          primaryActivator(LogicalKeyboardKey.numpadSubtract): () =>
               zoomCalendar(ref, -1),
         },
         child: Focus(focusNode: _focus, autofocus: true, child: widget.child),
@@ -2427,7 +2418,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// own claim on the same event and the grid doesn't also scroll.
   void _onWheel(PointerSignalEvent event) {
     if (event is! PointerScrollEvent ||
-        !HardwareKeyboard.instance.isControlPressed) {
+        !isPrimaryPressed()) {
       return;
     }
     final focalInViewport = event.localPosition.dy - _scroll.offset;

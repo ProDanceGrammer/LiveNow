@@ -59,6 +59,23 @@ class MetricPicker extends ConsumerWidget {
   /// Shows each direction's "Urgency to Keep in Balance" before its chip.
   final bool showUrgency;
 
+  /// The same searchable multi-select the picker's "Add…" opens, for a screen
+  /// that keeps its own selection (the Treemap's planned-hours directions).
+  /// Returns the chosen ids, or null when cancelled.
+  static Future<Set<String>?> pickMany(
+    BuildContext context, {
+    required List<Metric> candidates,
+    required Set<String> initial,
+    String title = 'Choose growth directions',
+  }) => showStackedDialog<Set<String>>(
+    context: context,
+    builder: (_) => _MetricSearchDialog(
+      metrics: candidates,
+      initial: initial,
+      title: title,
+    ),
+  );
+
   Widget _withUrgency(BuildContext context, MetricStat? stat, Widget chip) {
     if (stat == null) return chip;
     return Row(
@@ -196,8 +213,13 @@ class MetricPicker extends ConsumerWidget {
 class _MetricSearchDialog extends StatefulWidget {
   final List<Metric> metrics;
   final Set<String> initial;
+  final String title;
 
-  const _MetricSearchDialog({required this.metrics, required this.initial});
+  const _MetricSearchDialog({
+    required this.metrics,
+    required this.initial,
+    this.title = 'Choose growth directions',
+  });
 
   @override
   State<_MetricSearchDialog> createState() => _MetricSearchDialogState();
@@ -221,7 +243,7 @@ class _MetricSearchDialogState extends State<_MetricSearchDialog> {
     ]..sort((a, b) => a.name.compareTo(b.name));
 
     return AlertDialog(
-      title: const Text('Choose growth directions'),
+      title: Text(widget.title),
       content: SizedBox(
         width: 460,
         height: 460,

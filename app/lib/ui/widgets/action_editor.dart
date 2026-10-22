@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -421,9 +422,9 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     // own command, see NotesEditor.onSave, so it does not swallow the key).
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true): _saveStay,
-        const SingleActivator(LogicalKeyboardKey.enter, control: true): _save,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+        primaryActivator(LogicalKeyboardKey.keyS): _saveStay,
+        primaryActivator(LogicalKeyboardKey.enter): _save,
+        primaryActivator(LogicalKeyboardKey.numpadEnter):
             _save,
       },
       child: AlertDialog(

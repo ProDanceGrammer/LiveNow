@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -355,7 +356,7 @@ class ActionCard extends ConsumerWidget {
     final keys = HardwareKeyboard.instance;
     final notifier = ref.read(currentSelectionProvider.notifier);
     // On a phone, once something is selected a tap just toggles (no keys).
-    if (keys.isControlPressed ||
+    if (isPrimaryPressed() ||
         keys.isShiftPressed ||
         (usePhoneLayout(context) && notifier.state.isNotEmpty)) {
       _toggleSelected(ref);

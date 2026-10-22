@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'package:flutter/cupertino.dart'
     show
         CupertinoDatePicker,
@@ -152,7 +153,7 @@ class _QuickTimeEditDialogState extends State<QuickTimeEditDialog> {
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    final ctrl = HardwareKeyboard.instance.isControlPressed;
+    final ctrl = isPrimaryPressed();
 
     if (key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {

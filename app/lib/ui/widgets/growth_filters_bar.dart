@@ -9,8 +9,15 @@ import '../theme/glass_theme.dart';
 /// The filters on one row on a desktop; on a phone the search field gets a row
 /// of its own and the dropdowns share the next one. The first child must be an
 /// `Expanded` (the search field); `SizedBox` children are spacers.
-Widget growthFilterFlow(bool phone, List<Widget> kids) {
-  if (!phone) return Row(children: kids);
+Widget growthFilterFlow(bool phone, List<Widget> kids, {Widget? trailing}) {
+  if (!phone) {
+    return Row(
+      children: [
+        ...kids,
+        if (trailing != null) ...[const SizedBox(width: 4), trailing],
+      ],
+    );
+  }
   final search = (kids.first as Expanded).child;
   final rest = [
     for (final w in kids.skip(1))
@@ -26,6 +33,7 @@ Widget growthFilterFlow(bool phone, List<Widget> kids) {
             if (i > 0) const SizedBox(width: 12),
             Expanded(child: rest[i]),
           ],
+          if (trailing != null) ...[const SizedBox(width: 4), trailing],
         ],
       ),
     ],
@@ -36,9 +44,16 @@ Widget growthFilterFlow(bool phone, List<Widget> kids) {
 /// ([growthSearchProvider], [growthKindProvider]). [beforeKind] are extra
 /// controls placed between them (the List's sort).
 class GrowthFiltersBar extends ConsumerStatefulWidget {
-  const GrowthFiltersBar({super.key, this.beforeKind = const []});
+  const GrowthFiltersBar({
+    super.key,
+    this.beforeKind = const [],
+    this.trailing,
+  });
 
   final List<Widget> beforeKind;
+
+  /// A control at the end of the row (the Treemap's Filters button).
+  final Widget? trailing;
 
   @override
   ConsumerState<GrowthFiltersBar> createState() => _GrowthFiltersBarState();
@@ -96,6 +111,6 @@ class _GrowthFiltersBarState extends ConsumerState<GrowthFiltersBar> {
         ],
         onChanged: (v) => ref.read(growthKindProvider.notifier).state = v,
       ),
-    ]);
+    ], trailing: widget.trailing);
   }
 }

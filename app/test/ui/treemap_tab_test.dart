@@ -8,9 +8,11 @@ import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/growth_rules.dart';
 import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/ui/layout.dart' show kFabClearance;
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/screens/growth_directions_screen.dart';
 import 'package:livenow/ui/widgets/growth_direction_dialog.dart';
+import 'package:livenow/ui/widgets/treemap_canvas.dart';
 
 void main() {
   setUpAll(initPostponeTimeZoneData);
@@ -103,10 +105,15 @@ void main() {
     await settle(tester);
   }
 
-  Future<void> openTreemap(WidgetTester tester) async {
+  Future<void> openTreemap(WidgetTester tester, {bool filters = true}) async {
     await tester.tap(find.text('Treemap'));
     await animate(tester);
     await settle(tester);
+    // The filters are hidden until asked for.
+    if (filters) {
+      await tester.tap(find.byKey(const ValueKey('treemap-options-toggle')));
+      await settle(tester);
+    }
   }
 
   Future<void> unmount(WidgetTester tester) async {
@@ -132,7 +139,7 @@ void main() {
   ) async {
     await pumpScreen(
       tester,
-      size: const Size(700, 700),
+      size: const Size(700, 1000),
       seeder: (metrics, actions) async {
         final main = await metrics.saveMetric(
           name: 'Main',
@@ -347,6 +354,56 @@ void main() {
       expect(r.right, lessThanOrEqualTo(screen.width));
       expect(r.bottom, lessThanOrEqualTo(screen.height));
     }
+    await unmount(tester);
+  });
+
+  testWidgets('the filter panel is hidden by default; search and type stay', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+    await openTreemap(tester, filters: false);
+    expect(find.byKey(const ValueKey('growth-search')), findsOneWidget);
+    expect(find.byKey(const ValueKey('growth-kind')), findsOneWidget);
+    expect(find.byKey(const ValueKey('treemap-options-toggle')), findsOneWidget);
+    expect(find.byKey(const ValueKey('treemap-mode-time')), findsNothing);
+    expect(find.byKey(const ValueKey('treemap-period-week')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('treemap-options-toggle')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('treemap-mode-time')), findsOneWidget);
+    expect(find.byKey(const ValueKey('treemap-period-week')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('treemap-options-toggle')));
+    await settle(tester);
+    expect(find.byKey(const ValueKey('treemap-mode-time')), findsNothing);
+    await unmount(tester);
+  });
+
+  testWidgets('the toggle is marked while a non-default filter is set', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+    await openTreemap(tester, filters: false);
+    bool selected() => tester
+        .widget<IconButton>(find.byKey(const ValueKey('treemap-options-toggle')))
+        .isSelected!;
+    expect(selected(), isFalse);
+    await tester.tap(find.byKey(const ValueKey('treemap-options-toggle')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('treemap-period-year')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('treemap-options-toggle')));
+    await settle(tester);
+    // Closed again, but the year period keeps it highlighted.
+    expect(selected(), isTrue);
+    await unmount(tester);
+  });
+
+  testWidgets('the chart ends above the round + button', (tester) async {
+    await pumpScreen(tester);
+    await openTreemap(tester, filters: false);
+    final bottom = tester.getBottomLeft(find.byType(TreemapCanvas)).dy;
+    expect(bottom, lessThanOrEqualTo(1800 - kFabClearance + 0.5));
     await unmount(tester);
   });
 }

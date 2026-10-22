@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -136,7 +137,7 @@ class ActionTile extends ConsumerWidget {
         final selection = ref.read(allSelectionProvider.notifier);
         final kb = HardwareKeyboard.instance;
         if (selection.state.isNotEmpty ||
-            kb.isControlPressed ||
+            isPrimaryPressed() ||
             kb.isShiftPressed) {
           selection.toggle(action.id);
         } else {

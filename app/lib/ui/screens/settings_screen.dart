@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +11,7 @@ import '../data_imports.dart';
 import '../device_prefs.dart' show setDevicePrefBool;
 import '../reminders.dart';
 import '../notch_side.dart';
+import '../text_tool_access.dart';
 import '../work_hours.dart';
 import '../layout.dart';
 import '../../domain/work_hours.dart';
@@ -114,6 +115,25 @@ class SettingsScreen extends ConsumerWidget {
                       setDevicePrefBool(ref, kShowDoneAllDayKey, v),
                 ),
               ),
+              if (defaultTargetPlatform == TargetPlatform.windows) ...[
+                title('Other programs'),
+                _Panel(
+                  child: SwitchListTile(
+                    key: const ValueKey('settings-text-tool-access'),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    title: const Text('Let other programs see the text fields'),
+                    subtitle: const Text(
+                      'For dictation and text-editing tools that find the '
+                      'focused text through Windows accessibility. Try it if '
+                      'such a tool does nothing in LiveNow. Uses a little '
+                      'more CPU on busy screens',
+                    ),
+                    value: ref.watch(textToolAccessProvider),
+                    onChanged: (v) =>
+                        setDevicePrefBool(ref, kTextToolAccessKey, v),
+                  ),
+                ),
+              ],
               if (LocalNotificationsSink.supported) ...[
                 title('Notifications'),
                 _Panel(

@@ -1,0 +1,86 @@
+# Builds an UNSIGNED macOS app and packs it as LiveNow.dmg on a GitHub macOS
+# runner, so no Mac of your own is needed to get the build. The .dmg holds
+# LiveNow.app, the two hub scripts and a short README.
+#
+# Runs ONLY when you ask: push a tag that starts with "mac-" (git tag mac-1 &&
+# git push origin mac-1) or press "Run workflow" on the Actions page.
+name: macOS build (unsigned)
+
+on:
+  push:
+    tags: ['mac-*']
+  workflow_dispatch:
+
+# The job only reads the repository: the token gets nothing else.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      # Actions are pinned to a commit (the comment names the tag it was taken
+      # from), so a moved or hijacked tag cannot change what runs here.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode_*.app
+          NEWEST=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Static analysis
+        run: flutter analyze lib
+
+      - name: Build (release)
+        run: flutter build macos --release
+
+      # A downloaded app with no developer signature must at least carry a valid
+      # ad-hoc one, or Apple Silicon refuses to start it at all.
+      - name: Sign ad hoc
+        run: |
+          APP="build/macos/Build/Products/Release/LiveNow.app"
+          codesign --force --deep -s - "$APP"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Pack the .dmg
+        run: |
+          APP="build/macos/Build/Products/Release/LiveNow.app"
+          STAGE="$RUNNER_TEMP/livenow-dmg"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/Hub"
+          ditto "$APP" "$STAGE/LiveNow.app"
+          cp macos/hub/install_hub_mac.sh macos/hub/uninstall_hub_mac.sh "$STAGE/Hub/"
+          chmod +x "$STAGE/Hub/"*.sh
+          ln -s /Applications "$STAGE/Applications"
+          cat > "$STAGE/README.txt" <<'EOF'
+          LiveNow for macOS (unsigned)
+
+          1. Drag LiveNow.app onto Applications.
+          2. The first time: right-click LiveNow in Applications > Open > Open
+             (macOS warns about an unidentified developer; this is expected).
+          3. Optional, an always-on sync hub that runs without the window:
+             open Terminal, then run   Hub/install_hub_mac.sh
+             (run it again after every new LiveNow build; Hub/uninstall_hub_mac.sh
+             removes it).
+          EOF
+          hdiutil create -volname LiveNow -srcfolder "$STAGE" -ov -format UDZO "$GITHUB_WORKSPACE/app/LiveNow.dmg"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: livenow-macos-unsigned
+          path: app/LiveNow.dmg
+          retention-days: 7

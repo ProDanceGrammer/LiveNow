@@ -1,3 +1,4 @@
+import 'date_range_filter.dart';
 import 'growth_rules.dart';
 
 // Time spent per growth direction (the Treemap tab) and the filter the List and
@@ -37,16 +38,27 @@ enum TreemapPeriod {
 /// and count directions get a time too. An action linked to several directions
 /// counts fully in each of them, so the sum over directions is not unique time.
 /// A direction with no such action is absent.
+///
+/// An active custom [range] (calendar days, both ends included, see
+/// [DateRangeFilter]) REPLACES the period: only actions whose start (else last
+/// change) falls on a day inside it count. It is resolved ONCE here, against the
+/// same [nowUtc], so a quick preset such as "Last week" means today's dates.
 Map<String, Duration> timeSpentPerDirection(
   Iterable<LinkedActionFact> facts, {
   required DateTime nowUtc,
   required TreemapPeriod period,
+  DateRangeFilter? range,
 }) {
   final since = period.since(nowUtc);
+  final custom = range != null && range.active ? range.resolved(nowUtc) : null;
   final seconds = <String, int>{};
   for (final f in facts) {
     if (!f.isDone) continue;
-    if (since != null && f.windowTime.isBefore(since)) continue;
+    if (custom != null) {
+      if (!custom.contains(f.windowTime, nowUtc: nowUtc)) continue;
+    } else if (since != null && f.windowTime.isBefore(since)) {
+      continue;
+    }
     seconds[f.metricId] = (seconds[f.metricId] ?? 0) + f.duration.inSeconds;
   }
   return {

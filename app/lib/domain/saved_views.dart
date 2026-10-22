@@ -156,14 +156,14 @@ T? _byName<T extends Enum>(List<T> values, Object? name) {
 /// A quick choice (Last week, Today ...) is saved as its NAME, not its dates:
 /// reopening the view applies the same choice with the new dates. A custom range
 /// keeps its two days.
-Map<String, Object?> _rangeToJson(DateRangeFilter r) => r.preset != null
+Map<String, Object?> dateRangeToJson(DateRangeFilter r) => r.preset != null
     ? {'preset': r.preset!.name}
     : {
         if (r.from != null) 'from': r.from!.toUtc().toIso8601String(),
         if (r.until != null) 'until': r.until!.toUtc().toIso8601String(),
       };
 
-DateRangeFilter _rangeFromJson(Object? j) {
+DateRangeFilter dateRangeFromJson(Object? j) {
   if (j is! Map) return const DateRangeFilter();
   final preset = _byName(DatePreset.values, j['preset']);
   if (preset != null) return DateRangeFilter(preset: preset);
@@ -202,7 +202,7 @@ Map<String, Object?> txFilterToJson(TxFilters f, TxSearchFlags flags) => {
   'accounts': f.accountIds.toList()..sort(),
   'action': f.action.name,
   'actions': f.actionIds.toList()..sort(),
-  'range': _rangeToJson(f.dateRange),
+  'range': dateRangeToJson(f.dateRange),
   'flags': {'name': flags.name, 'category': flags.category, 'action': flags.action},
 };
 
@@ -221,7 +221,7 @@ Map<String, Object?> txFilterToJson(TxFilters f, TxSearchFlags flags) => {
       accountIds: _ids(j['accounts'], knownAccountIds),
       action: _byName(TxActionLink.values, j['action']) ?? TxActionLink.any,
       actionIds: _ids(j['actions']),
-      dateRange: _rangeFromJson(j['range']),
+      dateRange: dateRangeFromJson(j['range']),
     ),
     flags: fl is Map
         ? TxSearchFlags(
@@ -296,7 +296,7 @@ Map<String, Object?> allFilterToJson(AllActionsFilters f, SearchFlags flags) => 
   if (f.maxMinutes != null) 'maxMinutes': f.maxMinutes,
   if (f.minUrgency != null) 'minUrgency': f.minUrgency,
   if (f.maxUrgency != null) 'maxUrgency': f.maxUrgency,
-  'range': _rangeToJson(f.dateRange),
+  'range': dateRangeToJson(f.dateRange),
   'flags': {'name': flags.name, 'notes': flags.notes, 'directions': flags.directions},
 };
 
@@ -318,7 +318,7 @@ Map<String, Object?> allFilterToJson(AllActionsFilters f, SearchFlags flags) => 
       maxMinutes: (j['maxMinutes'] as num?)?.toInt(),
       minUrgency: (j['minUrgency'] as num?)?.toDouble(),
       maxUrgency: (j['maxUrgency'] as num?)?.toDouble(),
-      dateRange: _rangeFromJson(j['range']),
+      dateRange: dateRangeFromJson(j['range']),
     ),
     flags: fl is Map
         ? SearchFlags(

@@ -1,3 +1,4 @@
+import 'ui/shortcut_keys.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,16 +45,9 @@ class LiveNowApp extends ConsumerWidget {
     // shortcut scoped to `home` alone would miss it.
     return CallbackShortcuts(
       bindings: {
-        LogicalKeySet(
-          LogicalKeyboardKey.control,
-          LogicalKeyboardKey.keyZ,
-        ): () =>
+        primaryActivator(LogicalKeyboardKey.keyZ): () =>
             performUndo(ref),
-        LogicalKeySet(
-          LogicalKeyboardKey.control,
-          LogicalKeyboardKey.shift,
-          LogicalKeyboardKey.keyL,
-        ): () =>
+        primaryActivator(LogicalKeyboardKey.keyL, shift: true): () =>
             ref.read(themeModeProvider.notifier).toggle(),
       },
       child: Focus(

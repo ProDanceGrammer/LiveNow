@@ -107,3 +107,42 @@ List<TreemapRect> squarify(
   }
   return out;
 }
+
+/// The zoom levels of a treemap (1 = the chart fits the window).
+const kTreemapZoomSteps = <double>[1, 1.5, 2, 3, 4, 6, 8];
+
+/// The next zoom level in direction [dir] (+1 in, -1 out). [current] is first
+/// snapped to the nearest step (a pinch can leave it in between); the result
+/// is clamped to the first and last step.
+double stepTreemapZoom(double current, int dir) {
+  var nearest = 0;
+  for (var i = 1; i < kTreemapZoomSteps.length; i++) {
+    if ((kTreemapZoomSteps[i] - current).abs() <
+        (kTreemapZoomSteps[nearest] - current).abs()) {
+      nearest = i;
+    }
+  }
+  final next = (nearest + (dir > 0 ? 1 : -1)).clamp(
+    0,
+    kTreemapZoomSteps.length - 1,
+  );
+  return kTreemapZoomSteps[next];
+}
+
+/// The [rects] that overlap the viewport (left, top, width, height in the same
+/// units) grown by [margin] on every side, so only those need a widget.
+List<TreemapRect> visibleTreemapRects(
+  Iterable<TreemapRect> rects, {
+  required double left,
+  required double top,
+  required double width,
+  required double height,
+  double margin = 0,
+}) {
+  final l = left - margin, t = top - margin;
+  final r = left + width + margin, b = top + height + margin;
+  return [
+    for (final k in rects)
+      if (k.right > l && k.x < r && k.bottom > t && k.y < b) k,
+  ];
+}

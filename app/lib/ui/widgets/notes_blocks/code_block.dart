@@ -97,7 +97,7 @@ class _CodeBlockComponentWidgetState extends State<CodeBlockComponentWidget>
         editorState.editorStyle.textStyleConfiguration.text.fontSize ?? 16;
     final codeStyle = TextStyle(
       fontFamily: 'Consolas',
-      fontFamilyFallback: const ['Cascadia Mono', 'Courier New', 'monospace'],
+      fontFamilyFallback: const ['Cascadia Mono', 'Menlo', 'Courier New', 'monospace'],
       fontSize: bodySize - 2,
       height: 1.5,
     );

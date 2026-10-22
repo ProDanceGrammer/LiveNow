@@ -110,6 +110,7 @@ CommandShortcutEvent _key(
   key: key,
   getDescription: () => description,
   command: command,
+  macOSCommand: command.replaceAll('ctrl+', 'cmd+'),
   handler: handler,
 );
 

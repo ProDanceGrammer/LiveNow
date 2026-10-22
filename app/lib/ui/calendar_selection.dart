@@ -1,3 +1,4 @@
+import 'shortcut_keys.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
@@ -19,7 +20,7 @@ final calendarSelectionProvider = StateProvider<Set<String>>(
 /// instead of replacing it.
 bool isAdditiveCalendarClick() =>
     HardwareKeyboard.instance.isShiftPressed ||
-    HardwareKeyboard.instance.isControlPressed;
+    isPrimaryPressed();
 
 /// A plain click: [id] becomes the only selected event.
 void selectOnlyCalendarEvent(WidgetRef ref, String id) {

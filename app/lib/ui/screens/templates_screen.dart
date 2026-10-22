@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -648,8 +649,8 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
     // own command through NotesEditor.onSave).
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.enter, control: true): _save,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+        primaryActivator(LogicalKeyboardKey.enter): _save,
+        primaryActivator(LogicalKeyboardKey.numpadEnter):
             _save,
       },
       child: _dialog(context, expanded, media, width, notesHeight),
@@ -771,6 +772,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
                   label: 'Growth directions',
                   selectedIds: _selectedMetricIds,
                   onChanged: (ids) => setState(() => _selectedMetricIds = ids),
+                  onOpen: (m) => openDirectionById(context, ref, m.id),
                 ),
                     ],
                   ),

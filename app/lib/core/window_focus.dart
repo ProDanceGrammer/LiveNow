@@ -2,9 +2,10 @@ import 'dart:ffi';
 import 'dart:io' show Platform;
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:win32/win32.dart';
 
-/// Windows only: brings this app's window to the front (restoring it when it
+/// Windows and macOS: brings this app's window to the front (restoring it when it
 /// is minimized). A tapped notification must make the app visible, not just
 /// open an editor in a window nobody can see. `SetForegroundWindow` alone is
 /// often refused for a background process, so the thread input of the current
@@ -14,6 +15,14 @@ import 'package:win32/win32.dart';
 /// Only the window of process [pid] (default: this process) is touched, so a
 /// second running copy of the app is never raised by mistake.
 bool bringWindowToFront({int? pid}) {
+  if (Platform.isMacOS) {
+    // The runner's `io.livenow/window` channel activates the app and shows its
+    // window (MainFlutterWindow.swift). Fire and forget.
+    const MethodChannel('io.livenow/window')
+        .invokeMethod<void>('activate')
+        .catchError((Object _) {});
+    return true;
+  }
   if (!Platform.isWindows) return false;
   try {
     final hwnd = findOwnWindow(pid: pid);

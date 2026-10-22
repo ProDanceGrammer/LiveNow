@@ -14,7 +14,8 @@ import '../providers.dart';
 // through to the system's colour font.
 final _kEmojiFonts = [
   if (defaultTargetPlatform != TargetPlatform.iOS &&
-      defaultTargetPlatform != TargetPlatform.android)
+      defaultTargetPlatform != TargetPlatform.android &&
+      defaultTargetPlatform != TargetPlatform.macOS)
     'TwemojiFlags',
   'Segoe UI Emoji',
   'Apple Color Emoji',

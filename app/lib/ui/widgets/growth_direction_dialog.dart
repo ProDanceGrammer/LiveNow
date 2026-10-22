@@ -1,3 +1,4 @@
+import '../shortcut_keys.dart';
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
@@ -217,9 +218,9 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
     return CallbackShortcuts(
       // Ctrl+Enter = Save, from any field.
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.enter, control: true):
+        primaryActivator(LogicalKeyboardKey.enter):
             _saveIfReady,
-        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true):
+        primaryActivator(LogicalKeyboardKey.numpadEnter):
             _saveIfReady,
       },
       child: AlertDialog(

@@ -28,10 +28,15 @@ class LocalNotificationsSink implements ReminderSink {
   List<ReminderMoment> _pending = const [];
 
   static bool get _isIos => !kIsWeb && Platform.isIOS;
+  static bool get _isMac => !kIsWeb && Platform.isMacOS;
   static bool get _isWindows => !kIsWeb && Platform.isWindows;
 
+  /// iOS and macOS both hand the system the nearest moments to schedule
+  /// (it delivers them even when the app is closed); Windows keeps one timer.
+  static bool get _isDarwin => _isIos || _isMac;
+
   /// Which platforms get reminders at all.
-  static bool get supported => _isIos || _isWindows;
+  static bool get supported => _isDarwin || _isWindows;
 
   /// Starts the plugin (once); false where reminders are unavailable.
   Future<bool> init() => _init();
@@ -64,6 +69,11 @@ class LocalNotificationsSink implements ReminderSink {
             requestBadgePermission: false,
             requestSoundPermission: false,
           ),
+          macOS: DarwinInitializationSettings(
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
+          ),
           windows: WindowsInitializationSettings(
             appName: 'LiveNow',
             appUserModelId: 'io.livenow.LiveNow',
@@ -79,14 +89,22 @@ class LocalNotificationsSink implements ReminderSink {
   }
 
   Future<void> _askPermission() async {
-    if (_asked || !_isIos) return;
+    if (_asked || !_isDarwin) return;
     _asked = true;
     try {
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin
-          >()
-          ?.requestPermissions(alert: true, sound: true);
+      if (_isMac) {
+        await _plugin
+            .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin
+            >()
+            ?.requestPermissions(alert: true, sound: true);
+      } else {
+        await _plugin
+            .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin
+            >()
+            ?.requestPermissions(alert: true, sound: true);
+      }
     } catch (_) {}
   }
 
@@ -98,7 +116,7 @@ class LocalNotificationsSink implements ReminderSink {
     if (!supported) return;
     if (!await _init()) return;
     try {
-      if (_isIos) {
+      if (_isDarwin) {
         await _plugin.cancelAll();
         if (moments.isEmpty) return;
         await _askPermission();
@@ -109,6 +127,7 @@ class LocalNotificationsSink implements ReminderSink {
             scheduledDate: tz.TZDateTime.from(m.at, zone),
             notificationDetails: const NotificationDetails(
               iOS: DarwinNotificationDetails(),
+              macOS: DarwinNotificationDetails(),
             ),
             title: _title(m),
             body: m.title,

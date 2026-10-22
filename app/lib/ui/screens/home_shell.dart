@@ -22,6 +22,7 @@ import '../theme_mode.dart';
 import '../widgets/app_toast.dart' show toastBottomInset;
 import '../widgets/glass.dart';
 import '../sync_providers.dart';
+import '../text_tool_access.dart';
 import '../widgets/instant_rail.dart';
 import '../widgets/sync_status_button.dart';
 import 'actions_section.dart';
@@ -41,6 +42,7 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell>
     with WidgetsBindingObserver {
   ReminderScheduler? _reminders;
+  final _textToolAccess = TextToolAccess();
 
   int _index = 0;
   bool _phoneCalendarInit = false;
@@ -84,6 +86,12 @@ class _HomeShellState extends ConsumerState<HomeShell>
         );
       }
       WidgetsBinding.instance.addObserver(this);
+      // Accessibility tree for other programs' text tools (Settings switch).
+      ref.listenManual(
+        textToolAccessProvider,
+        (_, on) => _textToolAccess.apply(on),
+        fireImmediately: true,
+      );
     }
   }
 
@@ -102,6 +110,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _reminders?.dispose();
+    _textToolAccess.dispose();
     super.dispose();
   }
 

@@ -663,6 +663,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
       code: TextStyle(
         color: scheme.error,
         fontFamily: 'Consolas',
+        fontFamilyFallback: const ['Menlo', 'Courier New'],
         backgroundColor: scheme.surfaceContainerHighest,
       ),
       lineHeight: 1.45,
