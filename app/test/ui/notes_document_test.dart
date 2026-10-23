@@ -99,33 +99,4 @@ void main() {
     final todo = Document.blank()..insert([0], [todoListNode(checked: false)]);
     expect(notesDocumentToJson(todo), isNotNull);
   });
-
-  test('resetChecklist unticks nested items and keeps text', () async {
-    final doc = Document.blank()
-      ..insert(
-        [0],
-        [
-          todoListNode(
-            checked: true,
-            text: 'Один',
-            children: [todoListNode(checked: true, text: 'Вкладений')],
-          ),
-          paragraphNode(text: 'p'),
-          todoListNode(checked: false, text: 'Три'),
-        ],
-      );
-    final state = EditorState(document: doc);
-    await resetChecklist(state);
-    expect(
-      dumpDoc(state.document),
-      'todo_list:Один[todo_list:Вкладений] | paragraph:p | todo_list:Три',
-    );
-    // No checked items -> no transaction (nothing to undo).
-    var changes = 0;
-    final sub = state.transactionStream.listen((_) => changes++);
-    await resetChecklist(state);
-    await Future<void>.delayed(Duration.zero);
-    await sub.cancel();
-    expect(changes, 0);
-  });
 }

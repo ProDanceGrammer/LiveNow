@@ -407,8 +407,6 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     await _editorState.apply(transaction);
   }
 
-  Future<void> _resetChecklist() => resetChecklist(_editorState);
-
   /// Sets every checkbox row inside [sel] to [checked] in ONE transaction (one
   /// Undo step); the selection is kept so the next toggle works on the same rows.
   /// Returns how many rows it touched.
@@ -829,11 +827,6 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
             spacing: 6,
             runSpacing: 4,
             children: [
-              TextButton(
-                style: buttonStyle,
-                onPressed: _resetChecklist,
-                child: const Text('Reset checkboxes'),
-              ),
               // Windows: Ctrl+Shift+V does it. A phone keeps the button as a
               // fallback next to the selection toolbar's Paste MD.
               if (usePhoneLayout(context))

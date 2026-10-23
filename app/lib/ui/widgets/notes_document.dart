@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:appflowy_editor/appflowy_editor.dart';
 
 /// Pure helpers for the notes editor's document (no widget code): JSON
-/// (de)serialisation, emptiness, checklist reset and Markdown import.
+/// (de)serialisation, emptiness and Markdown import.
 
 const _listTypes = {'todo_list', 'bulleted_list', 'numbered_list'};
 
@@ -38,23 +38,6 @@ bool notesDocumentIsEmpty(Document doc) {
 /// The JSON to store for [doc], or null when it is empty.
 String? notesDocumentToJson(Document doc) =>
     notesDocumentIsEmpty(doc) ? null : jsonEncode(doc.toJson());
-
-/// Sets `checked: false` on every `todo_list` node (recursively) in one
-/// transaction. Does nothing when no item is checked.
-Future<void> resetChecklist(EditorState state) async {
-  final transaction = state.transaction;
-  var changed = false;
-  void walk(Node node) {
-    if (node.type == 'todo_list' && node.attributes['checked'] == true) {
-      transaction.updateNode(node, {'checked': false});
-      changed = true;
-    }
-    node.children.forEach(walk);
-  }
-
-  state.document.root.children.forEach(walk);
-  if (changed) await state.apply(transaction);
-}
 
 /// Converts Markdown to a document. On top of the package's
 /// `markdownToDocument` it trims the leading whitespace list items keep after

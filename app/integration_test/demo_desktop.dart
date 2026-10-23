@@ -63,7 +63,6 @@ Future<void> desktopDemo(WidgetTester tester, Demo demo) async {
     await demo.scene('Open a running action: notes with checklist, toggle and code');
     await demo.tap(find.textContaining('Deep work').first, after: 1800, note: 'Deep work card');
     await demo.scroll(dy: 700);
-    await demo.tapText('Reset checkboxes');
     await demo.tapTooltip('Start');
     await demo.pause(800);
     await demo.closeDialog();

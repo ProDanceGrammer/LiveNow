@@ -261,7 +261,6 @@ void main() {
     await open(tester);
     expect(notesTile(tester).initiallyExpanded, isFalse);
     expect(find.byType(NotesEditor), findsNothing);
-    expect(find.text('Reset checkboxes'), findsNothing);
     expect(NotesEditorState.createdCount, before);
     await teardown(tester);
   });
@@ -286,7 +285,6 @@ void main() {
           ?.toPlainText(),
       'Hi',
     );
-    expect(find.text('Reset checkboxes'), findsOneWidget);
     await teardown(tester);
   });
 

@@ -81,7 +81,6 @@ void main() {
     ]);
     final state = await pumpEditor(tester, json: json, onToggle: () {});
     expect(find.byType(AppFlowyEditor), findsOneWidget);
-    expect(find.text('Reset checkboxes'), findsOneWidget);
     // Windows: Paste as Markdown is the Ctrl+Shift+V shortcut, no button.
     expect(find.text('Paste as Markdown'), findsNothing);
     expect(find.text('Expand'), findsOneWidget);
@@ -158,23 +157,6 @@ void main() {
     );
     await unmount(tester); // disposes before the 400 ms elapse
     expect(calls, [null]);
-  });
-
-  testWidgets('Reset checkboxes unticks nested items', (tester) async {
-    final json = jsonOf([
-      todoListNode(
-        checked: true,
-        text: 'A',
-        children: [todoListNode(checked: true, text: 'B')],
-      ),
-    ]);
-    final calls = <String?>[];
-    final state = await pumpEditor(tester, json: json, onChanged: calls.add);
-    await tester.tap(find.text('Reset checkboxes'));
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(dumpDoc(state.editorState.document), 'todo_list:A[todo_list:B]');
-    expect(calls, hasLength(1));
-    await unmount(tester);
   });
 
   testWidgets('Paste as Markdown inserts the converted blocks', (tester) async {
