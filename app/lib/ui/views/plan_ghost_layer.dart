@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show DragStartBehavior;
+import 'package:flutter/gestures.dart'
+    show DragStartBehavior, PointerDeviceKind, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 
 import '../../domain/plan_rules.dart';
+import 'calendar_layout.dart' show snapToNeighbours;
 
 /// Planning mode's translucent blocks (one per plan occurrence on the viewed
 /// days), drawn UNDER the real events. Self-contained: the calendar hands in the
@@ -25,7 +27,10 @@ import '../../domain/plan_rules.dart';
 ///
 /// Desktop: drag a block (any slice) to change its time of day (10-minute steps),
 /// drag the bottom edge of its last slice to change its length, double-click to
-/// edit the plan item. Phone: long-press then drag to move, tap to edit. A change
+/// edit the plan item. Dragging with the RIGHT mouse button moves the block with a
+/// magnet: it locks onto the start / end of the other plan blocks (off the
+/// 10-minute grid too), so plan items line up one after another like real
+/// actions do. Phone: long-press then drag to move, tap to edit. A change
 /// is reported as the occurrence plus the new start / duration; the host decides
 /// whether it is "this day only" or "the whole pattern".
 class PlanGhostLayer extends StatefulWidget {
@@ -62,10 +67,22 @@ class PlanGhostLayer extends StatefulWidget {
 }
 
 class _GhostDrag {
-  _GhostDrag(this.key, this.resize, this.startY, this.originScroll)
-    : lastY = startY;
+  _GhostDrag(
+    this.key,
+    this.resize,
+    this.startY,
+    this.originScroll, {
+    this.magnet = false,
+    this.edges = const [],
+  }) : lastY = startY;
   final String key;
   final bool resize;
+
+  /// A right-button drag: the block snaps onto [edges], the start / end instants
+  /// (minutes counted from the dragged occurrence's own midnight) of the OTHER
+  /// plan blocks on the visible days, sorted.
+  final bool magnet;
+  final List<int> edges;
 
   /// Where the pointer went down (global y) and where the grid was scrolled to.
   final double startY;
@@ -144,7 +161,27 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
   double _dyOf(_GhostDrag d) =>
       d.lastY - d.startY + ((_position?.pixels ?? d.originScroll) - d.originScroll);
 
-  void _beginDrag(String id, bool resize, double globalY) {
+  /// The edges the magnet can lock onto while [dragged] moves.
+  List<int> _edgesFor(PlanOccurrence dragged) {
+    final occDay = dragged.date.difference(widget.firstDay).inDays;
+    final id = _idOf(dragged);
+    final out = <int>{};
+    for (final s in _slots()) {
+      if (s.isEmpty || _idOf(s.occ) == id) continue;
+      final off = (s.day - occDay) * _kDay;
+      out
+        ..add(off + s.startMin)
+        ..add(off + s.endMin);
+    }
+    return out.toList()..sort();
+  }
+
+  void _beginDrag(
+    String id,
+    bool resize,
+    double globalY, {
+    PlanOccurrence? magnetFor,
+  }) {
     _position = Scrollable.maybeOf(context)?.position;
     _position?.addListener(_onScroll);
     _scrollTimer?.cancel();
@@ -169,8 +206,16 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
       );
       if (target != pos.pixels) pos.jumpTo(target);
     });
+    final edges = magnetFor == null ? const <int>[] : _edgesFor(magnetFor);
     setState(
-      () => _drag = _GhostDrag(id, resize, globalY, _position?.pixels ?? 0),
+      () => _drag = _GhostDrag(
+        id,
+        resize,
+        globalY,
+        _position?.pixels ?? 0,
+        magnet: magnetFor != null,
+        edges: edges,
+      ),
     );
   }
 
@@ -289,13 +334,44 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
 
   int _deltaMin(double dy) => (dy / _pxPerMin / _kSnap).round() * _kSnap;
 
+  /// How many minutes a MOVE drag shifts [o]: on the 10-minute grid, or for a
+  /// right-button drag locked onto the nearest other block's start / end when the
+  /// block comes within a few pixels of it.
+  int _moveDelta(_GhostDrag d, PlanOccurrence o) {
+    final dy = _dyOf(d);
+    final grid = _deltaMin(dy);
+    if (!d.magnet || d.edges.isEmpty) return grid;
+    final origin = DateTime.utc(2000);
+    final rawStart = origin.add(
+      Duration(seconds: ((o.startMin + dy / _pxPerMin) * 60).round()),
+    );
+    final snap = snapToNeighbours(
+      schedule: (
+        startAt: rawStart,
+        endAt: rawStart.add(Duration(minutes: o.durationMin)),
+      ),
+      moveWhole: true,
+      neighbourEdges: [
+        for (final e in d.edges) origin.add(Duration(minutes: e)),
+      ],
+      pxPerMinute: _pxPerMin,
+    );
+    if (snap.snappedTo == null) return grid;
+    return (snap.schedule.startAt.difference(origin).inSeconds / 60).round() -
+        o.startMin;
+  }
+
+  /// The right button went down on a block and has not been released: the drag
+  /// starts once the pointer has moved a few pixels.
+  ({String id, Offset origin})? _secondary;
+
   void _finish(_Slot s) {
     final d = _drag;
     final dy = d == null ? 0.0 : _dyOf(d);
     _stopDrag();
     setState(() => _drag = null);
     if (d == null) return;
-    final delta = _deltaMin(dy);
+    final delta = d.resize ? _deltaMin(dy) : _moveDelta(d, s.occ);
     if (delta == 0) return;
     if (d.resize) {
       final len = math.max(_kMinLen, s.occ.durationMin + delta);
@@ -339,7 +415,9 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     var mainStart = s.occ.startMin;
     var mainEnd = s.occ.startMin + s.occ.durationMin;
     if (drag != null) {
-      final delta = _deltaMin(_dyOf(drag));
+      final delta = drag.resize
+          ? _deltaMin(_dyOf(drag))
+          : _moveDelta(drag, s.occ);
       if (drag.resize) {
         mainEnd = math.max(mainStart + _kMinLen, mainEnd + delta);
       } else {
@@ -472,6 +550,36 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
               ),
             ),
         ],
+      );
+      // The right mouse button drags with the magnet (a plain drag recognizer
+      // only listens to the primary button), so raw pointer events are used.
+      final id = _idOf(s.occ);
+      body = Listener(
+        onPointerDown: (e) {
+          if (e.kind == PointerDeviceKind.mouse &&
+              e.buttons == kSecondaryMouseButton) {
+            _secondary = (id: id, origin: e.position);
+          }
+        },
+        onPointerMove: (e) {
+          final sec = _secondary;
+          if (sec == null || sec.id != id) return;
+          if (_drag == null) {
+            if ((e.position - sec.origin).distance < 4) return;
+            _beginDrag(id, false, sec.origin.dy, magnetFor: s.occ);
+          }
+          _moveDrag(e.position.dy);
+        },
+        onPointerUp: (_) {
+          final had = _secondary != null && _drag != null;
+          _secondary = null;
+          if (had) _finish(s);
+        },
+        onPointerCancel: (_) {
+          _secondary = null;
+          _cancelDrag();
+        },
+        child: body,
       );
     }
 

@@ -12,6 +12,7 @@ import '../dialog_stack.dart';
 import '../layout.dart';
 import '../plan_providers.dart';
 import '../providers.dart';
+import '../screens/templates_screen.dart' show TemplatesScreen;
 import '../theme/glass_theme.dart';
 import '../undo.dart';
 import 'app_toast.dart';
@@ -1064,6 +1065,12 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                   }),
                 ),
               ),
+              _EditTemplateButton(
+                key: ValueKey('$key-template-edit'),
+                template: templates
+                    .where((t) => t.id == c.templateId)
+                    .firstOrNull,
+              ),
               IconButton(
                 key: ValueKey('$key-remove'),
                 tooltip: 'Remove',
@@ -1300,7 +1307,10 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                       },
                     ),
                     const SizedBox(height: 8),
-                    DropdownButton<String?>(
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButton<String?>(
                       key: const ValueKey('plan-template'),
                       isExpanded: true,
                       value: templates.any((t) => t.id == _templateId)
@@ -1323,6 +1333,13 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                           ),
                       ],
                       onChanged: (v) => _chooseTemplate(v, templates),
+                          ),
+                        ),
+                        _EditTemplateButton(
+                          key: const ValueKey('plan-template-edit'),
+                          template: selected,
+                        ),
+                      ],
                     ),
                     // Like "Use the category's name" on a transaction.
                     if (showUseName)
@@ -1627,6 +1644,23 @@ DateTime _addMonths(DateTime d, int months) {
   return DateTime.utc(y, m, d.day > last ? last : d.day);
 }
 
+/// A pencil that opens the editor of the chosen template (greyed out when the
+/// item uses none). The template list refreshes by itself after a save.
+class _EditTemplateButton extends StatelessWidget {
+  const _EditTemplateButton({super.key, required this.template});
+  final ActionTemplate? template;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: 'Edit this template',
+    icon: const Icon(Icons.edit_outlined, size: 18),
+    visualDensity: VisualDensity.compact,
+    onPressed: template == null
+        ? null
+        : () => TemplatesScreen.showEditTemplate(context, template!),
+  );
+}
+
 /// "Confirm plan": turns the plan items into real actions up to a chosen day.
 class PlanConfirmDialog extends ConsumerStatefulWidget {
   const PlanConfirmDialog({super.key});
@@ -1719,6 +1753,16 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
   }
 
   bool _isOn(String id) => _selected == null || _selected!.contains(id);
+
+  void _selectAll(List<PlanItem> items) {
+    setState(() => _selected = null);
+    _refresh();
+  }
+
+  void _selectNone() {
+    setState(() => _selected = <String>{});
+    _refresh();
+  }
 
   /// Ticks / unticks every id in [ids].
   void _setOn(Iterable<String> ids, bool on, List<PlanItem> all) {
@@ -1856,7 +1900,21 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
                   ),
                 ),
               const SizedBox(height: 10),
-              const Text('Plan items'),
+              Row(
+                children: [
+                  const Expanded(child: Text('Plan items')),
+                  TextButton(
+                    key: const ValueKey('plan-confirm-all'),
+                    onPressed: items.isEmpty ? null : () => _selectAll(items),
+                    child: const Text('Select all'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('plan-confirm-none'),
+                    onPressed: items.isEmpty ? null : _selectNone,
+                    child: const Text('None'),
+                  ),
+                ],
+              ),
               ..._itemChecklist(items),
               const SizedBox(height: 8),
               Text(
@@ -1880,7 +1938,9 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
         ),
         FilledButton(
           key: const ValueKey('plan-confirm'),
-          onPressed: _busy || items.isEmpty ? null : _confirm,
+          onPressed: _busy || items.isEmpty || (_selected?.isEmpty ?? false)
+              ? null
+              : _confirm,
           child: const Text('Create actions'),
         ),
       ],

@@ -143,6 +143,79 @@ void main() {
     await unmount(tester);
   });
 
+  Future<String> lunchSeed(PlanService plans, {String name = 'Lunch'}) =>
+      plans.saveItem(
+        PlanItemInput(
+          name: name,
+          kind: PlanKind.cycle,
+          startDate: planDateOf(DateTime.now()).subtract(const Duration(days: 30)),
+          cycle: const CycleRule(
+            cycleDays: 1,
+            occurrences: [
+              // 11:35-12:05: off the 10-minute grid on purpose.
+              CycleOccurrence(day: 0, startMin: 11 * 60 + 35, durationMin: 30),
+            ],
+          ),
+        ),
+      );
+
+  /// Drags the first ghost of the plan item [id] from its place to 12:05 (the end
+  /// of the 'Lunch' item), with the given mouse [buttons], then chooses
+  /// "whole pattern" and returns the saved start minute of that item.
+  Future<int> dragRunTo1205(
+    WidgetTester tester,
+    String id,
+    int buttons,
+  ) async {
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    final run = find.byWidgetPredicate(
+      (w) => w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('plan-ghost-$id-') &&
+          !(w.key! as ValueKey<String>).value.startsWith('plan-ghost-handle-'),
+    ).first;
+    final pxPerMin = tester.getSize(run).height / 60;
+    final g = await tester.startGesture(
+      tester.getCenter(run),
+      kind: PointerDeviceKind.mouse,
+      buttons: buttons,
+    );
+    await g.moveBy(const Offset(0, 1));
+    await tester.pump();
+    // From 22:00 up to 12:05 = 595 minutes.
+    await g.moveBy(Offset(0, -595 * pxPerMin));
+    await tester.pump();
+    await g.up();
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('plan-scope-all')));
+    await settle(tester);
+    final item = (await tester.runAsync(
+      () => PlanService(db, ActionService(db)).items(),
+    ))!.firstWhere((r) => r.id == id);
+    return PlanService(db, ActionService(db))
+        .decode(item)
+        .cycle!
+        .occurrences
+        .single
+        .startMin;
+  }
+
+  testWidgets('a right-button drag locks onto the edge of another plan block', (
+    tester,
+  ) async {
+    final id = await mount(tester, seed: (p) => lunchSeed(p));
+    // Lunch ends at 12:05: the dragged block's start snaps there (off the grid).
+    expect(await dragRunTo1205(tester, id, kSecondaryMouseButton), 12 * 60 + 5);
+    await unmount(tester);
+  });
+
+  testWidgets('a plain drag stays on the 10-minute grid', (tester) async {
+    final id = await mount(tester, seed: (p) => lunchSeed(p));
+    final start = await dragRunTo1205(tester, id, kPrimaryMouseButton);
+    expect(start % 10, 0);
+    await unmount(tester);
+  });
+
   testWidgets('dragging a ghost: "whole pattern" changes the rule', (
     tester,
   ) async {

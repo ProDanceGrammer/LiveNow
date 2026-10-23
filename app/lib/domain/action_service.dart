@@ -664,6 +664,36 @@ class ActionService {
     });
   }
 
+  /// The occurrence rows of [actionId] that are still open (no `finished_at`),
+  /// oldest first. Normally zero or one, but nothing in the schema stops a
+  /// second one (two devices pressing Start both add a row and sync keeps both),
+  /// and reading them with `getSingleOrNull()` threw 'Too many elements', which
+  /// silently killed Start / Finish / Postpone for that action. Callers handle
+  /// the first and close the extras.
+  Future<List<ActionOccurrence>> _openOccurrences(String actionId) =>
+      (db.select(db.actionOccurrencesTable)
+            ..where((t) => t.actionId.equals(actionId) & t.finishedAt.isNull())
+            ..orderBy([(t) => OrderingTerm.asc(t.startedAt)]))
+          .get();
+
+  /// Closes the open rows in [extras] at [nowText] with [outcome].
+  Future<void> _closeOccurrences(
+    Iterable<ActionOccurrence> extras,
+    String nowText,
+    String outcome,
+  ) async {
+    for (final o in extras) {
+      await (db.update(
+        db.actionOccurrencesTable,
+      )..where((t) => t.id.equals(o.id))).write(
+        ActionOccurrencesTableCompanion(
+          finishedAt: Value(nowText),
+          outcome: Value(outcome),
+        ),
+      );
+    }
+  }
+
   /// Starts (or restarts) timing an action, and sets `start_at` to now every
   /// time — that field is the one place the UI shows/lets you postpone "the
   /// current time of this task", so every press of Start must move it,
@@ -706,18 +736,16 @@ class ActionService {
         ),
       );
 
-      final runningOccurrence =
-          await (db.select(db.actionOccurrencesTable)..where(
-                (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
-              ))
-              .getSingleOrNull();
-
-      if (runningOccurrence != null) {
+      final open = await _openOccurrences(actionId);
+      if (open.isNotEmpty) {
+        final runningOccurrence = open.first;
         // Re-pressing Start while already running resets when it "started"
         // too, rather than leaving the button looking like it did nothing.
         await (db.update(db.actionOccurrencesTable)
               ..where((t) => t.id.equals(runningOccurrence.id)))
             .write(ActionOccurrencesTableCompanion(startedAt: Value(nowText)));
+        // A stray second open row (two devices) is closed, not left to pile up.
+        await _closeOccurrences(open.skip(1), nowText, 'skipped');
         return;
       }
 
@@ -765,11 +793,9 @@ class ActionService {
               ),
             );
 
-      final runningOccurrence =
-          await (db.select(db.actionOccurrencesTable)..where(
-                (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
-              ))
-              .getSingleOrNull();
+      final open = await _openOccurrences(actionId);
+      final runningOccurrence = open.firstOrNull;
+      await _closeOccurrences(open.skip(1), nowText, 'done');
 
       if (runningOccurrence != null) {
         // Also re-sync startedAt to newStart: if it was back-projected above
@@ -1155,11 +1181,9 @@ class ActionService {
         ),
       );
 
-      final runningOccurrence =
-          await (db.select(db.actionOccurrencesTable)..where(
-                (t) => t.actionId.equals(actionId) & t.finishedAt.isNull(),
-              ))
-              .getSingleOrNull();
+      final open = await _openOccurrences(actionId);
+      final runningOccurrence = open.firstOrNull;
+      await _closeOccurrences(open.skip(1), nowText, 'postponed');
       if (runningOccurrence != null) {
         await (db.update(
           db.actionOccurrencesTable,

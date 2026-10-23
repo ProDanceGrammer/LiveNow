@@ -46,6 +46,16 @@ class TemplatesScreen extends ConsumerStatefulWidget {
 
   final bool embedded;
 
+  /// The editor of an existing template, opened from elsewhere (the plan item
+  /// editor's pencil).
+  static Future<void> showEditTemplate(
+    BuildContext context,
+    ActionTemplate template,
+  ) => showStackedDialog<void>(
+    context: context,
+    builder: (_) => _TemplateEditorDialog(existing: template),
+  );
+
   /// The "New template" dialog (the shell's FAB opens it on the Templates tab).
   static Future<void> showNewTemplate(BuildContext context) =>
       showStackedDialog<void>(

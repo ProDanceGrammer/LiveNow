@@ -1,8 +1,11 @@
 import 'ui/shortcut_keys.dart';
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/error_log.dart';
 import 'domain/postpone_rules.dart';
 import 'hub/hub_main.dart';
 import 'ui/accounts/account_gate.dart';
@@ -17,6 +20,18 @@ import 'ui/undo.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   initPostponeTimeZoneData();
+  // Anything that throws out of an async callback (a button's write failing,
+  // a stream erroring) is also written to error.log; the default handling
+  // (console) stays.
+  final previousOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    previousOnError?.call(details);
+    ErrorLog.write(details.exception, details.stack, context: 'Flutter');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    ErrorLog.write(error, stack, context: 'async');
+    return false;
+  };
   if (isHubMode(args)) {
     // The sync hub: no UI (runApp is never called, so nothing is drawn).
     await runHub(args);

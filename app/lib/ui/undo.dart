@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart'
     show StateController, StateProvider;
 
+import '../core/error_log.dart';
 import '../domain/action_service.dart' show ScheduleChange;
 import '../domain/bulk_edit_service.dart';
 import '../domain/form_effects.dart' show FormEffects;
@@ -55,9 +56,39 @@ Future<void> runUndoable(
   // the ProviderScope, so both stay valid.
   final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(undoHistoryProvider.notifier);
-  final snapshot = await service.snapshot(actionId);
-  await operation();
-  _offerUndo(overlay, lastUndo, description, () => service.restore(snapshot));
+  await _guard(overlay, description, () async {
+    final snapshot = await service.snapshot(actionId);
+    await operation();
+    _offerUndo(overlay, lastUndo, description, () => service.restore(snapshot));
+  });
+}
+
+/// Runs [body]; if it throws, the failure is not lost: it goes to the error log
+/// (`error.log`, see [ErrorLog]) and a toast says what could not be done. Before
+/// this a failing quick button only threw an unhandled async error and looked
+/// like "nothing happens".
+Future<void> _guard(
+  OverlayState overlay,
+  String description,
+  Future<void> Function() body,
+) async {
+  try {
+    await body();
+  } catch (e, st) {
+    ErrorLog.write(e, st, context: description);
+    if (overlay.mounted) {
+      showInfoToast(
+        overlay,
+        'Could not complete "$description": ${_shortReason(e)} '
+        '(details in error.log)',
+      );
+    }
+  }
+}
+
+String _shortReason(Object e) {
+  final t = e.toString().replaceFirst(RegExp(r'^[A-Za-z]*(Exception|Error): '), '');
+  return t.length > 90 ? '${t.substring(0, 87)}...' : t;
 }
 
 /// "Continue with Same Action", undoable like the other quick actions. It
@@ -71,13 +102,15 @@ Future<void> runUndoableContinue(
   final service = ref.read(actionServiceProvider);
   final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(undoHistoryProvider.notifier);
-  final result = await service.continueSameAction(sourceId);
-  _offerUndo(
-    overlay,
-    lastUndo,
-    'Continued as a new action',
-    () => service.undoContinue(result.undo),
-  );
+  await _guard(overlay, 'Continue with same action', () async {
+    final result = await service.continueSameAction(sourceId);
+    _offerUndo(
+      overlay,
+      lastUndo,
+      'Continued as a new action',
+      () => service.undoContinue(result.undo),
+    );
+  });
 }
 
 /// Deletes an action right away and offers Undo (no confirmation dialog —
@@ -95,14 +128,16 @@ Future<void> runUndoableDelete(
   final lastUndo = ref.read(undoHistoryProvider.notifier);
   final selected = ref.read(calendarSelectedActionProvider.notifier);
 
-  final undo = await service.deleteAction(actionId);
-  if (selected.state == actionId) selected.state = null;
-  _offerUndo(
-    overlay,
-    lastUndo,
-    'Deleted "${undo.action.name}"',
-    () => service.undoDelete(undo),
-  );
+  await _guard(overlay, 'Delete', () async {
+    final undo = await service.deleteAction(actionId);
+    if (selected.state == actionId) selected.state = null;
+    _offerUndo(
+      overlay,
+      lastUndo,
+      'Deleted "${undo.action.name}"',
+      () => service.undoDelete(undo),
+    );
+  });
 }
 
 /// Deletes SEVERAL actions at once (one transaction) and offers ONE Undo that
@@ -149,17 +184,19 @@ Future<void> runUndoableMoveMany(
   final overlay = rootOverlayOf(context);
   final lastUndo = ref.read(undoHistoryProvider.notifier);
 
-  final undo = await service.moveActions(list);
-  if (undo.before.isEmpty) return;
-  _offerUndo(
-    overlay,
-    lastUndo,
-    description ??
-        (undo.before.length == 1
-            ? 'Moved'
-            : 'Moved ${undo.before.length} events'),
-    () => service.undoMoveActions(undo),
-  );
+  await _guard(overlay, description ?? 'Move', () async {
+    final undo = await service.moveActions(list);
+    if (undo.before.isEmpty) return;
+    _offerUndo(
+      overlay,
+      lastUndo,
+      description ??
+          (undo.before.length == 1
+              ? 'Moved'
+              : 'Moved ${undo.before.length} events'),
+      () => service.undoMoveActions(undo),
+    );
+  });
 }
 
 /// The same growth directions for SEVERAL actions ([mode]: add / remove /

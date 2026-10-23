@@ -144,6 +144,32 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('the pencil next to the template opens its editor', (tester) async {
+    await mount(tester);
+    await template(tester, 'Swim');
+    await pumpCalendar(tester);
+    await openEditor(tester);
+
+    // No template chosen: the pencil is greyed out.
+    expect(
+      tester
+          .widget<IconButton>(
+            find.descendant(
+              of: find.byKey(const ValueKey('plan-template-edit')),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+    await pickTemplate(tester, 'Swim');
+    await tester.tap(find.byKey(const ValueKey('plan-template-edit')));
+    await settle(tester, 600);
+    // The template editor is on top, showing the template's name.
+    expect(find.widgetWithText(TextFormField, 'Swim'), findsOneWidget);
+    await unmount(tester);
+  });
+
   testWidgets('only the switch toggles "forever"; a time row duplicates', (
     tester,
   ) async {

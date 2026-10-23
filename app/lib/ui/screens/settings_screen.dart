@@ -6,6 +6,7 @@ import '../../data/reminders/local_notifications_sink.dart';
 import '../../data/backup/auto_backup.dart' show AutoBackupOutcome;
 import '../accounts/account_settings.dart';
 import '../all_day_week.dart' show kShowDoneAllDayKey, showDoneAllDayProvider;
+import '../../core/error_log.dart';
 import '../backup_providers.dart';
 import '../data_imports.dart';
 import '../device_prefs.dart' show setDevicePrefBool;
@@ -400,6 +401,20 @@ class SettingsScreen extends ConsumerWidget {
                   '(© Twitter, Inc. and other contributors, CC-BY 4.0).',
                   style: theme.textTheme.bodySmall,
                 ),
+              ),
+              FutureBuilder<String?>(
+                future: ErrorLog.path(),
+                builder: (context, snap) => snap.data == null
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                        child: SelectableText(
+                          key: const ValueKey('settings-error-log'),
+                          'Error log (send it when something does nothing): '
+                          '${snap.data}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
               ),
             ],
           ),

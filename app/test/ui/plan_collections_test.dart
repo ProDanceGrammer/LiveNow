@@ -192,4 +192,28 @@ void main() {
     expect(on('plan-confirm-item-$run'), isTrue);
     await unmount(tester);
   });
+
+  testWidgets('Select all / None tick or untick every item; Create needs one', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.tap(find.byKey(const ValueKey('plan-bar-confirm')));
+    await settle(tester);
+    bool on(String id) => tester
+        .widget<CheckboxListTile>(find.byKey(ValueKey('plan-confirm-item-$id')))
+        .value == true;
+    FilledButton create() =>
+        tester.widget<FilledButton>(find.byKey(const ValueKey('plan-confirm')));
+
+    await tester.tap(find.byKey(const ValueKey('plan-confirm-none')));
+    await settle(tester);
+    expect([on(run), on(swim), on(cook)], [false, false, false]);
+    expect(create().onPressed, isNull);
+
+    await tester.tap(find.byKey(const ValueKey('plan-confirm-all')));
+    await settle(tester);
+    expect([on(run), on(swim), on(cook)], [true, true, true]);
+    expect(create().onPressed, isNotNull);
+    await unmount(tester);
+  });
 }
