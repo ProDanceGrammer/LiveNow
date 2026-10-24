@@ -93,8 +93,18 @@ class BackupWriter {
       if (await tmp.exists()) await tmp.delete();
       rethrow;
     }
-    if (await out.exists()) await out.delete();
-    await tmp.rename(out.path);
+    try {
+      if (await out.exists()) await out.delete();
+      await tmp.rename(out.path);
+    } catch (_) {
+      // The finished temp file must not be left behind (it would sit in the
+      // backup folder for good); the previous backup, if any, is still there
+      // unless it was the thing that could not be replaced.
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      rethrow;
+    }
     return total;
   }
 
@@ -145,7 +155,14 @@ class BackupWriter {
     if (await tmp.exists()) await tmp.delete();
     await db.customStatement("VACUUM INTO '${tmp.path.replaceAll("'", "''")}'");
     blankDeviceLocalSyncTables(tmp.path);
-    if (await out.exists()) await out.delete();
-    await tmp.rename(out.path);
+    try {
+      if (await out.exists()) await out.delete();
+      await tmp.rename(out.path);
+    } catch (_) {
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      rethrow;
+    }
   }
 }

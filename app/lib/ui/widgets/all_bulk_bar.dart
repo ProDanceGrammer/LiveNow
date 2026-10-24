@@ -63,6 +63,7 @@ class AllBulkBar extends ConsumerWidget {
         children: [
           Checkbox(
             key: const ValueKey('all-select-all'),
+            semanticLabel: 'Select all',
             tristate: true,
             value: n == 0 ? false : (all ? true : null),
             onChanged: (_) => all

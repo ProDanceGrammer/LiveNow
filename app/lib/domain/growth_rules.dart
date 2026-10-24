@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import '../core/error_log.dart';
 import '../core/local_time.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
@@ -23,7 +25,15 @@ enum MetricKind {
   hours;
 
   String get dbValue => name;
-  static MetricKind fromDb(String value) => values.byName(value);
+  /// An unknown stored kind (a newer app wrote it, or the row is damaged) reads
+  /// as boolean and is logged, so one bad row cannot break every list.
+  static MetricKind fromDb(String value) {
+    for (final k in values) {
+      if (k.name == value) return k;
+    }
+    unawaited(ErrorLog.write('Unknown direction kind "$value"', null, context: 'read'));
+    return boolean;
+  }
 }
 
 /// How far back finished actions count toward a count/hours direction.
@@ -36,8 +46,16 @@ enum MetricWindow {
   final String dbValue;
   const MetricWindow(this.dbValue);
 
-  static MetricWindow? fromDb(String? value) =>
-      value == null ? null : values.firstWhere((w) => w.dbValue == value);
+  /// null for none AND for an unknown stored window (logged): the rules then
+  /// use their default window.
+  static MetricWindow? fromDb(String? value) {
+    if (value == null) return null;
+    for (final w in values) {
+      if (w.dbValue == value) return w;
+    }
+    unawaited(ErrorLog.write('Unknown direction window "$value"', null, context: 'read'));
+    return null;
+  }
 }
 
 /// A [Metric] row without the database types, the shape the rules work on.
@@ -145,8 +163,12 @@ Set<String> directionsNeedingData({
 /// [fact] as a percentage of [target], rounded to 2 decimals and NOT capped
 /// (12.5 h of a 7 h target is 178.57%). A non-positive target gives 0.
 double progressPercent(double fact, double target) {
-  if (target <= 0) return 0;
-  return (fact * 100 / target * 100).round() / 100;
+  if (!(target > 0) || target.isInfinite || fact.isNaN) return 0;
+  final p = fact * 100 / target;
+  // `round()` throws on Infinity and saturates at 2^63; such a percentage has
+  // no decimals left anyway.
+  if (p.isInfinite || p.abs() >= 1e15) return p;
+  return (p * 100).round() / 100;
 }
 
 /// `U = max(0, W × (1 − P/90)) − min(1, max(0, P − 90)) × P² / W`: how urgently
@@ -300,7 +322,8 @@ class LinkedActionFact {
         isAllDay: action.isAllDay,
         done: action.done,
       ),
-      windowTime: start ?? dateTimeFromDb(action.updatedAt)!,
+      windowTime:
+          start ?? dateTimeFromDb(action.updatedAt) ?? DateTime.utc(1970),
       duration: computeActionDuration(
         startAt: start,
         endAt: end,

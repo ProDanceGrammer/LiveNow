@@ -1,3 +1,4 @@
+import '../search_targets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -59,19 +60,28 @@ class GrowthFiltersBar extends ConsumerStatefulWidget {
   ConsumerState<GrowthFiltersBar> createState() => _GrowthFiltersBarState();
 }
 
-class _GrowthFiltersBarState extends ConsumerState<GrowthFiltersBar> {
+class _GrowthFiltersBarState extends ConsumerState<GrowthFiltersBar>
+    with SearchTargetState<GrowthFiltersBar> {
   late final TextEditingController _search;
+  final _searchFocus = FocusNode();
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _search);
 
   @override
   void initState() {
     super.initState();
     // The text outlives a tab switch: start from what the other tab typed.
     _search = TextEditingController(text: ref.read(growthSearchProvider));
+    registerSearchTarget();
   }
 
   @override
   void dispose() {
+    unregisterSearchTarget();
     _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -87,6 +97,7 @@ class _GrowthFiltersBarState extends ConsumerState<GrowthFiltersBar> {
         child: TextField(
           key: const ValueKey('growth-search'),
           controller: _search,
+          focusNode: _searchFocus,
           decoration: const InputDecoration(
             labelText: 'Search',
             prefixIcon: Icon(Icons.search),

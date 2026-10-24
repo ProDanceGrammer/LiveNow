@@ -147,6 +147,14 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
   // objects on every parent rebuild would needlessly re-create its blocks.
   Map<String, BlockComponentBuilder>? _blocks;
   ColorScheme? _blocksScheme;
+
+  /// The current theme's colours. The package's editor keeps the block builders
+  /// it saw when it was first built (`editorState.renderer` is only replaced when
+  /// its service changes), so a builder must NOT capture a colour: the struck-out
+  /// grey of a checked line, the checkbox and the placeholder read this field
+  /// when they draw, and therefore follow a light / dark switch (which also
+  /// animates through in-between colours).
+  late ColorScheme _liveScheme;
   StreamSubscription<EditorTransactionValue>? _sub;
   Timer? _timer;
   String? _lastEmitted;
@@ -296,6 +304,13 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      // The OS may kill a backgrounded app without another frame: do not
+      // leave the last 400 ms of typing in the debounce.
+      flushPending();
+      return;
+    }
     if (state != AppLifecycleState.resumed) return;
     final sel = _lastSelection;
     if (sel == null || _editorState.selection != null) return;
@@ -342,6 +357,11 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     _scrollController.dispose();
     _editorState.dispose();
     super.dispose();
+  }
+
+  /// Hands a change that is still waiting in the debounce to [onChanged] now.
+  void flushPending() {
+    if (_timer?.isActive ?? false) _flush();
   }
 
   void _flush() {
@@ -646,6 +666,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
       fontSize: usePhoneLayout(context) ? 17 : 16,
       color: textColor,
     );
+    _liveScheme = scheme;
     if (_blocks == null || _blocksScheme != scheme) {
       _blocks = _buildBlocks(scheme);
       _blocksScheme = scheme;
@@ -866,7 +887,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
         BlockComponentConfiguration(
           placeholderText: placeholder ?? (_) => '',
           placeholderTextStyle: (_, {textSpan}) =>
-              TextStyle(color: scheme.onSurface.withValues(alpha: 0.4)),
+              TextStyle(color: _liveScheme.onSurface.withValues(alpha: 0.4)),
         );
 
     String firstHint(Node node) =>
@@ -886,7 +907,9 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
           child: Icon(
             checked ? Icons.check_box : Icons.check_box_outline_blank,
             size: 18,
-            color: checked ? scheme.primary : scheme.onSurfaceVariant,
+            color: checked
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
       );
@@ -913,7 +936,7 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
         textStyleBuilder: (checked) => checked
             ? TextStyle(
                 decoration: TextDecoration.lineThrough,
-                color: scheme.onSurface.withValues(alpha: 0.55),
+                color: _liveScheme.onSurface.withValues(alpha: 0.55),
               )
             : const TextStyle(),
       ),

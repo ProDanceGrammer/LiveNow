@@ -1,3 +1,4 @@
+import '../search_targets.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -1977,8 +1978,29 @@ class PlanItemsDialog extends ConsumerStatefulWidget {
   ConsumerState<PlanItemsDialog> createState() => _PlanItemsDialogState();
 }
 
-class _PlanItemsDialogState extends ConsumerState<PlanItemsDialog> {
+class _PlanItemsDialogState extends ConsumerState<PlanItemsDialog>
+    with SearchTargetState<PlanItemsDialog> {
   String _query = '';
+  final _searchText = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _searchText);
+
+  @override
+  void dispose() {
+    unregisterSearchTarget();
+    _searchText.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
 
   Future<void> _delete(
     BuildContext context,
@@ -2036,6 +2058,8 @@ class _PlanItemsDialogState extends ConsumerState<PlanItemsDialog> {
                   children: [
                     TextField(
                       key: const ValueKey('plan-items-search'),
+                      controller: _searchText,
+                      focusNode: _searchFocus,
                       decoration: const InputDecoration(
                         hintText: 'Search by name or collection',
                         prefixIcon: Icon(Icons.search),

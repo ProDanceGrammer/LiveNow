@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
 
+import '../core/data_exceptions.dart';
+import '../core/error_log.dart';
 import '../core/ids.dart';
+import '../core/text_rules.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'action_service.dart';
@@ -109,18 +113,33 @@ class PlanService {
 
   // ---- reading ----------------------------------------------------------------
 
+  /// A stored plan item as the generator reads it. A row whose dates are
+  /// damaged does not throw (that would break every plan on the screen): a bad
+  /// start date makes it PAUSED (it generates nothing) and is logged; a bad end
+  /// date reads as "no end".
   PlanItemData decode(PlanItem r) {
     final kind = r.kind == 'monthly' ? PlanKind.monthly : PlanKind.cycle;
     final rule = PlanItemData.decodeRule(kind, r.rule);
+    DateTime? date(String? key, String what) {
+      if (key == null) return null;
+      try {
+        return planDateFromKey(key);
+      } on Object catch (e, st) {
+        unawaited(ErrorLog.write(e, st, context: 'plan $what "$key"'));
+        return null;
+      }
+    }
+
+    final start = date(r.startDate, 'start date');
     return PlanItemData(
       id: r.id,
       name: r.name,
       templateId: r.templateId,
       kind: kind,
-      startDate: planDateFromKey(r.startDate),
-      endDate: r.endDate == null ? null : planDateFromKey(r.endDate!),
+      startDate: start ?? planDate(1970, 1, 1),
+      endDate: date(r.endDate, 'end date'),
       forever: r.forever,
-      paused: r.paused,
+      paused: r.paused || start == null,
       cycle: rule.cycle,
       monthly: rule.monthly,
       collectionIds: decodeCollectionIds(r.collections),
@@ -148,7 +167,7 @@ class PlanService {
   // ---- writing ----------------------------------------------------------------
 
   Future<String> saveItem(PlanItemInput i) async {
-    final clean = i.name.trim();
+    final clean = cleanName(i.name, what: 'plan name');
     if (clean.isEmpty) throw ArgumentError('A plan item needs a name.');
     final now = dateTimeToDb(DateTime.now())!;
     final rule = jsonEncode(
@@ -180,8 +199,12 @@ class PlanService {
           .into(db.planItemsTable)
           .insert(companion.copyWith(id: Value(id), createdAt: Value(now)));
     } else {
-      await (db.update(db.planItemsTable)..where((t) => t.id.equals(id)))
+      final changed = await (db.update(db.planItemsTable)
+            ..where((t) => t.id.equals(id)))
           .write(companion);
+      if (changed == 0) {
+        throw const MissingRowException('That plan no longer exists.');
+      }
     }
     return id;
   }
@@ -219,7 +242,7 @@ class PlanService {
 
   /// Creates (no [id]) or renames a collection; returns its id.
   Future<String> saveCollection({String? id, required String name}) async {
-    final clean = name.trim();
+    final clean = cleanName(name, what: 'collection name');
     if (clean.isEmpty) throw ArgumentError('A collection needs a name.');
     final now = dateTimeToDb(DateTime.now())!;
     if (id == null) {
@@ -236,10 +259,14 @@ class PlanService {
           );
       return nid;
     }
-    await (db.update(db.planCollectionsTable)..where((t) => t.id.equals(id)))
+    final changed = await (db.update(db.planCollectionsTable)
+          ..where((t) => t.id.equals(id)))
         .write(
           PlanCollectionsTableCompanion(name: Value(clean), updatedAt: Value(now)),
         );
+    if (changed == 0) {
+      throw const MissingRowException('That collection no longer exists.');
+    }
     return id;
   }
 
@@ -522,29 +549,35 @@ class PlanService {
   Future<PlanDeleteUndo?> deleteItem(
     String id, {
     bool removeFuture = false,
-  }) async {
-    final item = await (db.select(
-      db.planItemsTable,
-    )..where((t) => t.id.equals(id))).getSingleOrNull();
-    if (item == null) return null;
-    final overrides = await (db.select(
-      db.planOverridesTable,
-    )..where((t) => t.planItemId.equals(id))).get();
-    DeleteManyUndo? removed;
-    if (removeFuture) removed = await this.removeFuture(id);
-    await (db.delete(db.planOverridesTable)
-          ..where((t) => t.planItemId.equals(id)))
-        .go();
-    await (db.delete(db.planItemsTable)..where((t) => t.id.equals(id))).go();
-    return PlanDeleteUndo(item, overrides, removed);
+  }) {
+    // One transaction: a failure halfway must not leave overrides deleted
+    // under a plan item that is still there (or future actions removed).
+    return db.transaction(() async {
+      final item = await (db.select(
+        db.planItemsTable,
+      )..where((t) => t.id.equals(id))).getSingleOrNull();
+      if (item == null) return null;
+      final overrides = await (db.select(
+        db.planOverridesTable,
+      )..where((t) => t.planItemId.equals(id))).get();
+      DeleteManyUndo? removed;
+      if (removeFuture) removed = await this.removeFuture(id);
+      await (db.delete(db.planOverridesTable)
+            ..where((t) => t.planItemId.equals(id)))
+          .go();
+      await (db.delete(db.planItemsTable)..where((t) => t.id.equals(id))).go();
+      return PlanDeleteUndo(item, overrides, removed);
+    });
   }
 
-  Future<void> undoDeleteItem(PlanDeleteUndo u) async {
-    await db.into(db.planItemsTable).insertOnConflictUpdate(u.item);
-    for (final o in u.overrides) {
-      await db.into(db.planOverridesTable).insertOnConflictUpdate(o);
-    }
-    if (u.removed != null) await actions.undoDeleteMany(u.removed!);
+  Future<void> undoDeleteItem(PlanDeleteUndo u) {
+    return db.transaction(() async {
+      await db.into(db.planItemsTable).insertOnConflictUpdate(u.item);
+      for (final o in u.overrides) {
+        await db.into(db.planOverridesTable).insertOnConflictUpdate(o);
+      }
+      if (u.removed != null) await actions.undoDeleteMany(u.removed!);
+    });
   }
 
   String overrideId(String itemId, DateTime date, int index) =>

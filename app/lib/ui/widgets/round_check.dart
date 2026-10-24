@@ -24,25 +24,33 @@ class RoundCheck extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    // One labelled, checkable node for a screen reader (the bare circle had
+    // no name and no state).
+    return Semantics(
+      label: 'Done',
+      checked: value,
       onTap: onTap,
-      child: SizedBox(
-        width: hit,
-        height: hit,
-        child: Center(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: value ? color : null,
-              border: Border.all(color: color, width: 1.5),
-            ),
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: value
-                  ? Icon(Icons.check, size: size - 4, color: checkColor)
-                  : null,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: SizedBox(
+          width: hit,
+          height: hit,
+          child: Center(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: value ? color : null,
+                border: Border.all(color: color, width: 1.5),
+              ),
+              child: SizedBox(
+                width: size,
+                height: size,
+                child: value
+                    ? Icon(Icons.check, size: size - 4, color: checkColor)
+                    : null,
+              ),
             ),
           ),
         ),

@@ -44,6 +44,15 @@ tz.Location get _loc => tz.getLocation(AppSettings.timeZoneName);
 DateTime planInstant(DateTime date, int minutes) =>
     tz.TZDateTime(_loc, date.year, date.month, date.day, 0, minutes).toUtc();
 
+/// A whole number from stored JSON; null for a missing, NaN or infinite value
+/// (`1e999` decodes to Infinity, and `Infinity.toInt()` throws).
+int? _int(Object? v) => v is num && v.isFinite ? v.toInt() : null;
+
+/// A time-of-day in minutes from stored JSON, kept within a week of midnight so
+/// date arithmetic can never overflow (a stored 1 << 62 must not throw).
+int _minutes(Object? v, int fallback) =>
+    (v is num && v.isFinite ? v.toInt() : fallback).clamp(0, 24 * 60 * 7);
+
 int _daysBetween(DateTime a, DateTime b) => b.difference(a).inDays;
 
 int _daysInMonth(int y, int m) => DateTime.utc(y, m + 1, 0).day;
@@ -81,8 +90,8 @@ class PlanCompanion {
   static PlanCompanion fromJson(Map<String, Object?> j) => PlanCompanion(
     name: j['name'] as String?,
     templateId: j['templateId'] as String?,
-    minutes: ((j['minutes'] as num?)?.toInt() ?? 30).clamp(1, 24 * 60),
-    gapMinutes: ((j['gapMinutes'] as num?)?.toInt() ?? 0).clamp(0, 7 * 24 * 60),
+    minutes: (_int(j['minutes']) ?? 30).clamp(1, 24 * 60),
+    gapMinutes: (_int(j['gapMinutes']) ?? 0).clamp(0, 7 * 24 * 60),
     txTemplateIds: [
       for (final t in (j['tx'] as List? ?? const []))
         if (t is String) t,
@@ -166,9 +175,9 @@ class CycleOccurrence {
   };
 
   static CycleOccurrence fromJson(Map<String, Object?> j) => CycleOccurrence(
-    day: (j['day'] as num?)?.toInt() ?? 0,
-    startMin: (j['startMin'] as num?)?.toInt() ?? 0,
-    durationMin: (j['durationMin'] as num?)?.toInt(),
+    day: _int(j['day']) ?? 0,
+    startMin: _minutes(j['startMin'], 0),
+    durationMin: _int(j['durationMin'])?.clamp(1, 24 * 60 * 7).toInt(),
     name: j['name'] as String?,
     templateId: j['templateId'] as String?,
     extras: PlanExtras.fromJson(j),
@@ -188,7 +197,7 @@ class CycleRule {
   };
 
   static CycleRule fromJson(Map<String, Object?> j) => CycleRule(
-    cycleDays: ((j['cycleDays'] as num?)?.toInt() ?? 7).clamp(1, 3650),
+    cycleDays: (_int(j['cycleDays']) ?? 7).clamp(1, 3650),
     occurrences: [
       for (final o in (j['occurrences'] as List? ?? const []))
         if (o is Map) CycleOccurrence.fromJson(Map<String, Object?>.from(o)),
@@ -245,16 +254,16 @@ class MonthlyRule {
   };
 
   static MonthlyRule fromJson(Map<String, Object?> j) => MonthlyRule(
-    everyMonths: ((j['everyMonths'] as num?)?.toInt() ?? 1).clamp(1, 99999),
+    everyMonths: (_int(j['everyMonths']) ?? 1).clamp(1, 99999),
     mode: MonthlyMode.values.firstWhere(
       (m) => m.name == j['mode'],
       orElse: () => MonthlyMode.dayOfMonth,
     ),
-    day: ((j['day'] as num?)?.toInt() ?? 1).clamp(1, 31),
-    nth: (j['nth'] as num?)?.toInt() ?? 1,
-    weekday: ((j['weekday'] as num?)?.toInt() ?? 1).clamp(1, 7),
-    startMin: (j['startMin'] as num?)?.toInt() ?? 9 * 60,
-    durationMin: (j['durationMin'] as num?)?.toInt(),
+    day: (_int(j['day']) ?? 1).clamp(1, 31),
+    nth: _int(j['nth']) ?? 1,
+    weekday: (_int(j['weekday']) ?? 1).clamp(1, 7),
+    startMin: _minutes(j['startMin'], 9 * 60),
+    durationMin: _int(j['durationMin'])?.clamp(1, 24 * 60 * 7).toInt(),
     name: j['name'] as String?,
     extras: PlanExtras.fromJson(j),
     allDay: j['allDay'] == true,

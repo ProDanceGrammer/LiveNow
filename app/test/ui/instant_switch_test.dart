@@ -127,8 +127,9 @@ void main() {
 
     await tester.tap(find.descendant(of: tabs, matching: find.text('List')));
     await tester.pump();
-    expect(DefaultTabController.of(tester.element(tabs)).index, 1);
-    expect(DefaultTabController.of(tester.element(tabs)).animation!.value, 1);
+    // Tabs: Balance 0, Treemap 1, List 2, Mindmap 3.
+    expect(DefaultTabController.of(tester.element(tabs)).index, 2);
+    expect(DefaultTabController.of(tester.element(tabs)).animation!.value, 2);
     await _noLingeringAnimation(tester);
 
     await tester.tap(find.descendant(of: tabs, matching: find.text('Balance')));

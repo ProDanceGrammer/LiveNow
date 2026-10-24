@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../../domain/sync/network_rules.dart';
 import '../../domain/sync/sync_crypto.dart';
@@ -137,7 +138,17 @@ class HttpTransport implements SyncTransport {
   );
 }
 
-/// POSTs [body] to the first of [addresses] that answers.
+/// Largest reply body accepted (a pull page with notes is far below this).
+const kMaxSyncResponseBytes = 64 * 1024 * 1024;
+
+/// The reply body must arrive within this, however slowly it trickles.
+const kSyncResponseDeadline = Duration(minutes: 2);
+
+/// POSTs [body] to the first of [addresses] that answers. The reply is read
+/// with a byte cap ([maxResponseBytes]) and a total deadline
+/// ([responseDeadline]); a connection that drops or stalls mid-reply counts as
+/// "not reachable" (a sync step is safe to repeat), a reply over the cap is an
+/// [HttpException].
 Future<String> postFirstReachable(
   HttpClient client,
   Duration connectTimeout,
@@ -146,15 +157,23 @@ Future<String> postFirstReachable(
   String path,
   String body, {
   Future<void> Function(String address)? onReached,
+  int maxResponseBytes = kMaxSyncResponseBytes,
+  Duration responseDeadline = kSyncResponseDeadline,
+  Duration headerTimeout = const Duration(minutes: 2),
 }) async {
   client.connectionTimeout = connectTimeout;
   for (final address in addresses) {
+    var connecting = true;
     try {
       final req = await client.postUrl(Uri.http('$address:$port', path));
       req.headers.contentType = ContentType.json;
       req.write(body);
-      final res = await req.close().timeout(const Duration(minutes: 2));
-      final text = await utf8.decoder.bind(res).join();
+      final res = await req.close().timeout(headerTimeout);
+      connecting = false;
+      if (res.contentLength > maxResponseBytes) {
+        throw const HttpException('The reply is too large.');
+      }
+      final text = await _readCapped(res, maxResponseBytes, responseDeadline);
       if (res.statusCode == HttpStatus.unauthorized) {
         throw const SyncAuthException(
           'The other device refused this one. Pair them again; also check '
@@ -172,9 +191,51 @@ Future<String> postFirstReachable(
       continue;
     } on HandshakeException {
       continue;
+    } on _ReplyDropped {
+      continue;
+    } on HttpException {
+      // "Connection closed before full header was received": the link broke
+      // before any answer. Our own refusals (status, size) come after
+      // [connecting] is cleared and are real errors.
+      if (connecting) continue;
+      rethrow;
     }
   }
   throw const SyncUnreachable();
+}
+
+class _ReplyDropped implements Exception {
+  const _ReplyDropped();
+}
+
+Future<String> _readCapped(
+  HttpClientResponse res,
+  int max,
+  Duration deadline,
+) async {
+  Future<List<int>> read() async {
+    final bytes = BytesBuilder(copy: false);
+    try {
+      await for (final chunk in res) {
+        bytes.add(chunk);
+        if (bytes.length > max) {
+          throw const HttpException('The reply is too large.');
+        }
+      }
+    } on HttpException catch (e) {
+      // "Connection closed while receiving data" etc.: the link broke.
+      if (e.message.contains('too large')) rethrow;
+      throw const _ReplyDropped();
+    }
+    return bytes.takeBytes();
+  }
+
+  final raw = await read().timeout(deadline);
+  try {
+    return utf8.decode(raw);
+  } on FormatException {
+    throw const HttpException('The reply is not text.');
+  }
 }
 
 /// Pairs this device with the PC that showed [code]: proves knowledge of the

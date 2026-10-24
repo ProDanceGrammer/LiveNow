@@ -1,3 +1,4 @@
+import '../search_targets.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -707,8 +708,29 @@ class _TransactionsView extends ConsumerStatefulWidget {
   ConsumerState<_TransactionsView> createState() => _TransactionsViewState();
 }
 
-class _TransactionsViewState extends ConsumerState<_TransactionsView> {
+class _TransactionsViewState extends ConsumerState<_TransactionsView>
+    with SearchTargetState<_TransactionsView> {
   String _query = '';
+  final _searchText = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _searchText);
+
+  @override
+  void dispose() {
+    unregisterSearchTarget();
+    _searchText.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
   bool _showOptions = false;
   bool _showTemplates = false;
 
@@ -863,6 +885,8 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView> {
                 Expanded(
                   child: TextField(
                     key: const ValueKey('budget-transactions-search'),
+                    controller: _searchText,
+                    focusNode: _searchFocus,
                     decoration: const InputDecoration(
                       hintText: 'Search by name, category or action',
                       prefixIcon: Icon(Icons.search),

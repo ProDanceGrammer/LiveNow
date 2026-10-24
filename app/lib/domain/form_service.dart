@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../core/ids.dart';
+import '../core/text_rules.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'forms.dart';
@@ -54,7 +55,7 @@ class FormService {
   /// Creates the form (when [id] is null) or replaces the stored one; returns
   /// its id. A blank name is refused.
   Future<String> save(FormDef form, {String? id}) async {
-    final name = form.name.trim();
+    final name = cleanName(form.name, what: 'form name');
     if (name.isEmpty) throw ArgumentError('A form needs a name.');
     final now = dateTimeToDb(DateTime.now())!;
     final payload = encodeFormPayload(form.copyWith(name: name));

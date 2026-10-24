@@ -1,3 +1,4 @@
+import 'ui/search_targets.dart';
 import 'ui/shortcut_keys.dart';
 import 'dart:ui' show PlatformDispatcher;
 
@@ -64,6 +65,11 @@ class LiveNowApp extends ConsumerWidget {
             performUndo(ref),
         primaryActivator(LogicalKeyboardKey.keyL, shift: true): () =>
             ref.read(themeModeProvider.notifier).toggle(),
+        // Ctrl+F: the search bar of the view on screen; Ctrl+K: search over
+        // everything.
+        primaryActivator(LogicalKeyboardKey.keyF): () =>
+            ref.read(searchTargetsProvider).trigger(),
+        primaryActivator(LogicalKeyboardKey.keyK): openGlobalSearch,
       },
       child: Focus(
         autofocus: true,

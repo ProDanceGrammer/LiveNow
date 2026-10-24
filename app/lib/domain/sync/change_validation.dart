@@ -20,6 +20,12 @@ final _hlcShape = RegExp(
 /// win every conflict until real time caught up.
 const maxStampFuture = Duration(hours: 24);
 
+/// Longest text value of one field (4 Mi characters: big notes pass, a 5 MB
+/// payload does not), and the most columns of one row.
+const maxFieldChars = 4 * 1024 * 1024;
+const maxChangeColumns = 256;
+const double _maxSafeInt = 9007199254740991; // 2^53 - 1
+
 const _maxIdLength = 128;
 const _maxOriginLength = 64;
 const _maxTableLength = 64;
@@ -35,8 +41,11 @@ String? validateChange(SyncChange c, {DateTime? now}) {
     return 'origin';
   }
   if (!_hlcShape.hasMatch(c.hlc)) return 'clock stamp';
-  final wall = DateTime.tryParse(c.hlc.substring(0, 24));
-  if (wall == null) return 'clock stamp';
+  final wallText = c.hlc.substring(0, 24);
+  final wall = DateTime.tryParse(wallText);
+  // Dart rolls an impossible date over (2025-02-29 -> Mar 1, month 13 -> next
+  // year): such a stamp is not a real instant, so it must round-trip as typed.
+  if (wall == null || wall.toIso8601String() != wallText) return 'clock stamp';
   final limit = (now ?? DateTime.now()).toUtc().add(maxStampFuture);
   if (wall.isAfter(limit)) return 'clock stamp in the future';
 
@@ -45,8 +54,12 @@ String? validateChange(SyncChange c, {DateTime? now}) {
   if (c.deleted) return null;
   final data = c.data;
   if (data == null) return 'missing data';
+  if (data.length > maxChangeColumns) return 'too many columns';
   for (final v in data.values) {
     if (v != null && v is! String && v is! num && v is! bool) return 'value';
+    // JSON `1e999` decodes to Infinity; nothing the app stores is that large.
+    if (v is num && (!v.isFinite || v.abs() > _maxSafeInt)) return 'value';
+    if (v is String && v.length > maxFieldChars) return 'value too long';
   }
   // The row must be the one the change names: otherwise the stamp comparison
   // is made on one row and the write lands on another.

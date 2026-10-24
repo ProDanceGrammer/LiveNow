@@ -1,3 +1,4 @@
+import '../core/text_rules.dart';
 import 'actions_csv.dart' show parseDatetimeCell;
 import 'budget_rules.dart';
 import 'growth_import.dart' show parseCsv;
@@ -219,8 +220,10 @@ class _Table {
     return null;
   }
 
+  /// A cell's text; the apostrophe our own export puts before a formula-looking
+  /// value is taken off again.
   String cell(List<String> row, int? i) =>
-      i == null || i >= row.length ? '' : row[i].trim();
+      i == null || i >= row.length ? '' : unguardCsvCell(row[i].trim());
 }
 
 /// Parses whichever of the three exports are given. Throws [FormatException]

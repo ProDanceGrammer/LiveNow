@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ids.dart';
+import '../../core/text_rules.dart';
 import '../../data/database.dart';
 import '../../domain/action_urgency.dart';
 import '../../domain/growth_rules.dart';
@@ -24,9 +25,11 @@ import '../widgets/param_icons.dart';
 import '../providers.dart';
 import '../saved_views_bar.dart';
 import '../../domain/saved_views.dart';
+import '../../domain/template_payload.dart';
 import '../widgets/glass.dart';
 import '../widgets/glass_icon_tile.dart';
 import '../widgets/sort_chips.dart';
+import '../search_targets.dart';
 import '../widgets/sort_icons.dart';
 import '../widgets/metric_picker.dart';
 import '../widgets/notes_document.dart';
@@ -67,8 +70,29 @@ class TemplatesScreen extends ConsumerStatefulWidget {
   ConsumerState<TemplatesScreen> createState() => _TemplatesScreenState();
 }
 
-class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
+class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
+    with SearchTargetState<TemplatesScreen> {
   String _query = '';
+  final _searchText = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _searchText);
+
+  @override
+  void dispose() {
+    unregisterSearchTarget();
+    _searchText.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
   bool _showOptions = false;
   List<TemplateSortKey> _sort = const [
     TemplateSortKey(TemplateSortField.name),
@@ -90,6 +114,8 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
                 Expanded(
                   child: TextField(
                     key: const ValueKey('templates-search'),
+                    controller: _searchText,
+                    focusNode: _searchFocus,
                     decoration: const InputDecoration(
                       hintText: 'Search by name or direction',
                       prefixIcon: Icon(Icons.search),
@@ -278,7 +304,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     double? urgency, {
     Color? fg,
   }) {
-    final payload = jsonDecode(t.payload) as Map<String, dynamic>;
+    final payload = decodeTemplatePayload(t.payload, fallbackName: t.name);
     final m = payload['estimatedMinutes'];
     final manual = (m is int && m > 0) ? m : null;
     final useAverage = payload['useAverage'] != false;
@@ -325,7 +351,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen> {
     Duration? average,
     Map<String, MetricStat>? stats,
   ) {
-    final payload = jsonDecode(t.payload) as Map<String, dynamic>;
+    final payload = decodeTemplatePayload(t.payload, fallbackName: t.name);
     final ids = templateMetricIds(t.payload);
     final m = payload['estimatedMinutes'];
     return TemplateSortInfo(
@@ -530,7 +556,10 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
     Map<String, dynamic>? payload;
     final existing = widget.existing;
     if (existing != null) {
-      payload = jsonDecode(existing.payload) as Map<String, dynamic>;
+      payload = decodeTemplatePayload(
+        existing.payload,
+        fallbackName: existing.name,
+      );
     }
 
     _nameController = TextEditingController(
@@ -573,7 +602,10 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
 
   Map<String, dynamic> get _basePayload => widget.existing == null
       ? const {}
-      : jsonDecode(widget.existing!.payload) as Map<String, dynamic>;
+      : decodeTemplatePayload(
+          widget.existing!.payload,
+          fallbackName: widget.existing!.name,
+        );
 
   bool get _isDirty {
     final b = _basePayload;
@@ -713,8 +745,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
                   // Enter = the Save button.
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _save(),
-                  validator: (v) =>
-                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  validator: nameFieldError,
                 ),
                 const SizedBox(height: 12),
                 // Compact (text + switch only) so its hover area stays small
@@ -844,7 +875,7 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final db = ref.read(databaseProvider);
-    final name = _nameController.text.trim();
+    final name = stripUnsafeText(_nameController.text).trim();
 
     final payload = jsonEncode({
       'name': name,

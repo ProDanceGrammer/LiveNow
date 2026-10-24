@@ -1,3 +1,4 @@
+import '../search_targets.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -49,8 +50,20 @@ class BudgetCategoriesBoard extends ConsumerStatefulWidget {
       _BudgetCategoriesBoardState();
 }
 
-class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
+class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard>
+    with SearchTargetState<BudgetCategoriesBoard> {
   final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _search);
   Timer? _debounce;
 
   /// The row widgets of the last build, by category id: an unchanged row is
@@ -84,8 +97,10 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
 
   @override
   void dispose() {
+    unregisterSearchTarget();
     _debounce?.cancel();
     _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -332,6 +347,7 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard> {
                       child: TextField(
                         key: const ValueKey('budget-categories-search'),
                         controller: _search,
+                        focusNode: _searchFocus,
                         onChanged: _onSearch,
                         decoration: const InputDecoration(
                           hintText: 'Search categories',

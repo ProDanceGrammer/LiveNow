@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/text_rules.dart';
+import '../../core/number_rules.dart';
 import '../../data/database.dart' show Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
@@ -253,9 +255,7 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
                           onFieldSubmitted: (_) {
                             if (_relationsLoaded) _save();
                           },
-                          validator: (v) => (v == null || v.trim().isEmpty)
-                              ? 'Required'
-                              : null,
+                          validator: nameFieldError,
                         ),
                         const SizedBox(height: 12),
                         TextFormField(
@@ -323,7 +323,10 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
                               final n = double.tryParse(
                                 (v ?? '').trim().replaceAll(',', '.'),
                               );
-                              return (n == null || n <= 0)
+                              return (n == null ||
+                                      !n.isFinite ||
+                                      n <= 0 ||
+                                      n > kMaxNumber)
                                   ? 'A number above 0'
                                   : null;
                             },
@@ -495,6 +498,10 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
       if (mounted) Navigator.of(context).pop(savedId);
     } on MetricCycleException catch (e) {
       if (mounted) setState(() => _error = e.toString());
+    } on InvalidNumberException catch (e) {
+      if (mounted) setState(() => _error = e.text);
+    } on InvalidNameException catch (e) {
+      if (mounted) setState(() => _error = e.message);
     }
   }
 

@@ -1,5 +1,6 @@
 import 'package:timezone/timezone.dart' as tz;
 
+import '../../core/number_rules.dart';
 import '../../core/settings.dart';
 
 /// Money with two decimals and a real minus sign; `sign` adds '+' to positives.
@@ -18,8 +19,28 @@ String budgetNumber(double v) {
 }
 
 /// Parses a typed number (comma or dot); null for empty/garbage.
-double? parseBudgetNumber(String text) =>
-    double.tryParse(text.trim().replaceAll(',', '.'));
+///
+/// Spaces (also non-breaking) are grouping: "1 000,50" is 1000.5. With both a
+/// comma and a dot the LAST one is the decimal mark ("1,000.50", "1.000,50").
+/// NaN, Infinity and anything above [kMaxNumber] are not numbers (null), and
+/// "-0" is a plain 0.
+double? parseBudgetNumber(String text) {
+  var s = text.replaceAll(RegExp(r'[\s\u00a0]'), '');
+  if (s.isEmpty) return null;
+  final comma = s.lastIndexOf(',');
+  final dot = s.lastIndexOf('.');
+  if (comma >= 0 && dot >= 0) {
+    s = comma > dot
+        ? s.replaceAll('.', '').replaceAll(',', '.')
+        : s.replaceAll(',', '');
+  } else if (comma >= 0) {
+    if (comma != s.indexOf(',')) return null; // "1,2,3"
+    s = s.replaceAll(',', '.');
+  }
+  final v = double.tryParse(s);
+  if (v == null || !v.isFinite || v.abs() > kMaxNumber) return null;
+  return v == 0 ? 0.0 : v;
+}
 
 const _months = [
   'Jan',

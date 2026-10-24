@@ -5,6 +5,7 @@ import '../data/backup/backup_import_service.dart';
 import '../data/backup/backup_sources.dart';
 import '../data/backup/backup_writer.dart';
 import '../data/sync/sync_backup.dart' show defaultBackupDirectory;
+import '../core/text_rules.dart' show InvalidNameException;
 import '../domain/budget_csv.dart';
 import '../domain/full_backup.dart';
 import '../domain/budget_icons.dart';
@@ -40,7 +41,10 @@ Future<void> importActionsCsv(BuildContext context, WidgetRef ref) async {
     await ActionImportSummaryDialog.show(context, result);
   } on FormatException catch (e) {
     messenger.showSnackBar(
-      SnackBar(content: Text('Import failed: ${e.message}')),
+      SnackBar(content: Text('Import failed: ${e.message}. Nothing was changed.')),
+    );  } on InvalidNameException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Import failed: ${e.message} Nothing was changed.')),
     );
   }
 }
@@ -57,7 +61,10 @@ Future<void> importTemplatesCsv(BuildContext context, WidgetRef ref) async {
     await TemplateImportSummaryDialog.show(context, result);
   } on FormatException catch (e) {
     messenger.showSnackBar(
-      SnackBar(content: Text('Import failed: ${e.message}')),
+      SnackBar(content: Text('Import failed: ${e.message}. Nothing was changed.')),
+    );  } on InvalidNameException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Import failed: ${e.message} Nothing was changed.')),
     );
   }
 }
@@ -90,7 +97,10 @@ Future<void> importGrowthCsv(BuildContext context, WidgetRef ref) async {
     );
   } on FormatException catch (e) {
     messenger.showSnackBar(
-      SnackBar(content: Text('Import failed: ${e.message}')),
+      SnackBar(content: Text('Import failed: ${e.message}. Nothing was changed.')),
+    );  } on InvalidNameException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Import failed: ${e.message} Nothing was changed.')),
     );
   }
 }
@@ -119,7 +129,10 @@ Future<void> importGrowthIcons(BuildContext context, WidgetRef ref) async {
     );
   } on FormatException catch (e) {
     messenger.showSnackBar(
-      SnackBar(content: Text('Import failed: ${e.message}')),
+      SnackBar(content: Text('Import failed: ${e.message}. Nothing was changed.')),
+    );  } on InvalidNameException catch (e) {
+    messenger.showSnackBar(
+      SnackBar(content: Text('Import failed: ${e.message} Nothing was changed.')),
     );
   }
 }
@@ -133,7 +146,7 @@ Future<void> importBudgetData(BuildContext context, WidgetRef ref) async {
   try {
     files = await ref.read(budgetFilesProvider).pickImportFiles();
   } on FormatException catch (e) {
-    showInfoToast(overlay, 'Import failed: ${e.message}');
+    showInfoToast(overlay, 'Import failed: ${e.message}. Nothing was changed.');
     return;
   }
   if (files.isEmpty || !context.mounted) return;
@@ -208,7 +221,9 @@ Future<void> importBudgetData(BuildContext context, WidgetRef ref) async {
       ignoredFiles: ignored,
     );
   } on FormatException catch (e) {
-    showInfoToast(overlay, 'Import failed: ${e.message}');
+    showInfoToast(overlay, 'Import failed: ${e.message}. Nothing was changed.');
+  } on InvalidNameException catch (e) {
+    showInfoToast(overlay, 'Import failed: ${e.message} Nothing was changed.');
   }
 }
 
@@ -217,7 +232,13 @@ Future<void> importBudgetData(BuildContext context, WidgetRef ref) async {
 Future<void> importBudgetIcons(BuildContext context, WidgetRef ref) async {
   final overlay = rootOverlayOf(context);
   final io = ref.read(budgetIoServiceProvider);
-  final files = await ref.read(budgetFilesProvider).pickImportFiles();
+  final List<PickedFile> files;
+  try {
+    files = await ref.read(budgetFilesProvider).pickImportFiles();
+  } on FormatException catch (e) {
+    showInfoToast(overlay, 'Import failed: ${e.message}. Nothing was changed.');
+    return;
+  }
   if (files.isEmpty || !context.mounted) return;
   final icons = <CategoryIcon>[];
   for (final f in files) {

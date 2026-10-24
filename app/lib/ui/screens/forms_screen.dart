@@ -1,3 +1,5 @@
+import '../search_targets.dart';
+import '../../domain/search_match.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -24,8 +26,29 @@ class FormsScreen extends ConsumerStatefulWidget {
   ConsumerState<FormsScreen> createState() => _FormsScreenState();
 }
 
-class _FormsScreenState extends ConsumerState<FormsScreen> {
+class _FormsScreenState extends ConsumerState<FormsScreen>
+    with SearchTargetState<FormsScreen> {
   String _query = '';
+  final _searchText = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _searchText);
+
+  @override
+  void dispose() {
+    unregisterSearchTarget();
+    _searchText.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
 
   Future<void> _delete(BuildContext context, FormItem f) async {
     // Everything needing ref / context is read before the await.
@@ -53,6 +76,8 @@ class _FormsScreenState extends ConsumerState<FormsScreen> {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: TextField(
               key: const ValueKey('forms-search'),
+              controller: _searchText,
+              focusNode: _searchFocus,
               decoration: const InputDecoration(
                 hintText: 'Search forms',
                 prefixIcon: Icon(Icons.search),
@@ -74,16 +99,12 @@ class _FormsScreenState extends ConsumerState<FormsScreen> {
                     ),
                   );
                 }
-                final shown = _query.isEmpty
-                    ? all
-                    : [
-                        for (final f in all)
-                          if (f.name.toLowerCase().contains(_query) ||
-                              f.def.questions.any(
-                                (q) => q.title.toLowerCase().contains(_query),
-                              ))
-                            f,
-                      ];
+                // Whole-word matches of the name first, then the rest (a hit in
+                // a question title counts after the name).
+                final shown = rankMatches(all, _query, (f) => [
+                  f.name,
+                  for (final q in f.def.questions) q.title,
+                ]);
                 if (shown.isEmpty) return const Center(child: Text('No matches'));
                 return ListView.builder(
                   padding: const EdgeInsets.symmetric(vertical: 8),

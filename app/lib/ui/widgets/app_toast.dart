@@ -119,6 +119,14 @@ void showInfoToast(
   onNameTap: onNameTap,
 );
 
+/// "That WHAT no longer exists." for an entity an opener (a chip, a search
+/// hit, a reminder) could not find: it was deleted here or on another device.
+/// Does nothing when [context] is gone.
+void showMissingToast(BuildContext context, String what) {
+  if (!context.mounted) return;
+  showInfoToast(rootOverlayOf(context), 'That $what no longer exists.');
+}
+
 class _ToastContent extends StatefulWidget {
   final String leading;
   final String? name;

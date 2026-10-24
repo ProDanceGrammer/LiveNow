@@ -13,6 +13,7 @@ import '../providers.dart';
 import '../views/all_actions_view.dart';
 import '../views/calendar_view.dart';
 import '../views/current_actions_view.dart';
+import '../search_targets.dart';
 import '../widgets/glass.dart';
 import 'forms_screen.dart';
 import 'templates_screen.dart';
@@ -82,7 +83,7 @@ class ActionsSection extends ConsumerStatefulWidget {
 }
 
 class _ActionsSectionState extends ConsumerState<ActionsSection>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, SearchTargetState<ActionsSection> {
   final _visited = <ActionsSub>{};
   bool _calendarShown = false;
   late final TabController _tabs;
@@ -105,6 +106,17 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
       vsync: this,
       animationDuration: Duration.zero,
     )..addListener(_onTab);
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: the Current board's search (only while that tab is shown).
+  @override
+  bool get searchIsCurrent => widget.sub == ActionsSub.current;
+
+  @override
+  void openSearch() {
+    if (!_searchOpen) setState(() => _searchOpen = true);
+    focusSearchField(_searchFocus, _searchText);
   }
 
   void _onTab() {
@@ -120,8 +132,10 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
 
   @override
   void dispose() {
+    unregisterSearchTarget();
     _searchDebounce?.cancel();
     _searchText.dispose();
+    _searchFocus.dispose();
     _tabs.dispose();
     super.dispose();
   }
@@ -131,6 +145,7 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
   // the field clears the filter.
   bool _searchOpen = false;
   final _searchText = TextEditingController();
+  final _searchFocus = FocusNode();
   Timer? _searchDebounce;
 
   void _toggleSearch() {
@@ -265,6 +280,7 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
             child: TextField(
               key: const ValueKey('current-search-field'),
               controller: _searchText,
+              focusNode: _searchFocus,
               autofocus: true,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(

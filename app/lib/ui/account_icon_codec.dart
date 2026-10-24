@@ -8,6 +8,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../core/capped_read.dart';
+
 /// The picture of an account is stored as a small square PNG in base64 text
 /// (column `budget_accounts.icon`), so it syncs and backs up like any other
 /// column. These helpers turn a chosen image file into that text and back.
@@ -114,6 +116,15 @@ Uint8List? decodeAccountIcon(String? icon) {
   return bytes;
 }
 
+/// Reads a picked image with the size cap applied BEFORE its bytes are loaded.
+Future<Uint8List> _readIconBytes(XFile file) async {
+  try {
+    return await readBytesCapped(file, maxBytes: kAccountIconMaxFileBytes);
+  } on FormatException {
+    throw const AccountIconException('That image is larger than 10 MB.');
+  }
+}
+
 /// Asks for a picture from the phone's PHOTO LIBRARY (the Files picker below
 /// cannot browse Photos) and returns its bytes (null = cancelled). Phones only.
 final accountIconPhotoPickerProvider =
@@ -124,7 +135,7 @@ final accountIconPhotoPickerProvider =
           maxWidth: 512,
           maxHeight: 512,
         );
-        return picked?.readAsBytes();
+        return picked == null ? null : _readIconBytes(picked);
       },
     );
 
@@ -143,6 +154,6 @@ final accountIconPickerProvider = Provider<Future<Uint8List?> Function()>(
         ),
       ],
     );
-    return file?.readAsBytes();
+    return file == null ? null : _readIconBytes(file);
   },
 );

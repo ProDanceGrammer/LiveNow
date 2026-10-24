@@ -262,6 +262,9 @@ DatabaseConnection _openConnection(Directory? profile) {
       setup: (db) {
         db.execute('PRAGMA foreign_keys = ON;');
         db.execute('PRAGMA journal_mode = WAL;');
+        // A second connection (hub admin, backup copy) waits for a lock
+        // instead of failing at once with SQLITE_BUSY.
+        db.execute('PRAGMA busy_timeout = 5000;');
       },
     ),
   );

@@ -89,6 +89,12 @@ const double _kToolbarHeight = _kToolTile + _kToolHit + 2 * _kToolPad;
 /// 24-hour zoom stays usable (the grid then scrolls a little).
 const double _kMinHourHeight = 12;
 
+/// The narrowest an event block is drawn, however many lanes share the day.
+const double _kMinBlockWidth = 4;
+
+/// The width the header's controls need side by side (below it they scroll).
+const double _kHeaderRowWidth = 880;
+
 const _dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /// Build/layout counters so a test can prove that selection, hover, drag and
@@ -890,8 +896,9 @@ class _Header extends ConsumerWidget {
     final allDayOn = ref.watch(calendarAllDayProvider);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      child: Row(
-        children: [
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final items = <Widget>[
           pill(
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -999,7 +1006,20 @@ class _Header extends ConsumerWidget {
               onSelectionChanged: (s) => setCalendarDayCount(ref, s.first),
             ),
           ),
-        ],
+          ];
+          // A narrow window (a desktop window dragged small): the controls
+          // scroll sideways instead of overflowing.
+          if (box.maxWidth >= _kHeaderRowWidth) return Row(children: items);
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final w in items)
+                  w is Spacer ? const SizedBox(width: 12) : w,
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -3438,7 +3458,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       return cached.widget;
     }
     final laneW = widget.dayWidth / p.laneCount;
-    final blockW = laneW * p.span - 2;
+    // A cluster of dozens of simultaneous events would give a lane no width
+    // at all (negative before this clamp): keep a sliver that can be hit.
+    final blockW = math.max(_kMinBlockWidth, laneW * p.span - 2);
     final height = math.max(_kMinBlockHeight, _px(seg.lenMin));
     final key = seg.isStart
         ? ValueKey('event-${seg.item.id}')
@@ -3519,7 +3541,10 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
             key: ValueKey(first ? base : '$base-d$day'),
             left: day * widget.dayWidth + (useLane ? drag.lane : 0) * laneW,
             top: _px(topMin),
-            width: laneW * (useLane ? drag.span : 1) - 2,
+            width: math.max(
+              _kMinBlockWidth,
+              laneW * (useLane ? drag.span : 1) - 2,
+            ),
             height: math.max(_kMinBlockHeight, _px(lenMin)),
             child: _rangeBox(scheme, range),
           ),
@@ -3703,7 +3728,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         final box = Rect.fromLTWH(
           d * widget.dayWidth + p.lane * laneW,
           _px(seg.topMin),
-          laneW * p.span - 2,
+          math.max(_kMinBlockWidth, laneW * p.span - 2),
           math.max(_kMinBlockHeight, _px(seg.lenMin)),
         );
         if (box.overlaps(r)) hits.add(seg.item.id);

@@ -152,17 +152,26 @@ List<QuickActionSpec> formQuickActionSpecs(
 /// The quick actions for [actionId], shared by the icon bar (hover toolbar,
 /// editor) and the phone's long-press list, so both stay identical.
 /// [onDelete] replaces the Delete button's default (delete just [actionId]).
+/// [beforeAction] runs (and is awaited) before every button except Delete: the
+/// action editor saves the form's unsaved Start / End there, so a button works
+/// from the times the user sees, not from the older saved ones.
 List<QuickActionSpec> quickActionSpecs(
   BuildContext context,
   WidgetRef ref,
   String actionId, {
   VoidCallback? onDelete,
+  Future<void> Function()? beforeAction,
 }) {
   final service = ref.read(actionServiceProvider);
   final hours = ref.read(workHoursProvider);
 
-  Future<void> run(String description, Future<void> Function() operation) =>
-      runUndoable(context, ref, actionId, description, operation);
+  Future<void> run(String description, Future<void> Function() operation) async {
+    if (beforeAction != null) {
+      await beforeAction();
+      if (!context.mounted) return;
+    }
+    await runUndoable(context, ref, actionId, description, operation);
+  }
 
   Future<void> postpone(String done, PostponeRule rule) =>
       run(done, () => service.postpone(actionId, rule));
@@ -187,7 +196,13 @@ List<QuickActionSpec> quickActionSpecs(
       GlassHue.green,
       'Continue with same action',
       0,
-      () => runUndoableContinue(context, ref, actionId),
+      () async {
+        if (beforeAction != null) {
+          await beforeAction();
+          if (!context.mounted) return;
+        }
+        await runUndoableContinue(context, ref, actionId);
+      },
     ),
     for (final b in _postponeButtons(hours))
       QuickActionSpec(
@@ -221,6 +236,9 @@ class QuickActionBar extends ConsumerWidget {
   /// delete a whole multi-selection.
   final VoidCallback? onDelete;
 
+  /// Awaited before every button except Delete (see [quickActionSpecs]).
+  final Future<void> Function()? beforeAction;
+
   /// Tile geometry (see `GlassIconTile`) and the gap between tiles.
   final double tileSize;
   final double iconSize;
@@ -252,6 +270,7 @@ class QuickActionBar extends ConsumerWidget {
     super.key,
     required this.actionId,
     this.onDelete,
+    this.beforeAction,
     this.tileSize = 32,
     this.iconSize = 20,
     this.hitExtra = 4,
@@ -277,12 +296,20 @@ class QuickActionBar extends ConsumerWidget {
   }) : formSpecs = specs,
        actionId = '',
        onDelete = null,
+       beforeAction = null,
        extra = const [];
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final base =
-        formSpecs ?? quickActionSpecs(context, ref, actionId, onDelete: onDelete);
+        formSpecs ??
+        quickActionSpecs(
+          context,
+          ref,
+          actionId,
+          onDelete: onDelete,
+          beforeAction: beforeAction,
+        );
     final all = [
       for (final s in base)
         if (s.group != 2) s,

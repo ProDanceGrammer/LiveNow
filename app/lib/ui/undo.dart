@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart'
     show StateController, StateProvider;
 
+import '../core/db_errors.dart';
 import '../core/error_log.dart';
 import '../domain/action_service.dart' show ScheduleChange;
 import '../domain/bulk_edit_service.dart';
@@ -79,8 +80,8 @@ Future<void> _guard(
     if (overlay.mounted) {
       showInfoToast(
         overlay,
-        'Could not complete "$description": ${_shortReason(e)} '
-        '(details in error.log)',
+        'Could not complete "$description": '
+        '${friendlyDbError(e) ?? _shortReason(e)} (details in error.log)',
       );
     }
   }

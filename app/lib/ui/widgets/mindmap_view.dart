@@ -1,3 +1,4 @@
+import '../search_targets.dart';
 import '../shortcut_keys.dart';
 import 'dart:math' as math;
 
@@ -64,7 +65,8 @@ class MindmapView extends ConsumerStatefulWidget {
   ConsumerState<MindmapView> createState() => _MindmapViewState();
 }
 
-class _MindmapViewState extends ConsumerState<MindmapView> {
+class _MindmapViewState extends ConsumerState<MindmapView>
+    with SearchTargetState<MindmapView> {
   final _controller = TransformationController();
   final _focus = FocusNode(debugLabel: 'mindmap');
 
@@ -130,15 +132,26 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
   /// directions, tapping one selects it and centres the map on it.
   bool _searchOpen = false;
   final _searchText = TextEditingController();
+  final _searchFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onTransform);
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: open the search box (it sits behind the magnifier) and focus it.
+  @override
+  void openSearch() {
+    if (!_searchOpen) setState(() => _searchOpen = true);
+    focusSearchField(_searchFocus, _searchText);
   }
 
   @override
   void dispose() {
+    unregisterSearchTarget();
+    _searchFocus.dispose();
     _controller.removeListener(_onTransform);
     _controller.dispose();
     _focus.dispose();
@@ -361,6 +374,7 @@ class _MindmapViewState extends ConsumerState<MindmapView> {
                 child: TextField(
                   key: const ValueKey('mindmap-search-field'),
                   controller: _searchText,
+                  focusNode: _searchFocus,
                   autofocus: true,
                   decoration: InputDecoration(
                     hintText: 'Find a direction',

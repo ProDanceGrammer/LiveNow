@@ -1,11 +1,10 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/ui/widgets/notes_blocks/notes_blocks.dart';
-import 'package:livenow/ui/widgets/notes_document.dart';
 import 'package:livenow/ui/widgets/notes_editor.dart';
 
 /// Round 20: a copy / cut / paste inside the app keeps every block exactly (toggles

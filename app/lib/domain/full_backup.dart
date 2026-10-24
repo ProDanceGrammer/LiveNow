@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../core/text_rules.dart';
+
 /// The full-backup file formats (compact `.livenow`, CSV folder, SQLite copy),
 /// pure helpers shared by the writer, the readers and the import.
 
@@ -108,7 +110,9 @@ BackupHeader parseHeaderLine(String line) {
 /// (RFC 4180), so NULL and '' survive a round trip.
 String csvCell(Object? v) {
   if (v == null) return '';
-  final s = v is String ? v : v.toString();
+  // Text a spreadsheet would run as a formula gets a leading apostrophe on
+  // export (numbers are never touched); CsvFolderBackupSource strips it again.
+  final s = v is String ? guardCsvCell(v) : v.toString();
   if (s.isEmpty) return '""';
   if (s.contains(RegExp(r'[",\r\n]')) || s != s.trim()) {
     return '"${s.replaceAll('"', '""')}"';

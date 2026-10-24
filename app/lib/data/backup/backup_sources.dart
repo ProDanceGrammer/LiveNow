@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 
+import '../../core/text_rules.dart';
 import '../../domain/full_backup.dart';
 import '../sync/sync_schema.dart';
 
@@ -160,7 +161,14 @@ class CsvFolderBackupSource implements BackupSource {
     if (meta == null) return const BackupHeader();
     await _checkFileSize(meta, kMaxBackupMetaBytes);
     final p = CsvRowParser();
-    final rows = [...p.add(await meta.readAsString()), ...p.close()];
+    final String text;
+    try {
+      text = await meta.readAsString();
+    } on Object {
+      // Not UTF-8 (a picture or binary named _meta.csv), or unreadable.
+      throw const BackupFormatException('_meta.csv is not a text file.');
+    }
+    final rows = [...p.add(text), ...p.close()];
     int? schema;
     for (final r in rows) {
       if (r.length >= 2 && r[0] == 'schemaVersion') schema = int.tryParse(r[1]!);
@@ -201,7 +209,7 @@ class CsvFolderBackupSource implements BackupSource {
           if (r.length != columns!.length) {
             throw BackupFormatException('A row in $table.csv is damaged.');
           }
-          rows.add(r);
+          rows.add([for (final c in r) c == null ? null : unguardCsvCell(c)]);
         }
         if (rows.length >= kBackupBatchRows) {
           final c = TableChunk(table, columns!, rows);
@@ -211,9 +219,16 @@ class CsvFolderBackupSource implements BackupSource {
         return null;
       }
 
-      await for (final text in file.openRead().transform(utf8.decoder)) {
-        final c = take(parser.add(text));
-        if (c != null) yield c;
+      try {
+        await for (final text in file.openRead().transform(utf8.decoder)) {
+          final c = take(parser.add(text));
+          if (c != null) yield c;
+        }
+      } on FormatException {
+        // Bytes that are not UTF-8: a gzip or picture named like a table.
+        throw BackupFormatException('$table.csv is not a text file.');
+      } on FileSystemException {
+        throw BackupFormatException('$table.csv could not be read.');
       }
       final c = take(parser.close());
       if (c != null) yield c;

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/capped_read.dart';
 import '../core/time_codec.dart';
 import '../data/sync/http_transport.dart';
 import '../data/sync/hub_admin_client.dart';
@@ -455,10 +456,18 @@ final syncClientProvider = NotifierProvider<SyncClientController, SyncStatus>(
   SyncClientController.new,
 );
 
+/// How many periodic ticks to skip after [streak] unreachable attempts in a
+/// row: 1, 3, 7, then 14 (about 15 minutes at one tick a minute). A resume, a
+/// local change or the Sync button still try at once.
+int offlineSkipTicks(int streak) =>
+    streak <= 0 ? 0 : ((1 << (streak > 4 ? 4 : streak)) - 1).clamp(0, 14);
+
 /// The phone's side: pairs with the PC and syncs with it on app start, on
 /// resume, a few seconds after a local change, and on demand.
 class SyncClientController extends Notifier<SyncStatus>
     with WidgetsBindingObserver {
+  int _offlineStreak = 0;
+  int _skipTicks = 0;
   Timer? _debounce;
   Timer? _periodic;
   StreamSubscription<Object?>? _changes;
@@ -514,6 +523,10 @@ class SyncClientController extends Notifier<SyncStatus>
           .tableUpdates()
           .listen((_) => _scheduleSync());
       _periodic = Timer.periodic(periodicSync, (_) {
+        if (_skipTicks > 0) {
+          _skipTicks--; // backing off while the other device is unreachable
+          return;
+        }
         if (state.phase != SyncPhase.unpaired &&
             state.phase != SyncPhase.syncing) {
           unawaited(syncNow());
@@ -560,6 +573,8 @@ class SyncClientController extends Notifier<SyncStatus>
       await ref
           .read(syncStoreProvider)
           .setState('last_sync', dateTimeToDb(now)!);
+      _offlineStreak = 0;
+      _skipTicks = 0;
       state = state.copyWith(
         phase: SyncPhase.idle,
         lastSync: now,
@@ -567,6 +582,8 @@ class SyncClientController extends Notifier<SyncStatus>
       );
       return report;
     } on SyncUnreachable {
+      _offlineStreak++;
+      _skipTicks = offlineSkipTicks(_offlineStreak);
       state = state.copyWith(
         phase: SyncPhase.offline,
         message:
@@ -660,7 +677,7 @@ class SyncClientController extends Notifier<SyncStatus>
         'Start the hub first.',
       );
     }
-    final code = PairingUri.parse(await file.readAsString());
+    final code = PairingUri.parse(await readFileTextCapped(file, maxBytes: 16 * 1024));
     await pairAndReplace(code, replace: false, asHub: true);
   }
 

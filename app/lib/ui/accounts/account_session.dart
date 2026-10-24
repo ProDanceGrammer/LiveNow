@@ -15,7 +15,14 @@ class AccountSession {
     required this.auth,
     required this.signOut,
     required this.changed,
+    this.idleMinutes = 30,
+    this.setIdleMinutes,
   });
+
+  /// Minutes of inactivity before this account locks itself (0 = never); only
+  /// applies to an account with a password.
+  final int idleMinutes;
+  final void Function(int minutes)? setIdleMinutes;
 
   final String accountId;
   final AccountRegistry registry;

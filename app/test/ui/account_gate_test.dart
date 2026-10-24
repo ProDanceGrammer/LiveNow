@@ -236,7 +236,7 @@ void main() {
   });
 
   testWidgets('Add account on the picker creates a local account and opens it', (tester) async {
-    final a = (await tester.runAsync(() async {
+    (await tester.runAsync(() async {
       final r = AccountRegistry.empty(root);
       final a = await r.addMain('Ann');
       await AccountAuth(r, iterations: iterations).setPassword(a.id, 'correct horse');

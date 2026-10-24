@@ -5,6 +5,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../core/ids.dart';
 import '../core/settings.dart';
+import '../core/text_rules.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'budget_csv.dart';
@@ -375,24 +376,38 @@ class BudgetIoService {
     if (data is! Map || data['format'] != budgetJsonFormat) {
       throw const FormatException('That is not a LiveNow budget backup.');
     }
-    if ((data['version'] as num?) == null ||
-        (data['version'] as num) > _budgetJsonVersion) {
+    final version = data['version'];
+    if (version is! num) {
+      throw const FormatException('That is not a LiveNow budget backup.');
+    }
+    if (version > _budgetJsonVersion) {
       throw const FormatException(
         'The backup comes from a newer version of the app.',
       );
     }
-    final root = Map<String, dynamic>.from(data);
-    List<T> list<T>(String key, T Function(Map<String, dynamic>) from) => [
-      for (final e in (root[key] as List? ?? const []))
-        from(Map<String, dynamic>.from(e as Map)),
-    ];
-    final accounts = list('accounts', BudgetAccount.fromJson);
-    final categories = list('categories', BudgetCategory.fromJson);
-    final transactions = list('transactions', BudgetTransaction.fromJson);
-    final settings = BudgetService.settingsFromMap({
-      for (final e in ((root['settings'] as Map?) ?? const {}).entries)
-        '${e.key}': '${e.value}',
-    });
+    final List<BudgetAccount> accounts;
+    final List<BudgetCategory> categories;
+    final List<BudgetTransaction> transactions;
+    final BudgetSettings settings;
+    try {
+      final root = Map<String, dynamic>.from(data);
+      List<T> list<T>(String key, T Function(Map<String, dynamic>) from) => [
+        for (final e in (root[key] as List? ?? const []))
+          from(Map<String, dynamic>.from(e as Map)),
+      ];
+      accounts = list('accounts', BudgetAccount.fromJson);
+      categories = list('categories', BudgetCategory.fromJson);
+      transactions = list('transactions', BudgetTransaction.fromJson);
+      settings = BudgetService.settingsFromMap({
+        for (final e in ((root['settings'] as Map?) ?? const {}).entries)
+          '${e.key}': '${e.value}',
+      });
+    } on FormatException {
+      rethrow;
+    } on Object {
+      // A wrong type or a missing field inside an otherwise valid JSON.
+      throw const FormatException('That backup file is damaged.');
+    }
 
     return db.transaction(() async {
       await _clear();
@@ -457,8 +472,12 @@ class BudgetIoService {
 
   // ---- CSV export (the Notion layout) ---------------------------------------
 
-  static String _csvCell(String v) =>
-      v.contains(RegExp(r'[",\n\r]')) ? '"${v.replaceAll('"', '""')}"' : v;
+  static String _csvCell(String raw) {
+    final v = guardCsvCell(raw);
+    return v.contains(RegExp(r'[",\n\r]'))
+        ? '"${v.replaceAll('"', '""')}"'
+        : v;
+  }
 
   static String _csv(List<List<String>> rows) =>
       '${rows.map((r) => r.map(_csvCell).join(',')).join('\n')}\n';
@@ -480,7 +499,7 @@ class BudgetIoService {
     final amount = transactionInteractAmount(
       BudgetTx(
         id: t.id,
-        date: dateTimeFromDb(t.occurredAt)!,
+        date: dateTimeFromDb(t.occurredAt) ?? DateTime.utc(1970),
         quantity: t.quantity,
         unitPrice: t.unitPrice,
         isIncome: t.isIncome,
@@ -623,7 +642,7 @@ class BudgetIoService {
           t.name,
           _num(t.quantity),
           t.isAmount ? '' : _num(t.unitPrice),
-          _dayTime(dateTimeFromDb(t.occurredAt)!),
+          _dayTime(dateTimeFromDb(t.occurredAt) ?? DateTime.utc(1970)),
           _num(t.rateCount),
           _num(t.rateInteract),
           _interactTotal(t, accountsById),

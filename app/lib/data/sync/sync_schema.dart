@@ -51,6 +51,11 @@ const Map<String, Set<String>> syncExcludedColumns = {
 const String syncEpochHlc = '1970-01-01T00:00:00.000Z-0000-seed';
 
 const _wallNow = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+/// One millisecond after `last_wall`: used when the 4-hex-digit counter is
+/// exhausted (a clock stuck in the past with 65k writes), so a stamp never
+/// grows a 5th digit that would sort BEFORE `ffff`.
+const _nextMs =
+    "strftime('%Y-%m-%dT%H:%M:%fZ', julianday(last_wall) + 1.5 / 86400000.0)";
 const _deviceId = "(SELECT value FROM sync_state WHERE key = 'device_id')";
 
 /// Creates the sync bookkeeping tables and this device's id. Idempotent.
@@ -124,8 +129,10 @@ Future<void> createSyncTables(DatabaseConnectionUser db) async {
 String _stamp(String tbl, String rowExpr, int deleted) =>
     '''
 UPDATE sync_clock SET
-  counter = CASE WHEN $_wallNow > last_wall THEN 0 ELSE counter + 1 END,
-  last_wall = max(last_wall, $_wallNow),
+  last_wall = CASE WHEN $_wallNow > last_wall THEN $_wallNow
+    WHEN counter >= 65535 THEN $_nextMs ELSE last_wall END,
+  counter = CASE WHEN $_wallNow > last_wall OR counter >= 65535 THEN 0
+    ELSE counter + 1 END,
   seq = seq + 1
 WHERE id = 1;
 INSERT INTO sync_versions (tbl, row_id, hlc, origin, deleted, seq)
@@ -149,8 +156,10 @@ Future<void> stampLocalChange(
 }) async {
   await db.customStatement(
     'UPDATE sync_clock SET '
-    'counter = CASE WHEN $_wallNow > last_wall THEN 0 ELSE counter + 1 END, '
-    'last_wall = max(last_wall, $_wallNow), seq = seq + 1 WHERE id = 1',
+    'last_wall = CASE WHEN $_wallNow > last_wall THEN $_wallNow '
+    'WHEN counter >= 65535 THEN $_nextMs ELSE last_wall END, '
+    'counter = CASE WHEN $_wallNow > last_wall OR counter >= 65535 THEN 0 '
+    'ELSE counter + 1 END, seq = seq + 1 WHERE id = 1',
   );
   await db.customStatement(
     'INSERT INTO sync_versions (tbl, row_id, hlc, origin, deleted, seq) '

@@ -1,6 +1,7 @@
 import '../data/queries.dart';
 import 'date_range_filter.dart';
 import 'duration_rules.dart';
+import 'search_match.dart';
 
 /// Pure sort / filter / search rules of the All Actions list (the UI in
 /// `ui/views/all_actions_view.dart` only edits these values).
@@ -356,5 +357,25 @@ List<ActionListItem> arrangeActions({
     for (final a in items)
       if (keep(a)) a,
   ];
-  return sortActions(kept, sort, urgency: urgency);
+  final sorted = sortActions(kept, sort, urgency: urgency);
+  // With the default order (no sort chosen) a search shows whole-word hits first
+  // - "IT infrastructure", "do it" before "commit files" - each group keeping
+  // the default order. A sort the user chose always wins. Items found only in
+  // their notes go last.
+  if (q.isNotEmpty && _isDefaultSort(sort)) {
+    return orderByMatch(sorted, q, (a) {
+      final dirNames = flags.directions
+          ? [
+              for (final id in links.metricIdsByAction?[a.id] ?? const <String>{})
+                links.metricNamesById?[id] ?? '',
+            ]
+          : const <String>[];
+      return [if (flags.name) a.name, ...dirNames];
+    });
+  }
+  return sorted;
 }
+
+bool _isDefaultSort(List<SortKey> sort) =>
+    sort.length == kDefaultAllActionsSort.length &&
+    sort.first == kDefaultAllActionsSort.first;

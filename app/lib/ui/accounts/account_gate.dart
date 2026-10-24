@@ -14,6 +14,7 @@ import '../theme_mode.dart';
 import '../widgets/glass.dart';
 import 'account_picker.dart';
 import 'account_providers.dart';
+import 'idle_lock.dart';
 import 'account_session.dart';
 
 /// Sits above everything: finds (or, for the data that existed before accounts,
@@ -31,7 +32,11 @@ class AccountGate extends StatefulWidget {
     required this.appBuilder,
     this.root,
     this.kdfIterations = kAccountKdfIterations,
+    this.idleUnit = const Duration(minutes: 1),
   });
+
+  /// One "minute" of the idle-lock setting (tests shorten it).
+  final Duration idleUnit;
 
   final ThemeMode initialTheme;
 
@@ -56,6 +61,7 @@ class _AccountGateState extends State<AccountGate> {
   Object? _error;
   Account? _signedIn;
   int _generation = 0;
+  int _idleMinutes = kIdleLockDefaultMinutes;
   bool _explicitSignOut = false;
   late ThemeMode _theme = widget.initialTheme;
 
@@ -109,15 +115,27 @@ class _AccountGateState extends State<AccountGate> {
     await reg.setLast(account.id);
     final dir = await reg.profileDir(account).create(recursive: true);
     // Theme is per DEVICE: reread it (it may have changed in the last account).
-    final theme = await loadThemeMode();
+    final loaded = await Future.wait<Object>([
+      loadThemeMode(),
+      loadIdleLockMinutes(dir),
+    ]);
+    final theme = loaded[0] as ThemeMode;
+    final idle = loaded[1] as int;
     activeProfileDirectory = dir;
     if (!mounted) return;
     setState(() {
       _theme = theme;
+      _idleMinutes = idle;
       _signedIn = account;
       _explicitSignOut = false;
       _generation++;
     });
+  }
+
+  void _setIdleMinutes(int minutes) {
+    setState(() => _idleMinutes = minutes);
+    final dir = activeProfileDirectory;
+    if (dir != null) saveIdleLockMinutes(dir, minutes);
   }
 
   void _signOut() {
@@ -147,16 +165,26 @@ class _AccountGateState extends State<AccountGate> {
         auth: _auth!,
         signOut: _signOut,
         changed: () => setState(() {}),
+        idleMinutes: _idleMinutes,
+        setIdleMinutes: _setIdleMinutes,
       );
+      // Only an account WITH a password locks itself; Off (0) never does.
+      final locks = _registry.byId(signed.id)?.hasPassword ?? false;
       return AccountSessionScope(
         session: session,
-        child: ProviderScope(
+        child: IdleLock(
+          timeout: locks && _idleMinutes > 0
+              ? widget.idleUnit * _idleMinutes
+              : null,
+          onLock: _signOut,
+          child: ProviderScope(
           key: ValueKey('${signed.id}#$_generation'),
           overrides: [
             themeModeProvider.overrideWith(() => ThemeModeNotifier(_theme)),
             syncAllowedProvider.overrideWithValue(signed.syncAllowed),
           ],
           child: Builder(builder: (c) => widget.appBuilder(c, signed)),
+          ),
         ),
       );
     }

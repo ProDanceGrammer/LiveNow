@@ -1,6 +1,9 @@
 import 'package:drift/drift.dart';
 
+import '../core/data_exceptions.dart';
 import '../core/ids.dart';
+import '../core/number_rules.dart';
+import '../core/text_rules.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'budget_rules.dart';
@@ -165,9 +168,8 @@ class BudgetService {
     /// remove it.
     Value<String?> icon = const Value.absent(),
   }) async {
-    if (!(rateToBase > 0)) {
-      throw ArgumentError.value(rateToBase, 'rateToBase', 'must be > 0');
-    }
+    rateToBase = checkNumber(rateToBase, 'exchange rate', positive: true);
+    openingBalance = checkNumber(openingBalance, 'opening balance');
     final now = dateTimeToDb(DateTime.now())!;
     final cleanType = type == null || type.trim().isEmpty ? null : type.trim();
     final code = currency.trim().toUpperCase();
@@ -178,7 +180,7 @@ class BudgetService {
           .insert(
             BudgetAccountsTableCompanion.insert(
               id: newAccountId,
-              name: name.trim(),
+              name: requireName(name, what: 'account name'),
               type: Value(cleanType),
               currency: code,
               rateToBase: Value(rateToBase),
@@ -190,11 +192,11 @@ class BudgetService {
           );
       return newAccountId;
     }
-    await (db.update(
+    final changed = await (db.update(
       db.budgetAccountsTable,
     )..where((t) => t.id.equals(id))).write(
       BudgetAccountsTableCompanion(
-        name: Value(name.trim()),
+        name: Value(requireName(name, what: 'account name')),
         type: Value(cleanType),
         currency: Value(code),
         rateToBase: Value(rateToBase),
@@ -203,6 +205,9 @@ class BudgetService {
         updatedAt: Value(now),
       ),
     );
+    if (changed == 0) {
+      throw const MissingRowException('That account no longer exists.');
+    }
     return id;
   }
 
@@ -274,6 +279,10 @@ class BudgetService {
 
   Future<void> undoDeleteAccount(AccountDeleteUndo undo) {
     return db.transaction(() async {
+      final back = await (db.select(db.budgetAccountsTable)
+            ..where((t) => t.id.equals(undo.account.id)))
+          .getSingleOrNull();
+      if (back != null) return; // already restored
       await db.into(db.budgetAccountsTable).insert(undo.account);
       final id = undo.account.id;
       await (db.update(db.budgetCategoriesTable)
@@ -317,6 +326,10 @@ class BudgetService {
   /// or percent loop and [BudgetGroupException] when the chosen parent still
   /// holds transactions of its own (move them first: [moveTransactions]).
   Future<String> saveCategory(CategoryInput input) {
+    checkNumberOrNull(input.price, 'price');
+    checkNumberOrNull(input.percent, 'percent');
+    checkNumberOrNull(input.frequencyMonths, 'frequency');
+    checkNumberOrNull(input.unitsPerMonth, 'units per month');
     return db.transaction(() async {
       final all = await db.select(db.budgetCategoriesTable).get();
       final id = input.id ?? newId();
@@ -358,7 +371,7 @@ class BudgetService {
             .insert(
               BudgetCategoriesTableCompanion.insert(
                 id: id,
-                name: input.name.trim(),
+                name: requireName(input.name, what: 'category name'),
                 isIncome: Value(input.isIncome),
                 oneTime: Value(input.oneTime),
                 unit: Value(input.unit.db),
@@ -376,11 +389,11 @@ class BudgetService {
               ),
             );
       } else {
-        await (db.update(
+        final changed = await (db.update(
           db.budgetCategoriesTable,
         )..where((t) => t.id.equals(id))).write(
           BudgetCategoriesTableCompanion(
-            name: Value(input.name.trim()),
+            name: Value(requireName(input.name, what: 'category name')),
             isIncome: Value(input.isIncome),
             oneTime: Value(input.oneTime),
             unit: Value(input.unit.db),
@@ -396,6 +409,9 @@ class BudgetService {
             updatedAt: Value(now),
           ),
         );
+        if (changed == 0) {
+          throw const MissingRowException('That category no longer exists.');
+        }
       }
       return id;
     });
@@ -487,6 +503,10 @@ class BudgetService {
 
   Future<void> undoDeleteCategory(CategoryDeleteUndo undo) {
     return db.transaction(() async {
+      final back = await (db.select(db.budgetCategoriesTable)
+            ..where((t) => t.id.equals(undo.category.id)))
+          .getSingleOrNull();
+      if (back != null) return; // already restored
       await db.into(db.budgetCategoriesTable).insert(undo.category);
       final id = undo.category.id;
       await (db.update(db.budgetCategoriesTable)
@@ -516,26 +536,32 @@ class BudgetService {
     double? rateCount,
     double? rateInteract,
   }) {
+    final qty = quantity == null
+        ? 1.0
+        : checkNumber(quantity, 'quantity', nonZero: true);
+    final price = checkNumberOrNull(unitPrice, 'price');
+    final typedCount = checkNumberOrNull(rateCount, 'exchange rate');
+    final typedInteract = checkNumberOrNull(rateInteract, 'exchange rate');
     return db.transaction(() async {
       final category = await _leafCategory(categoryId);
       final id = newId();
       final now = DateTime.now();
       final snap = await _snapshot(
         category,
-        unitPrice: unitPrice,
-        typedCount: rateCount,
-        typedInteract: rateInteract,
+        unitPrice: price,
+        typedCount: typedCount,
+        typedInteract: typedInteract,
       );
       await db
           .into(db.budgetTransactionsTable)
           .insert(
             BudgetTransactionsTableCompanion.insert(
               id: id,
-              name: Value(name),
+              name: Value(cleanName(name, what: 'transaction name')),
               categoryId: Value(categoryId),
               actionId: Value(actionId),
               occurredAt: dateTimeToDb(date ?? now)!,
-              quantity: Value(quantity ?? 1),
+              quantity: Value(qty),
               unitPrice: Value(snap.unitPrice),
               isIncome: Value(category.isIncome),
               isAmount: Value(snap.isAmount),
@@ -563,17 +589,28 @@ class BudgetService {
     double? rateCount,
     double? rateInteract,
   }) {
+    final qty = quantity == null
+        ? null
+        : checkNumber(quantity, 'quantity', nonZero: true);
+    unitPrice = checkNumberOrNull(unitPrice, 'price');
+    rateCount = checkNumberOrNull(rateCount, 'exchange rate');
+    rateInteract = checkNumberOrNull(rateInteract, 'exchange rate');
     return db.transaction(() async {
       final row = await (db.select(
         db.budgetTransactionsTable,
-      )..where((t) => t.id.equals(id))).getSingle();
+      )..where((t) => t.id.equals(id))).getSingleOrNull();
+      if (row == null) {
+        throw const MissingRowException('That transaction no longer exists.');
+      }
       var companion = BudgetTransactionsTableCompanion(
-        name: name == null ? const Value.absent() : Value(name),
+        name: name == null
+            ? const Value.absent()
+            : Value(cleanName(name, what: 'transaction name')),
         actionId: actionId,
         occurredAt: date == null
             ? const Value.absent()
             : Value(dateTimeToDb(date)!),
-        quantity: quantity == null ? const Value.absent() : Value(quantity),
+        quantity: qty == null ? const Value.absent() : Value(qty),
         updatedAt: Value(dateTimeToDb(DateTime.now())!),
       );
       final newCategoryId = categoryId ?? row.categoryId;
@@ -646,7 +683,9 @@ class BudgetService {
     double? unitPrice,
   }) async {
     final now = dateTimeToDb(DateTime.now())!;
-    final qty = quantity > 0 ? quantity : 1.0;
+    final checked = checkNumber(quantity, 'quantity');
+    final qty = checked > 0 ? checked : 1.0;
+    unitPrice = checkNumberOrNull(unitPrice, 'price');
     if (id == null) {
       final newTemplateId = newId();
       await db
@@ -654,7 +693,7 @@ class BudgetService {
           .insert(
             BudgetTxTemplatesTableCompanion.insert(
               id: newTemplateId,
-              name: Value(name.trim()),
+              name: Value(cleanName(name, what: 'template name')),
               categoryId: Value(categoryId),
               quantity: Value(qty),
               unitPrice: Value(unitPrice),
@@ -667,7 +706,7 @@ class BudgetService {
     await (db.update(db.budgetTxTemplatesTable)..where((t) => t.id.equals(id)))
         .write(
           BudgetTxTemplatesTableCompanion(
-            name: Value(name.trim()),
+            name: Value(cleanName(name, what: 'template name')),
             categoryId: Value(categoryId),
             quantity: Value(qty),
             unitPrice: Value(unitPrice),

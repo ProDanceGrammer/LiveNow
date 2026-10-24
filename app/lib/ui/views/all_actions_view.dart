@@ -1,3 +1,4 @@
+import '../search_targets.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -106,15 +107,29 @@ class AllActionsView extends ConsumerStatefulWidget {
   ConsumerState<AllActionsView> createState() => _AllActionsViewState();
 }
 
-class _AllActionsViewState extends ConsumerState<AllActionsView> {
+class _AllActionsViewState extends ConsumerState<AllActionsView>
+    with SearchTargetState<AllActionsView> {
   final _controller = TextEditingController();
+  final _searchFocus = FocusNode();
   Timer? _debounce;
   bool _panelOpen = false;
 
   @override
+  void initState() {
+    super.initState();
+    registerSearchTarget();
+  }
+
+  // Ctrl+F: focus the search field and select its text.
+  @override
+  void openSearch() => focusSearchField(_searchFocus, _controller);
+
+  @override
   void dispose() {
+    unregisterSearchTarget();
     _debounce?.cancel();
     _controller.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -166,6 +181,7 @@ class _AllActionsViewState extends ConsumerState<AllActionsView> {
                 child: TextField(
                   key: const ValueKey('allSearchField'),
                   controller: _controller,
+                  focusNode: _searchFocus,
                   onChanged: _onChanged,
                   decoration: InputDecoration(
                     hintText: 'Search actions',

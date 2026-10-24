@@ -24,9 +24,14 @@ void main() {
     expect(ids('ЇМ'), ['1']);
   });
 
-  test('prefix matches come first', () {
+  test('whole words come first, then the rest by name', () {
     expect(ids('про'), ['6', '2']);
     expect(ids('до'), ['4']);
+    final withWord = [...all, m('7', 'Про це'), m('8', 'Мій про план')];
+    final out = [for (final x in searchDirections(withWord, 'про')) x.id];
+    // 'Про це' and 'Мій про план' hold the whole word 'про'; the others only
+    // contain it inside a word.
+    expect(out, ['8', '7', '6', '2']);
   });
 
   test('an emoji finds the icon, apostrophes are interchangeable', () {

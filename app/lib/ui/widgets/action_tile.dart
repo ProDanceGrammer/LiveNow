@@ -95,6 +95,7 @@ class ActionTile extends ConsumerWidget {
         children: [
           Checkbox(
             key: ValueKey('all-check-${action.id}'),
+            semanticLabel: 'Select ${action.name}',
             value: selected,
             visualDensity: VisualDensity.compact,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,

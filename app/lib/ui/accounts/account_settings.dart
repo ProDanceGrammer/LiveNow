@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../data/accounts/account_auth.dart';
 import '../widgets/section_block.dart';
 import 'account_picker.dart';
+import 'idle_lock.dart';
 import 'account_session.dart';
 
 /// The Account block of Settings: who is signed in, switching, a password, the
@@ -107,6 +108,7 @@ class AccountSettingsSection extends StatelessWidget {
                       : null,
                 ),
                 const Divider(height: 16),
+                _IdleLockTile(session: session),
                 if (!account.hasTwoFactor)
                   tile(
                     'account-2fa-on',
@@ -652,5 +654,39 @@ class _RecoveryCodesDialog extends StatelessWidget {
         child: const Text('I saved them'),
       ),
     ],
+  );
+}
+
+/// "Lock after idle": Off / 5 / 15 / 30 / 60 minutes, per account.
+class _IdleLockTile extends StatelessWidget {
+  const _IdleLockTile({required this.session});
+
+  final AccountSession session;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    key: const ValueKey('account-idle-lock'),
+    dense: true,
+    contentPadding: EdgeInsets.zero,
+    leading: const Icon(Icons.timer_outlined),
+    title: const Text('Lock after idle'),
+    subtitle: const Text('Signs out after no mouse or keyboard activity'),
+    trailing: DropdownButton<int>(
+      key: const ValueKey('account-idle-lock-menu'),
+      value: kIdleLockOptions.contains(session.idleMinutes)
+          ? session.idleMinutes
+          : kIdleLockDefaultMinutes,
+      underline: const SizedBox.shrink(),
+      items: [
+        for (final m in kIdleLockOptions)
+          DropdownMenuItem(
+            value: m,
+            child: Text(m == 0 ? 'Off' : '$m min'),
+          ),
+      ],
+      onChanged: (m) {
+        if (m != null) session.setIdleMinutes?.call(m);
+      },
+    ),
   );
 }

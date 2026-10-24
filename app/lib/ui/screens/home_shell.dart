@@ -21,6 +21,8 @@ import '../reminders.dart';
 import '../theme_mode.dart';
 import '../widgets/app_toast.dart' show toastBottomInset;
 import '../widgets/glass.dart';
+import '../../domain/global_search.dart' show SearchSection;
+import '../search_targets.dart';
 import '../sync_providers.dart';
 import '../text_tool_access.dart';
 import '../widgets/instant_rail.dart';
@@ -57,9 +59,19 @@ class _HomeShellState extends ConsumerState<HomeShell>
   /// Which view the Actions section (index 0) shows.
   ActionsSub _actionsSub = ActionsSub.current;
 
+  /// What Ctrl+F opens in a section without a search bar of its own: the Ctrl+K
+  /// window, narrowed to what is on screen (the Calendar shows actions, Growth
+  /// directions; elsewhere everything).
+  Set<SearchSection> _searchScope() => switch (_index) {
+    0 => _actionsSub == ActionsSub.calendar ? {SearchSection.actions} : {},
+    1 => {SearchSection.directions},
+    _ => {},
+  };
+
   @override
   void initState() {
     super.initState();
+    ref.read(searchTargetsProvider).fallbackScope = _searchScope;
     // Sync starts with the app (the PC opens its server when a phone is
     // paired, a phone syncs). Never under `flutter test`: no sockets there.
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {

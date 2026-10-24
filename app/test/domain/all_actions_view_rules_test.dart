@@ -284,4 +284,40 @@ void main() {
       );
     },
   );
+
+  group('search ranking', () {
+    final items = [
+      _a('1', 'commit files', updated: h(9)),
+      _a('2', 'IT infrastructure', updated: h(4)),
+      _a('3', 'iterations construction', updated: h(8)),
+      _a('4', 'do it', updated: h(6)),
+    ];
+
+    test('with the default sort whole words come first, each group newest first', () {
+      final out = arrangeActions(
+        items: items,
+        sort: kDefaultAllActionsSort,
+        query: 'it',
+      );
+      // Whole word: do it (h6), IT infrastructure (h4). Then the rest by the
+      // default order: commit files (h9), iterations construction (h8).
+      expect(_ids(out), ['4', '2', '1', '3']);
+    });
+
+    test('a sort the user chose is kept (no reordering by relevance)', () {
+      final out = arrangeActions(
+        items: items,
+        sort: [const SortKey(SortField.name)],
+        query: 'it',
+      );
+      expect(_ids(out), ['1', '4', '2', '3']); // commit, do, IT, iterations
+    });
+
+    test('without a search nothing changes', () {
+      expect(
+        _ids(arrangeActions(items: items, sort: kDefaultAllActionsSort)),
+        ['1', '3', '4', '2'],
+      );
+    });
+  });
 }

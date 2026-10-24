@@ -1,3 +1,4 @@
+import '../../domain/search_match.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -236,11 +237,12 @@ class _MetricSearchDialogState extends State<_MetricSearchDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final query = _query.trim().toLowerCase();
-    final shown = [
-      for (final m in widget.metrics)
-        if (query.isEmpty || m.name.toLowerCase().contains(query)) m,
-    ]..sort((a, b) => a.name.compareTo(b.name));
+    // By name; whole-word matches of the typed text first, then the rest.
+    final shown = rankMatches(
+      [...widget.metrics]..sort((a, b) => a.name.compareTo(b.name)),
+      _query,
+      (m) => [m.name],
+    );
 
     return AlertDialog(
       title: Text(widget.title),

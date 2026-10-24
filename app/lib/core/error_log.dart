@@ -39,6 +39,20 @@ class ErrorLog {
     Object error,
     StackTrace? stack, {
     String? context,
+  }) {
+    // One write at a time: two overlapping appends (a burst of failures) would
+    // interleave and garble each other's lines.
+    final done = _tail.then((_) => _write(error, stack, context: context));
+    _tail = done.then((_) {}, onError: (Object _) {});
+    return done;
+  }
+
+  static Future<void> _tail = Future<void>.value();
+
+  static Future<void> _write(
+    Object error,
+    StackTrace? stack, {
+    String? context,
   }) async {
     try {
       final f = await file();

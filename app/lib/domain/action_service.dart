@@ -1,10 +1,12 @@
-import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../core/data_exceptions.dart';
 import '../core/ids.dart';
+import '../core/number_rules.dart';
 import '../core/settings.dart';
+import '../core/text_rules.dart';
 import '../core/time_codec.dart';
 import '../data/database.dart';
 import 'duration_rules.dart';
@@ -12,6 +14,7 @@ import 'notes_plain_text.dart';
 import 'postpone_rules.dart';
 import 'work_hours.dart';
 import 'sequence_naming.dart';
+import 'template_payload.dart';
 
 /// A full copy of one action's row and its entire occurrence history, taken
 /// just before a quick-action button changes it — lets [ActionService.restore]
@@ -197,6 +200,13 @@ class ActionService {
     String? planKey,
   }) async {
     final id = newId();
+    final cleanedName = requireName(name, what: 'action name');
+    if (estimatedMinutes != null &&
+        (estimatedMinutes < 0 || estimatedMinutes > kMaxEstimatedMinutes)) {
+      throw InvalidNumberException(
+        'The duration must be between 0 minutes and 10 years.',
+      );
+    }
     final nowText = dateTimeToDb(DateTime.now())!;
 
     await db.transaction(() async {
@@ -205,7 +215,7 @@ class ActionService {
           .insert(
             ActionsTableCompanion.insert(
               id: id,
-              name: name,
+              name: cleanedName,
               postponeFlex: Value(postponeFlex),
               depthLevel: Value(depthLevel),
               startAt: Value(dateTimeToDb(startAt)),
@@ -250,13 +260,14 @@ class ActionService {
     // Absent = leave the notes as they are (a caller that doesn't know about
     // notes must not wipe them); `Value(null)` clears them.
     Value<String?> notes = const Value.absent(),
-  }) {
+  }) async {
+    final cleanedName = requireName(name, what: 'action name');
     final nowText = dateTimeToDb(DateTime.now())!;
-    return (db.update(
+    final changed = await (db.update(
       db.actionsTable,
     )..where((t) => t.id.equals(actionId))).write(
       ActionsTableCompanion(
-        name: Value(name),
+        name: Value(cleanedName),
         postponeFlex: Value(postponeFlex),
         depthLevel: Value(depthLevel),
         startAt: Value(dateTimeToDb(startAt)),
@@ -270,6 +281,11 @@ class ActionService {
         updatedAt: Value(nowText),
       ),
     );
+    if (changed == 0) {
+      throw const MissingRowException(
+        'This action no longer exists (it was deleted elsewhere).',
+      );
+    }
   }
 
   /// Writes only the notes (and their search text): the editor's silent
@@ -361,6 +377,11 @@ class ActionService {
   /// deleted metric, are skipped rather than failing the whole undo.
   Future<void> undoDelete(DeleteUndo undo) {
     return db.transaction(() async {
+      // Already back (a second undo): nothing to restore.
+      final back = await (db.select(db.actionsTable)
+            ..where((t) => t.id.equals(undo.action.id)))
+          .getSingleOrNull();
+      if (back != null) return;
       await db.into(db.actionsTable).insert(undo.action);
       for (final occurrence in undo.occurrences) {
         await db.into(db.actionOccurrencesTable).insert(occurrence);
@@ -875,6 +896,8 @@ class ActionService {
       // The name is the truth: a removed `[#n]` restarts the count at 1, an
       // edited one is honoured (the stored counter is only rewritten below).
       final sequence = prefixNumber ?? 1;
+      // `[#n]` holds at most 9 digits (see sequence_naming.dart): stop there.
+      final nextSequence = sequence >= 999999999 ? sequence : sequence + 1;
 
       final predicted = predictedDuration(
         ownDuration: computeActionDuration(
@@ -905,14 +928,14 @@ class ActionService {
           .insert(
             ActionsTableCompanion.insert(
               id: newActionId,
-              name: formatSequenceName(sequence + 1, baseName),
+              name: formatSequenceName(nextSequence, baseName),
               postponeFlex: Value(source.postponeFlex),
               depthLevel: Value(source.depthLevel),
               // Timed even when the source is all-day: it starts right now.
               startAt: Value(nowText),
               endAt: Value(dateTimeToDb(nowUtc.add(predicted))),
               estimatedMinutes: Value(source.estimatedMinutes),
-              sequenceNumber: Value(sequence + 1),
+              sequenceNumber: Value(nextSequence),
               countableActivityId: Value(source.countableActivityId),
               // The whole description carries over as it is (ticks kept).
               notes: Value(source.notes),
@@ -1520,7 +1543,7 @@ class ActionService {
     final template = await (db.select(
       db.actionTemplatesTable,
     )..where((t) => t.id.equals(templateId))).getSingle();
-    return jsonDecode(template.payload) as Map<String, dynamic>;
+    return decodeTemplatePayload(template.payload, fallbackName: template.name);
   }
 
   /// The createAction arguments a template payload describes. Directions

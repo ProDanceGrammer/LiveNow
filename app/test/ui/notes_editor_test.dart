@@ -424,4 +424,46 @@ void main() {
       );
     }
   });
+
+  testWidgets('checked lines follow a theme change (light <-> dark)', (
+    tester,
+  ) async {
+    final json = jsonOf([
+      todoListNode(checked: true, text: 'Done thing'),
+      todoListNode(checked: false, text: 'Open thing'),
+    ]);
+    // The colour the text spans of the line carry (the editor draws its own text).
+    Color? colorOf(String text) {
+      final rt = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .firstWhere((w) => w.text.toPlainText().contains(text));
+      Color? found;
+      rt.text.visitChildren((span) {
+        if (span is TextSpan && span.style?.color != null) {
+          found = span.style!.color;
+          return false;
+        }
+        return true;
+      });
+      return found ?? rt.text.style?.color;
+    }
+
+    Color checkedFor(Brightness b) =>
+        ThemeData(brightness: b).colorScheme.onSurface.withValues(alpha: 0.55);
+
+    await pumpEditor(tester, json: json, brightness: Brightness.dark);
+    expect(colorOf('Done thing'), checkedFor(Brightness.dark));
+
+    // Same widget tree, the other theme: the checked line must take the new
+    // colour (it used to keep the dark theme's pale grey on a light page).
+    await pumpEditor(tester, json: json, brightness: Brightness.light);
+    // The theme change animates; let it finish.
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(colorOf('Done thing'), checkedFor(Brightness.light));
+
+    await pumpEditor(tester, json: json, brightness: Brightness.dark);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(colorOf('Done thing'), checkedFor(Brightness.dark));
+    await unmount(tester);
+  });
 }

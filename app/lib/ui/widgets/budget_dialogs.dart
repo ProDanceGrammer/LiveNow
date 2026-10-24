@@ -4,6 +4,8 @@ import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/number_rules.dart';
+import '../../core/text_rules.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/budget_rules.dart';
@@ -53,7 +55,8 @@ Future<void> openBudgetCategoryById(
   final row = await (db.select(
     db.budgetCategoriesTable,
   )..where((t) => t.id.equals(id))).getSingleOrNull();
-  if (row == null || !context.mounted) return;
+  if (!context.mounted) return;
+  if (row == null) return showMissingToast(context, 'category');
   await BudgetCategoryDialog.show(context, existing: row);
 }
 
@@ -414,7 +417,7 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
             autofocus: true,
             decoration: const InputDecoration(labelText: 'Name'),
             validator: (v) =>
-                (v ?? '').trim().isEmpty ? 'Name is required' : null,
+                nameFieldError(v, required: 'Name is required'),
             onFieldSubmitted: (_) => _save(),
           ),
           _gap,
@@ -584,6 +587,10 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
       setState(() => _error = e.message);
     } on BudgetGroupException catch (e) {
       await _offerMove(service, e, navigator);
+    } on InvalidNumberException catch (e) {
+      setState(() => _error = e.text);
+    } on InvalidNameException catch (e) {
+      setState(() => _error = e.message);
     }
   }
 
@@ -952,7 +959,7 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               helperText: 'Tip: put the currency first, e.g. "(TL) Groceries"',
             ),
             validator: (v) =>
-                (v ?? '').trim().isEmpty ? 'Name is required' : null,
+                nameFieldError(v, required: 'Name is required'),
             onFieldSubmitted: (_) => _save(),
           ),
           if (isGroup) ...[
@@ -1448,6 +1455,10 @@ class _BudgetTransactionDialogState
       navigator.pop();
     } on BudgetGroupException catch (e) {
       setState(() => _error = e.message);
+    } on InvalidNumberException catch (e) {
+      setState(() => _error = e.text);
+    } on InvalidNameException catch (e) {
+      setState(() => _error = e.message);
     }
   }
 
@@ -1470,6 +1481,12 @@ class _BudgetTransactionDialogState
         parseBudgetNumber(v ?? '') == null ? 'Enter a number' : null;
     String? optionalNumber(String? v) =>
         (v ?? '').trim().isEmpty ? null : number(v);
+    // A quantity may be negative (a refund) but never 0.
+    String? quantityNumber(String? v) {
+      final n = parseBudgetNumber(v ?? '');
+      if (n == null) return 'Enter a number';
+      return n == 0 ? 'Cannot be 0' : null;
+    }
 
     // The same transaction in the three currencies it can be read in, with the
     // rates as typed in the form (else the stored snapshot, else the accounts').
@@ -1673,7 +1690,7 @@ class _BudgetTransactionDialogState
                   decoration: InputDecoration(
                     labelText: isAmount ? 'Amount' : 'Quantity',
                   ),
-                  validator: number,
+                  validator: quantityNumber,
                   onChanged: (_) => setState(() {}),
                   onFieldSubmitted: (_) => _save(),
                 ),
@@ -1843,7 +1860,7 @@ class _BudgetSettingsDialogState extends ConsumerState<BudgetSettingsDialog> {
                   'All totals are shown in it; account rates are per 1 unit',
               helperMaxLines: 2,
             ),
-            validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+            validator: nameFieldError,
           ),
           _gap,
           TextFormField(

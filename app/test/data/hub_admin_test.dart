@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -267,6 +268,87 @@ void main() {
 
     await desktopT.call('/v1/admin/peers/remove', {'deviceId': await phone.id});
     await expectLater(phoneT.hello(), throwsA(isA<SyncAuthException>()));
+  });
+
+  /// A phone paired through the desktop's invitation (not an admin).
+  Future<HttpTransport> pairPhone(HttpTransport desktopT) async {
+    final start = await desktopT.call('/v1/admin/pairing/start', const {});
+    final code = PairingUri.parse(start['uri']! as String);
+    final pairing = connect(
+      phone,
+      PairingUri(
+        deviceId: code.deviceId,
+        port: server.port,
+        hosts: code.hosts,
+        secret: code.secret,
+      ),
+      name: 'iPhone',
+    );
+    await _approveNext(desktopT, true);
+    return pairing;
+  }
+
+  test('a newly granted admin works on its next request; a revoked one loses it at once', () async {
+    final desktopT = await pairDesktop();
+    final phoneT = await pairPhone(desktopT);
+    await expectLater(
+      phoneT.call('/v1/admin/status', const {}),
+      throwsA(isA<SyncAuthException>()),
+    );
+
+    await hub.store.setState(adminStateKey(await phone.id), '1');
+    expect((await phoneT.call('/v1/admin/status', const {}))['wire'], isNotNull);
+
+    await hub.store.setState(adminStateKey(await phone.id), '0');
+    await expectLater(
+      phoneT.call('/v1/admin/status', const {}),
+      throwsA(isA<SyncAuthException>()),
+    );
+    // Its normal sync access is untouched by losing admin rights.
+    expect((await phoneT.hello()).deviceId, await hub.id);
+  });
+
+  test('a non-admin sending loopback-looking headers still gets 401 and no data', () async {
+    final desktopT = await pairDesktop();
+    await pairPhone(desktopT);
+    final peer = (await SyncPeers(phone.db).get(await hub.id))!;
+    final counter = peer.lastCounter + 1000;
+    const path = '/v1/admin/peers';
+    final env = await SyncEnvelope.seal(
+      key: peer.key,
+      path: path,
+      deviceId: await phone.id,
+      counter: counter,
+      body: const {},
+    );
+    final client = HttpClient();
+    addTearDown(() => client.close(force: true));
+    final req = await client.postUrl(Uri.http('127.0.0.1:${server.port}', path));
+    req.headers
+      ..set('X-Forwarded-For', '127.0.0.1')
+      ..set('X-Real-IP', '127.0.0.1')
+      ..set('Forwarded', 'for=127.0.0.1')
+      ..set('Host', 'localhost');
+    req.write(env.encode());
+    final res = await req.close();
+    final body = await utf8.decoder.bind(res).join();
+    expect(res.statusCode, 401);
+    expect(body, isEmpty);
+  });
+
+  test('a removed admin is cut off and its admin flag is cleared', () async {
+    final desktopT = await pairDesktop();
+    final phoneT = await pairPhone(desktopT);
+    await hub.store.setState(adminStateKey(await phone.id), '1');
+    expect((await phoneT.call('/v1/admin/peers', const {}))['peers'], isNotNull);
+
+    await desktopT.call('/v1/admin/peers/remove', {'deviceId': await phone.id});
+    await expectLater(
+      phoneT.call('/v1/admin/peers', const {}),
+      throwsA(isA<SyncAuthException>()),
+    );
+    expect(await hub.store.getState(adminStateKey(await phone.id)), '0');
+    expect(await SyncPeers(hub.db).get(await phone.id), isNull);
   });
 }
 

@@ -1,4 +1,5 @@
 import '../core/local_time.dart';
+import '../core/number_rules.dart';
 import 'name_sort.dart' show sortKeyIgnoringEmoji;
 
 // Budget rules: the Notion "resource expenditure" formulas, rebuilt as pure
@@ -34,7 +35,13 @@ enum BudgetUnit {
   );
 }
 
-double round2(double v) => (v * 100).round() / 100;
+double round2(double v) {
+  // `double.round()` throws on NaN / Infinity and saturates at 2^63; a value
+  // that large has no cents left anyway.
+  if (v.isNaN) return 0;
+  if (v.isInfinite || v.abs() >= 1e15) return v;
+  return (v * 100).round() / 100;
+}
 
 /// Fiat-like currencies are rounded to cents; tiny-rate ones (BTC) are not.
 double roundForRate(double v, double rate) => rate > 0.5 ? round2(v) : v;
@@ -239,7 +246,71 @@ BudgetSnapshot computeBudget({
   required List<BudgetAcct> accounts,
   required List<BudgetTx> transactions,
   required BudgetPeriod period,
-}) => _Calc(categories, accounts, transactions, period).run();
+}) => _Calc(
+  [for (final c in categories) _saneCat(c)],
+  [for (final a in accounts) _saneAcct(a)],
+  [for (final t in transactions) ?_saneTx(t)],
+  period,
+).run();
+
+// Stored rows can hold values the services now refuse (old imports, sync from
+// an older version): NaN, Infinity or absurd magnitudes. They are cleaned here
+// so one bad row never turns every total into NaN or throws.
+bool _ok(double? v) => v == null || (v.isFinite && v.abs() <= kMaxNumber);
+double? _okOrNull(double? v) => _ok(v) ? v : null;
+
+/// A rate so close to 0 that dividing by it overflows is no rate at all.
+bool _okRate(double? v) => _ok(v) && (v == null || v <= 0 || v >= 1e-12);
+double? _rateOrNull(double? v) => _okRate(v) ? v : null;
+
+BudgetCat _saneCat(BudgetCat c) =>
+    _ok(c.price) && _ok(c.percent) && _ok(c.frequencyMonths) && _ok(c.unitsPerMonth)
+    ? c
+    : BudgetCat(
+        id: c.id,
+        name: c.name,
+        isIncome: c.isIncome,
+        oneTime: c.oneTime,
+        unit: c.unit,
+        endDate: c.endDate,
+        price: _okOrNull(c.price),
+        percent: _okOrNull(c.percent),
+        frequencyMonths: _okOrNull(c.frequencyMonths),
+        unitsPerMonth: _okOrNull(c.unitsPerMonth),
+        parentId: c.parentId,
+        countPercentOfId: c.countPercentOfId,
+        accountCountId: c.accountCountId,
+        accountUseId: c.accountUseId,
+      );
+
+BudgetAcct _saneAcct(BudgetAcct a) => _okRate(a.rateToBase) && _ok(a.openingBalance)
+    ? a
+    : BudgetAcct(
+        id: a.id,
+        currency: a.currency,
+        // 0 = "no rate" (flagged), never NaN.
+        rateToBase: _okRate(a.rateToBase) ? a.rateToBase : 0,
+        openingBalance: _ok(a.openingBalance) ? a.openingBalance : 0,
+      );
+
+BudgetTx? _saneTx(BudgetTx t) {
+  if (!(_ok(t.quantity) && _ok(t.unitPrice))) return null;
+  if (_okRate(t.rateCount) && _okRate(t.rateInteract)) return t;
+  return BudgetTx(
+    id: t.id,
+    date: t.date,
+    categoryId: t.categoryId,
+    actionId: t.actionId,
+    quantity: t.quantity,
+    unitPrice: t.unitPrice,
+    isIncome: t.isIncome,
+    isAmount: t.isAmount,
+    accountCountId: t.accountCountId,
+    accountUseId: t.accountUseId,
+    rateCount: _rateOrNull(t.rateCount),
+    rateInteract: _rateOrNull(t.rateInteract),
+  );
+}
 
 class _Calc {
   _Calc(

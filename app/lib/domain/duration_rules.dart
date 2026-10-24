@@ -1,3 +1,5 @@
+import '../core/number_rules.dart' show kMaxEstimatedMinutes;
+
 /// Fallback duration when an action has nothing to derive one from — matches
 /// the original Notion "Predicted Time Consumption" formula's fallback.
 const Duration defaultActionDuration = Duration(minutes: 60);
@@ -23,7 +25,12 @@ Duration computeActionDuration({
     return endAt.difference(startAt);
   }
   if (legacyEstimatedMinutes != null && legacyEstimatedMinutes > 0) {
-    return Duration(minutes: legacyEstimatedMinutes);
+    // Capped: Duration(minutes: 1 << 62) overflows its microsecond counter.
+    return Duration(
+      minutes: legacyEstimatedMinutes > kMaxEstimatedMinutes
+          ? kMaxEstimatedMinutes
+          : legacyEstimatedMinutes,
+    );
   }
   return defaultActionDuration;
 }

@@ -7,10 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/db_errors.dart';
+import '../../core/error_log.dart';
+import '../../core/text_rules.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/action_urgency.dart';
-import '../../domain/action_service.dart' show ActionDraft;
+import '../../domain/action_service.dart' show ActionDraft, ScheduleChange;
 import '../../domain/chain_schedule.dart';
 import '../../domain/dependency_service.dart';
 import '../../domain/duration_rules.dart';
@@ -136,6 +139,7 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
 }
 
 class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
+    with WidgetsBindingObserver
     implements DraftDialog {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
@@ -198,6 +202,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final existing = widget.existing;
     _nameController = TextEditingController(text: existing?.name ?? '');
     _notes = existing?.notes;
@@ -389,8 +394,25 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     });
   }
 
+  /// Going to the background (the OS may end the app there): the Notes typed in
+  /// the last moments are written now instead of after the quiet period.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.inactive &&
+        state != AppLifecycleState.paused) {
+      return;
+    }
+    _notesKey.currentState?.flushPending();
+    final id = _id;
+    if (id != null && (_notesTimer?.isActive ?? false)) {
+      _notesTimer!.cancel();
+      ref.read(actionServiceProvider).updateNotes(id, _notes);
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unregisterDraftDialog(this);
     _notesTimer?.cancel();
     _rowSub?.cancel();
@@ -521,8 +543,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                       // Enter = the Save button.
                       textInputAction: TextInputAction.done,
                       onFieldSubmitted: (_) => _save(),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      validator: nameFieldError,
                     ),
                   ),
                   Visibility(
@@ -671,6 +692,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                     children: [
                       QuickActionBar(
                         actionId: widget.existing!.id,
+                        beforeAction: _flushSchedule,
                         groups: const {0},
                         tileSize: 36,
                         iconSize: 22,
@@ -680,6 +702,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                       const SizedBox(height: 8),
                       QuickActionBar(
                         actionId: widget.existing!.id,
+                        beforeAction: _flushSchedule,
                         groups: const {1},
                         tileSize: 36,
                         iconSize: 22,
@@ -690,6 +713,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                         const SizedBox(height: 8),
                         QuickActionBar(
                           actionId: widget.existing!.id,
+                          beforeAction: _flushSchedule,
                           groups: const {3},
                           extra: chain,
                           tileSize: 36,
@@ -704,6 +728,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                 // left, the postpones in the middle, Delete at the right.
                 : QuickActionBar(
                     actionId: widget.existing!.id,
+                    beforeAction: _flushSchedule,
                     onDelete: _deleteAndClose,
                     spread: true,
                     extra: chain,
@@ -918,6 +943,25 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     final id = _createdId;
     if (id != null) unawaited(runUndoableDelete(context, ref, id));
     Navigator.of(context).pop();
+  }
+
+  /// Saves the form's Start / End / All day to the database when they differ
+  /// from the saved row, so the quick buttons (Finish, Start, postpone,
+  /// Continue ...) work from the times on screen. They read the SAVED row; without
+  /// this, Finish kept the old saved Start and the row update then overwrote the
+  /// Start the user had typed.
+  Future<void> _flushSchedule() async {
+    final id = widget.existing?.id;
+    final base = _seen ?? widget.existing;
+    if (id == null || base == null) return;
+    if (_startAt == dateTimeFromDb(base.startAt) &&
+        _endAt == dateTimeFromDb(base.endAt) &&
+        _isAllDay == base.isAllDay) {
+      return;
+    }
+    await ref.read(actionServiceProvider).moveActions([
+      ScheduleChange(id, startAt: _startAt, endAt: _endAt, isAllDay: _isAllDay),
+    ]);
   }
 
   /// The button row's Delete: run it (Undo snackbar) and close this editor,
@@ -1181,15 +1225,35 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
     }
   }
 
+  /// [_persist] with the service's "name refused" turned into a toast (the
+  /// field validator normally catches it first).
+  Future<bool> _persistOrToast() async {
+    final overlay = rootOverlayOf(context);
+    try {
+      return await _persist();
+    } on InvalidNameException catch (e) {
+      showInfoToast(overlay, e.message);
+      return false;
+    } on Object catch (e, st) {
+      // Disk full / database busy or read-only: say so and keep the dialog
+      // (and everything typed in it) open. Anything else is a bug: rethrow.
+      final friendly = friendlyDbError(e);
+      if (friendly == null) rethrow;
+      ErrorLog.write(e, st, context: 'Save action');
+      showInfoToast(overlay, 'Not saved: $friendly.');
+      return false;
+    }
+  }
+
   Future<void> _save() async {
-    if (!await _persist()) return;
+    if (!await _persistOrToast()) return;
     if (mounted) Navigator.of(context).pop(_createdId);
   }
 
   /// Ctrl+S: the same write, but the dialog stays open and a toast confirms.
   Future<void> _saveStay() async {
     final overlay = rootOverlayOf(context);
-    if (!await _persist()) return;
+    if (!await _persistOrToast()) return;
     showInfoToast(overlay, 'Saved');
   }
 

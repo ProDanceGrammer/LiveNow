@@ -1,3 +1,4 @@
+import '../../domain/search_match.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/capped_read.dart';
 import '../../domain/growth_rules.dart';
 import '../../domain/growth_time.dart' show filterDirections;
+import '../search_targets.dart' show TabPage;
 import '../calendar_fullscreen.dart';
 import '../growth_filters.dart';
 import '../layout.dart';
@@ -133,17 +135,32 @@ class GrowthDirectionsScreen extends ConsumerWidget {
                   const SizedBox(width: 8),
                 ],
               ),
-            const Expanded(
-              child: TabBarView(
-                // No swiping between tabs: horizontal drags belong to the
-                // Mindmap (moving boxes, panning).
-                physics: NeverScrollableScrollPhysics(),
-                children: [
-                  _BalanceTab(),
-                  TreemapView(),
-                  _ListTab(),
-                  MindmapView(),
-                ],
+            Expanded(
+              // Each page knows its tab, so Ctrl+F can tell the selected one
+              // from the pages kept alive behind it.
+              child: Builder(
+                builder: (context) {
+                  final controller = DefaultTabController.of(context);
+                  const pages = <Widget>[
+                    _BalanceTab(),
+                    TreemapView(),
+                    _ListTab(),
+                    MindmapView(),
+                  ];
+                  return TabBarView(
+                    // No swiping between tabs: horizontal drags belong to the
+                    // Mindmap (moving boxes, panning).
+                    physics: const NeverScrollableScrollPhysics(),
+                    children: [
+                      for (var i = 0; i < pages.length; i++)
+                        TabPage(
+                          controller: controller,
+                          index: i,
+                          child: pages[i],
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
           ],
@@ -587,6 +604,13 @@ class _ListTabState extends ConsumerState<_ListTab> {
               }
             });
 
+            // With the default sort a search shows whole-word hits first (each
+            // group stays in urgency order); a sort the user chose wins.
+            final searchText = ref.watch(growthSearchProvider);
+            final rankedItems = _sort == _Sort.urgency
+                ? orderByMatch(items, searchText, (m) => [m.name])
+                : items;
+
             return Column(
               children: [
                 Padding(
@@ -629,12 +653,12 @@ class _ListTabState extends ConsumerState<_ListTab> {
                   ),
                 ),
                 Expanded(
-                  child: items.isEmpty
+                  child: rankedItems.isEmpty
                       ? const Center(child: Text('No growth directions match.'))
                       : ListView.builder(
-                          itemCount: items.length,
+                          itemCount: rankedItems.length,
                           itemBuilder: (context, i) {
-                            final m = items[i];
+                            final m = rankedItems[i];
                             final s = snapshot.stats[m.id]!;
                             return Padding(
                               padding: const EdgeInsets.fromLTRB(12, 3, 12, 3),

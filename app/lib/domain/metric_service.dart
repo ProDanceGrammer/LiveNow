@@ -1,6 +1,8 @@
 import 'package:drift/drift.dart';
 
 import '../core/ids.dart';
+import '../core/number_rules.dart';
+import '../core/text_rules.dart';
 import '../data/database.dart';
 import 'growth_import.dart';
 import 'growth_rules.dart';
@@ -76,11 +78,15 @@ class MetricService {
     List<String> dependsOnIds = const [],
     List<String> leadsToIds = const [],
   }) {
-    final trimmed = name.trim();
+    final trimmed = cleanName(name, what: 'direction name');
     if (trimmed.isEmpty) throw ArgumentError('A direction needs a name.');
     if (kind != MetricKind.boolean && window == null) {
       throw ArgumentError('A count/hours direction needs a time window.');
     }
+    // A boolean direction's target is fixed at 1 (whatever was passed).
+    final checkedTarget = kind == MetricKind.boolean
+        ? 1.0
+        : checkNumber(target, 'target', positive: true);
     final metricId = id ?? newId();
     final depends = {...dependsOnIds}..remove(metricId);
     final leads = {...leadsToIds}..remove(metricId);
@@ -106,7 +112,7 @@ class MetricService {
               timeWindow: Value(
                 kind == MetricKind.boolean ? null : window!.dbValue,
               ),
-              target: Value(kind == MetricKind.boolean ? 1 : target),
+              target: Value(checkedTarget),
               isMain: Value(isMain),
               icon: icon,
             ),
@@ -178,6 +184,10 @@ class MetricService {
   /// meantime, and links from actions deleted in the meantime, are skipped.
   Future<void> undoDelete(MetricDeleteUndo undo) {
     return db.transaction(() async {
+      final back = await (db.select(db.metricsTable)
+            ..where((t) => t.id.equals(undo.metric.id)))
+          .getSingleOrNull();
+      if (back != null) return; // already restored
       await db.into(db.metricsTable).insert(undo.metric);
 
       final metricIds = (await db.select(db.metricsTable).get())

@@ -259,6 +259,30 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
   /// beyond what a block needs are included (empty until a drag makes it longer,
   /// later or earlier).
   List<_Slot> _slots() {
+    // Rebuilt only when its inputs change: a drag rebuilds the layer on every
+    // pointer move and _edgesFor asks again, and the lane packing below is
+    // quadratic per cluster.
+    final cached = _slotsCache;
+    if (cached != null &&
+        identical(_slotsFor, widget.occurrences) &&
+        _slotsDays == widget.dayCount &&
+        _slotsFirstDay == widget.firstDay) {
+      return cached;
+    }
+    final built = _computeSlots();
+    _slotsCache = built;
+    _slotsFor = widget.occurrences;
+    _slotsDays = widget.dayCount;
+    _slotsFirstDay = widget.firstDay;
+    return built;
+  }
+
+  List<_Slot>? _slotsCache;
+  List<PlanOccurrence>? _slotsFor;
+  int _slotsDays = 0;
+  DateTime? _slotsFirstDay;
+
+  List<_Slot> _computeSlots() {
     final slots = <_Slot>[];
 
     void add(
@@ -305,23 +329,24 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
         ..sort((a, b) => a.startMin.compareTo(b.startMin));
       var cluster = <_Slot>[];
       var clusterEnd = -1;
+      // End minute of the last slot placed in each lane of the open cluster.
+      final laneEnds = <int>[];
       void close() {
-        final n = cluster.fold<int>(0, (m, s) => math.max(m, s.lane + 1));
         for (final s in cluster) {
-          s.lanes = n;
+          s.lanes = laneEnds.length;
         }
         cluster = [];
+        laneEnds.clear();
       }
 
       for (final s in day) {
         if (cluster.isNotEmpty && s.startMin >= clusterEnd) close();
-        final taken = {
-          for (final c in cluster)
-            if (c.endMin > s.startMin) c.lane,
-        };
-        var lane = 0;
-        while (taken.contains(lane)) {
-          lane++;
+        var lane = laneEnds.indexWhere((end) => end <= s.startMin);
+        if (lane == -1) {
+          lane = laneEnds.length;
+          laneEnds.add(s.endMin);
+        } else {
+          laneEnds[lane] = s.endMin;
         }
         s.lane = lane;
         cluster.add(s);

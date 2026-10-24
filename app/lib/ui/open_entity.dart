@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/growth_rules.dart';
 import 'providers.dart';
 import 'widgets/action_editor.dart';
+import 'widgets/app_toast.dart' show showMissingToast;
 import 'widgets/growth_direction_dialog.dart';
 
 // Rule: every entity shown inside an edit menu (chips, lists) must be
@@ -23,7 +24,8 @@ Future<void> openActionById(
   final row = await (db.select(
     db.actionsTable,
   )..where((t) => t.id.equals(id))).getSingleOrNull();
-  if (row == null || !context.mounted) return;
+  if (!context.mounted) return;
+  if (row == null) return showMissingToast(context, 'action');
   await ActionEditorDialog.show(context, existing: row);
 }
 
@@ -37,7 +39,8 @@ Future<void> openDirectionById(
   final row = await (db.select(
     db.metricsTable,
   )..where((t) => t.id.equals(id))).getSingleOrNull();
-  if (row == null || !context.mounted) return;
+  if (!context.mounted) return;
+  if (row == null) return showMissingToast(context, 'growth direction');
   await GrowthDirectionDialog.show(
     context,
     existing: GrowthMetric.fromRow(row),
