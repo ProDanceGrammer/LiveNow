@@ -17,14 +17,12 @@ subprojects {
 }
 // Some plugins (keyboard_height_plugin, pulled in by appflowy_editor) still
 // compile against android-31 while their AndroidX dependencies need 33 or later,
-// which fails the build. Raise every plugin library to the app's level after its
-// own build script has run (must come before evaluationDependsOn below).
+// which fails the build. finalizeDsl runs after a plugin's own build script and
+// before AGP locks the settings, so every plugin library is raised to 36.
 subprojects {
     plugins.withId("com.android.library") {
-        afterEvaluate {
-            extensions.configure<com.android.build.api.dsl.LibraryExtension> {
-                compileSdk = 36
-            }
+        extensions.configure<com.android.build.api.variant.LibraryAndroidComponentsExtension> {
+            finalizeDsl { library -> library.compileSdk = 36 }
         }
     }
 }
