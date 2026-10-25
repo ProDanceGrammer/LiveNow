@@ -1,0 +1,51 @@
+# Builds the Windows release and packs it as LiveNow-windows-x64.zip (portable:
+# livenow.exe + DLLs + Visual C++ runtime) on a GitHub Windows runner.
+#
+# Runs ONLY when you ask: push a tag that starts with "win-" (git tag win-1 &&
+# git push origin win-1) or press "Run workflow" on the Actions page.
+name: Windows build (portable zip)
+
+on:
+  push:
+    tags: ['win-*']
+  workflow_dispatch:
+
+# The job only reads the repository: the token gets nothing else.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      # Actions are pinned to a commit (the comment names the tag it was taken
+      # from), so a moved or hijacked tag cannot change what runs here.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Static analysis
+        run: flutter analyze lib
+
+      - name: Build (release)
+        run: flutter build windows --release
+
+      - name: Pack the zip
+        shell: pwsh
+        run: ./windows/package/pack_windows.ps1
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: livenow-windows-portable
+          path: app/LiveNow-windows-x64.zip
+          retention-days: 7

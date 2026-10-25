@@ -69,8 +69,24 @@ If `flutter`/`dart` aren't recognized in a fresh shell, reload `PATH` in PowerSh
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 ```
 
-macOS and iOS builds run in GitHub Actions (`.github/workflows/macos-build.yml` on tags `mac-*`,
-`ios-build.yml` on `ios-*`).
+macOS, iOS, Android and a portable Windows zip are built in GitHub Actions on a tag
+(`mac-*`, `ios-*`, `android-*`, `win-*`); the result is a 7-day workflow artifact.
+
+## Installing the builds
+
+- **Windows (portable):** unzip `LiveNow-windows-x64.zip` anywhere and run `livenow.exe` (the
+  Visual C++ runtime DLLs are inside). SmartScreen may warn because the app is unsigned: More
+  info → Run anyway. Locally: `flutter build windows --release`, then
+  `app/windows/package/pack_windows.ps1` makes the zip.
+- **Android:** download `livenow.apk` from the `android-*` workflow run, copy it to the phone (or
+  `adb install livenow.apk`) and allow "install unknown apps". It is signed with the project's
+  release key (GitHub secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_PASSWORD`, `ANDROID_KEY_ALIAS`; the local copy of the key is not in git: keep a
+  backup, a lost key means the next build cannot update an installed app). Android is a phone
+  client: it syncs with a PC or hub (plain HTTP on the LAN/VPN inside AES envelopes, so cleartext
+  traffic is enabled), shows reminders through the system, pairs by QR (camera). Not yet verified
+  on a real phone.
+- **macOS / iOS:** see the notes in `dev/NOTES.md` (unsigned `.dmg`, sideloaded `.ipa`).
 
 ## Commands
 

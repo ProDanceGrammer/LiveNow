@@ -9,8 +9,9 @@ import '../../core/settings.dart';
 import '../../domain/reminder_plan.dart';
 import 'reminder_scheduler.dart';
 
-/// The real notification centre: iOS holds the scheduled notifications itself
-/// (they fire with the app closed and cost nothing while waiting); Windows
+/// The real notification centre: iOS, macOS and Android hold the scheduled
+/// notifications themselves (they fire with the app closed and cost nothing
+/// while waiting); Windows
 /// has no such queue for an unpackaged app, so ONE timer waits for the next
 /// moment and shows its toast (only while the app runs). Every failure is
 /// swallowed: reminders must never be able to break the app.
@@ -30,13 +31,24 @@ class LocalNotificationsSink implements ReminderSink {
   static bool get _isIos => !kIsWeb && Platform.isIOS;
   static bool get _isMac => !kIsWeb && Platform.isMacOS;
   static bool get _isWindows => !kIsWeb && Platform.isWindows;
+  static bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
   /// iOS and macOS both hand the system the nearest moments to schedule
   /// (it delivers them even when the app is closed); Windows keeps one timer.
   static bool get _isDarwin => _isIos || _isMac;
 
+  /// Whether [platform] lets the system hold the scheduled notifications
+  /// (iOS, macOS and Android) instead of an in-app timer (Windows).
+  @visibleForTesting
+  static bool systemHoldsReminders(TargetPlatform platform) =>
+      platform == TargetPlatform.iOS ||
+      platform == TargetPlatform.macOS ||
+      platform == TargetPlatform.android;
+
+  static bool get _systemQueue => _isDarwin || _isAndroid;
+
   /// Which platforms get reminders at all.
-  static bool get supported => _isDarwin || _isWindows;
+  static bool get supported => _systemQueue || _isWindows;
 
   /// Starts the plugin (once); false where reminders are unavailable.
   Future<bool> init() => _init();
@@ -64,6 +76,7 @@ class LocalNotificationsSink implements ReminderSink {
           if (id != null && id.isNotEmpty) onOpenAction?.call(id);
         },
         settings: const InitializationSettings(
+          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
           iOS: DarwinInitializationSettings(
             requestAlertPermission: false,
             requestBadgePermission: false,
@@ -89,10 +102,17 @@ class LocalNotificationsSink implements ReminderSink {
   }
 
   Future<void> _askPermission() async {
-    if (_asked || !_isDarwin) return;
+    if (_asked || !_systemQueue) return;
     _asked = true;
     try {
-      if (_isMac) {
+      if (_isAndroid) {
+        // Android 13+ asks at runtime; older versions answer true at once.
+        await _plugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
+            ?.requestNotificationsPermission();
+      } else if (_isMac) {
         await _plugin
             .resolvePlatformSpecificImplementation<
               MacOSFlutterLocalNotificationsPlugin
@@ -116,7 +136,7 @@ class LocalNotificationsSink implements ReminderSink {
     if (!supported) return;
     if (!await _init()) return;
     try {
-      if (_isDarwin) {
+      if (_systemQueue) {
         await _plugin.cancelAll();
         if (moments.isEmpty) return;
         await _askPermission();
@@ -126,6 +146,13 @@ class LocalNotificationsSink implements ReminderSink {
             id: m.notificationId,
             scheduledDate: tz.TZDateTime.from(m.at, zone),
             notificationDetails: const NotificationDetails(
+              android: AndroidNotificationDetails(
+                'reminders',
+                'Reminders',
+                channelDescription: 'Start and end of your actions',
+                importance: Importance.high,
+                priority: Priority.high,
+              ),
               iOS: DarwinNotificationDetails(),
               macOS: DarwinNotificationDetails(),
             ),

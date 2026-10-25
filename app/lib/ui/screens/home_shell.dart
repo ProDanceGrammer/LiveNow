@@ -163,7 +163,27 @@ class _HomeShellState extends ConsumerState<HomeShell>
 
   @override
   Widget build(BuildContext context) {
-    if (usePhoneLayout(context)) return _buildPhone(context);
+    if (usePhoneLayout(context)) {
+      // Android's Back button / gesture: dialogs are their own routes and pop
+      // first; here Back steps out of a section (Budget -> Actions, Calendar ->
+      // Current Actions) and only leaves the app from the first screen.
+      final atHome = _index == 0 && _actionsSub == ActionsSub.current;
+      return PopScope(
+        canPop: atHome,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
+          setState(() {
+            if (_index != 0) {
+              _index = 0;
+              _visited.add(0);
+            } else {
+              _actionsSub = ActionsSub.current;
+            }
+          });
+        },
+        child: _buildPhone(context),
+      );
+    }
     if (toastBottomInset.value != 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         toastBottomInset.value = 0;

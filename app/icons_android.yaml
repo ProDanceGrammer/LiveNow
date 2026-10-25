@@ -1,0 +1,9 @@
+# Android launcher icon: the iOS artwork (very light violet square) for old
+# launchers, and an adaptive icon = padded transparent mark on that same colour.
+# Regenerate: dart run flutter_launcher_icons -f icons_android.yaml
+flutter_launcher_icons:
+  android: "ic_launcher"
+  image_path: "assets/icon/app_icon_ios.png"
+  min_sdk_android: 24
+  adaptive_icon_background: "#EEE8FF"
+  adaptive_icon_foreground: "assets/icon/app_icon_android_fg.png"
