@@ -25,6 +25,7 @@ const _kinds = {
   'plan_collections': 'Plan collection',
   'budget_tx_templates': 'Transaction template',
   'forms': 'Form',
+  'calendar_zones': 'Calendar timezone',
 };
 
 final _deviceIdProvider = FutureProvider<String>(

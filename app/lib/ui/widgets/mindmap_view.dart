@@ -24,8 +24,10 @@ import '../calendar_fullscreen.dart';
 import '../layout.dart';
 import '../providers.dart';
 import '../theme/glass_theme.dart';
+import '../touchpad.dart';
 import '../undo.dart';
 import '../urgency_colors.dart';
+import 'direction_menu.dart';
 import 'glass.dart';
 import 'growth_direction_dialog.dart';
 
@@ -312,6 +314,100 @@ class _MindmapViewState extends ConsumerState<MindmapView>
     return ids;
   }
 
+  // ---- touchpad ---------------------------------------------------------------
+  // Two-finger swipe moves the canvas, a pinch zooms about the mouse cursor,
+  // Ctrl + two-finger swipe zooms; the mouse wheel zooms about the pointer. All
+  // of it is done HERE, not by the InteractiveViewer: its pinch focal point is
+  // the gesture's start position plus the fingers' pan, which is not where the
+  // cursor is (it zoomed toward a corner), and our own pan in the same events
+  // fought its reference-point correction. The viewer's scaling stays OFF
+  // ([_touchScale]) except for a finger on a touch screen, where its pinch is
+  // right.
+
+  /// The mouse cursor in viewport coordinates (the touchpad moves it too);
+  /// null until it has been seen over the map.
+  Offset? _cursor;
+
+  /// Whether the viewer may scale (a touch pinch). Off for a mouse / touchpad,
+  /// switched on by the first touch and off again when the cursor hovers: set
+  /// BEFORE a gesture, because a rebuild during it would be too late.
+  bool _touchScale = false;
+
+  /// The cumulative scale of the gesture at its last update.
+  double _pzScale = 1;
+
+  bool get _invertX => ref.read(touchpadInvertXProvider);
+  bool get _invertY => ref.read(touchpadInvertYProvider);
+
+  void _panCanvas(Offset delta) {
+    final d = Offset(_invertX ? -delta.dx : delta.dx, _invertY ? -delta.dy : delta.dy);
+    _controller.value = pannedBy(_controller.value, d);
+  }
+
+  /// Scroll events over the map. A notched mouse wheel zooms about the pointer
+  /// (as the viewer used to: e^(-dy/200) per notch); a touchpad swipe pans, and
+  /// with Ctrl held it zooms about the pointer.
+  void _onViewportSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final d = event.scrollDelta;
+    final focal = _controller.toScene(event.localPosition);
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      if (!isTouchpadScroll(event)) {
+        _controller.value = zoomedAround(
+          _controller.value,
+          focal,
+          math.exp(-d.dy / 200),
+          min: _minScale,
+          max: _maxScale,
+        );
+      } else if (isPrimaryPressed()) {
+        _controller.value = zoomedAround(
+          _controller.value,
+          focal,
+          zoomFactorFor(d.dy),
+          min: _minScale,
+          max: _maxScale,
+        );
+      } else {
+        _panCanvas(Offset(-d.dx, -d.dy));
+      }
+    });
+  }
+
+  void _onPanZoomStart(PointerPanZoomStartEvent e) {
+    _pzScale = 1;
+    _cursor ??= e.localPosition;
+  }
+
+  void _onPanZoom(PointerPanZoomUpdateEvent e) {
+    // Where the zoom is anchored: the cursor the user sees, as a scene point.
+    final focal = _controller.toScene(_cursor ?? e.localPosition);
+    if (isPrimaryPressed()) {
+      // Ctrl + swipe = zoom about the cursor by the vertical travel.
+      _controller.value = zoomedAround(
+        _controller.value,
+        focal,
+        zoomFactorFor(-e.panDelta.dy),
+        min: _minScale,
+        max: _maxScale,
+      );
+      return;
+    }
+    // The pinch: the change since the last update, about the cursor.
+    final ratio = e.scale / _pzScale;
+    _pzScale = e.scale;
+    if (ratio != 1 && ratio.isFinite && ratio > 0) {
+      _controller.value = zoomedAround(
+        _controller.value,
+        focal,
+        ratio,
+        min: _minScale,
+        max: _maxScale,
+      );
+    }
+    _panCanvas(e.panDelta);
+  }
+
   // ---- toolbar --------------------------------------------------------------
 
   void _zoomBy(double factor) {
@@ -570,6 +666,12 @@ class _MindmapViewState extends ConsumerState<MindmapView>
     _setSelection({id});
   }
 
+  /// Right-click on a node: Open / Duplicate.
+  Future<void> _nodeMenu(GrowthMetric m, Offset at) {
+    _selectNode(m.id);
+    return showDirectionMenu(context, ref, m, at);
+  }
+
   /// Ctrl/Shift+click: toggles [id] in the selection.
   void _toggleNode(String id) {
     _setSelection(
@@ -748,7 +850,16 @@ class _MindmapViewState extends ConsumerState<MindmapView>
     _setSelection(_marqueeAdditive ? {..._selected, ...hit} : hit);
   }
 
+  void _viewportHover(PointerHoverEvent e) {
+    _cursor = e.localPosition;
+    if (_touchScale) setState(() => _touchScale = false);
+  }
+
   void _viewportDown(PointerDownEvent e) {
+    // The first finger enables the viewer's pinch BEFORE a second one lands.
+    if (e.kind == PointerDeviceKind.touch && !_touchScale) {
+      setState(() => _touchScale = true);
+    }
     final pans =
         e.buttons == kMiddleMouseButton ||
         e.buttons == kSecondaryMouseButton ||
@@ -757,6 +868,7 @@ class _MindmapViewState extends ConsumerState<MindmapView>
   }
 
   void _viewportMove(PointerMoveEvent e) {
+    _cursor = e.localPosition;
     if (e.pointer != _panPointer) return;
     _controller.value =
         Matrix4.translationValues(e.delta.dx, e.delta.dy, 0) *
@@ -1027,6 +1139,10 @@ class _MindmapViewState extends ConsumerState<MindmapView>
                       onPointerMove: _viewportMove,
                       onPointerUp: _viewportUp,
                       onPointerCancel: _viewportUp,
+                      onPointerHover: _viewportHover,
+                      onPointerSignal: _onViewportSignal,
+                      onPointerPanZoomStart: _onPanZoomStart,
+                      onPointerPanZoomUpdate: _onPanZoom,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(
                           GlassTheme.radiusPanel,
@@ -1034,6 +1150,8 @@ class _MindmapViewState extends ConsumerState<MindmapView>
                         child: InteractiveViewer(
                           transformationController: _controller,
                           panEnabled: false,
+                          // Only for a touch pinch: see [_touchScale].
+                          scaleEnabled: _touchScale,
                           constrained: false,
                           minScale: _minScale,
                           maxScale: _maxScale,
@@ -1126,6 +1244,7 @@ class _MindmapViewState extends ConsumerState<MindmapView>
                                           existing: m,
                                         );
                                       },
+                                      onMenu: (p) => _nodeMenu(m, p),
                                       onSelect: () => _pressNode(m.id),
                                       onDrag: (d) => _dragNodes(m.id, d),
                                       onDragEnd: () => _endDrag(m.id),
@@ -1515,6 +1634,7 @@ class _MindNode extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onOpen;
+  final void Function(Offset globalPosition) onMenu;
   final VoidCallback onSelect;
   final void Function(Offset delta) onDrag;
   final VoidCallback onDragEnd;
@@ -1532,6 +1652,7 @@ class _MindNode extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.onOpen,
+    required this.onMenu,
     required this.onSelect,
     required this.onDrag,
     required this.onDragEnd,
@@ -1541,8 +1662,10 @@ class _MindNode extends StatelessWidget {
   });
 
   GestureDetector _gestures(Widget child) => GestureDetector(
+    supportedDevices: kNoTrackpadDevices,
     onTap: onTap,
     onDoubleTap: onOpen,
+    onSecondaryTapUp: (d) => onMenu(d.globalPosition),
     onPanDown: (_) => onSelect(),
     onPanUpdate: (d) => onDrag(d.delta),
     onPanEnd: (_) => onDragEnd(),

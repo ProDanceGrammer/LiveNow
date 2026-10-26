@@ -303,6 +303,25 @@ class FormsTable extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// An extra timezone shown as an hour column beside the calendar's own (schema
+/// v18). `tz` is an IANA name; `label` is what the column header says (editable,
+/// starts as flag + city). Synced, so a phone shows the same columns.
+@DataClassName('CalendarZone')
+class CalendarZonesTable extends Table {
+  @override
+  String get tableName => 'calendar_zones';
+
+  TextColumn get id => text()();
+  TextColumn get tz => text()();
+  TextColumn get label => text().withDefault(const Constant(''))();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 /// A reusable transaction (schema v15): what a plan item creates next to the
 /// actions it generates, and what the Budget > Transactions screen lists as
 /// "templates". `category_id` is a soft reference (the category may be deleted;

@@ -7,9 +7,11 @@ import '../dialog_stack.dart';
 import '../open_entity.dart';
 import '../providers.dart';
 import '../time_format.dart';
+import '../undo.dart';
 import '../urgency_colors.dart';
 import 'action_editor.dart';
 import 'action_picker_dialog.dart';
+import 'app_toast.dart' show rootOverlayOf;
 
 /// Linked actions ordered by pure distance from now (|start - now|, past and
 /// future interleaved); actions without a start come last, then by name.
@@ -58,9 +60,17 @@ class DirectionActionsPanel extends ConsumerWidget {
 
   Future<void> _link(BuildContext context, WidgetRef ref, Set<String> ids) async {
     final service = ref.read(metricServiceProvider);
+    final overlay = rootOverlayOf(context);
+    final history = ref.read(undoHistoryProvider.notifier);
     final picked = await ActionPickerDialog.show(context, excludeIds: ids);
     if (picked == null) return;
     await service.linkAction(picked.id, metricId);
+    offerUndo(
+      overlay,
+      history,
+      'Linked "${picked.name}"',
+      () => service.unlinkAction(picked.id, metricId),
+    );
   }
 
   @override

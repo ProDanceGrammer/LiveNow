@@ -173,7 +173,7 @@ void main() {
       expect(v.keys, contains('budget_settings|period_months'));
     });
 
-    test('all 18 tables are tracked', () async {
+    test('all 19 tables are tracked', () async {
       final b = BudgetService(db);
       final acc = await b.saveAccount(
         name: 'A',
@@ -220,6 +220,9 @@ void main() {
       );
       await exec(
         "INSERT INTO forms (id, name, created_at, updated_at) VALUES ('f1', 'Goals', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO calendar_zones (id, tz, created_at, updated_at) VALUES ('cz1', 'Asia/Tokyo', 't', 't')",
       );
       final tables = {
         for (final k in (await versions()).keys) k.split('|').first,
@@ -411,11 +414,11 @@ void main() {
       'ensureSyncTriggers is idempotent and restores a missing trigger',
       () async {
         await ensureSyncTriggers(db);
-        expect(await triggerCount(), 54);
+        expect(await triggerCount(), 57);
         await exec('DROP TRIGGER sync_actions_upd');
-        expect(await triggerCount(), 53);
+        expect(await triggerCount(), 56);
         await ensureSyncTriggers(db);
-        expect(await triggerCount(), 54);
+        expect(await triggerCount(), 57);
         final id = await actions.createAction(name: 'x');
         final before = (await versions())['actions|$id']!.seq;
         await exec('UPDATE actions SET name = ? WHERE id = ?', ['y', id]);
@@ -533,7 +536,7 @@ void main() {
               "WHERE type='trigger' AND name LIKE 'sync_%'",
             )
             .getSingle();
-        expect(triggers.read<int>('n'), 54);
+        expect(triggers.read<int>('n'), 57);
         final device = await second
             .customSelect(
               "SELECT value FROM sync_state WHERE key = 'device_id'",

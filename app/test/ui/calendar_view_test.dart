@@ -11,6 +11,9 @@ import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/calendar_selection.dart';
+import 'package:livenow/ui/calendar_zone_providers.dart';
+import 'package:livenow/ui/device_prefs.dart';
+import 'package:livenow/ui/touchpad.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/theme/glass_theme.dart';
 import 'package:livenow/ui/views/calendar_layout.dart';
@@ -688,6 +691,148 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pump();
       expect(rangeStart(), calendarAddDays(start, 1));
+      await unmount(tester);
+    });
+  });
+
+  group('touchpad', () {
+    DateTime rangeStart() => container.read(calendarRangeStartProvider);
+    int hours() => container.read(calendarVisibleHoursProvider);
+
+    /// One two-finger swipe of a Precision Touchpad / MacBook: PanZoom events.
+    var padId = 100;
+    Future<void> swipe(WidgetTester tester, List<double> dxs) async {
+      final pad = TestPointer(padId++, PointerDeviceKind.trackpad);
+      final at = tester.getCenter(find.byType(CalendarView));
+      await tester.sendEventToBinding(pad.panZoomStart(at));
+      var sum = 0.0;
+      for (final dx in dxs) {
+        sum += dx;
+        await tester.sendEventToBinding(
+          pad.panZoomUpdate(at, pan: Offset(sum, 0)),
+        );
+      }
+      await tester.sendEventToBinding(pad.panZoomEnd());
+      await settle(tester); // the new range loads before the next swipe
+    }
+
+    testWidgets('a two-finger swipe moves exactly one day, left = next', (
+      tester,
+    ) async {
+      await pump(tester);
+      await settle(tester);
+      final start = rangeStart();
+
+      // A long, fast swipe is still one day.
+      await swipe(tester, [-20, -40, -80, -120, -200]);
+      expect(rangeStart(), calendarAddDays(start, 1), reason: 'first swipe');
+      await swipe(tester, [30, 60, 90]);
+      expect(rangeStart(), start, reason: 'right = previous day');
+      // Too short to count.
+      await swipe(tester, [-10, -10]);
+      expect(rangeStart(), start);
+      await unmount(tester);
+    });
+
+    testWidgets('an older touchpad driver (scroll events) works too', (
+      tester,
+    ) async {
+      await pump(tester);
+      await settle(tester);
+      final start = rangeStart();
+      final pad = TestPointer(8, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pad.hover(const Offset(700, 500)));
+      for (var i = 0; i < 8; i++) {
+        // Sideways, small and uneven: one swipe, one day.
+        await tester.sendEventToBinding(pad.scroll(Offset(17.5 + i, 2)));
+      }
+      await tester.pump();
+      expect(rangeStart(), calendarAddDays(start, 1));
+      await unmount(tester);
+    });
+
+    testWidgets('a mostly vertical swipe does not change the day', (
+      tester,
+    ) async {
+      await pump(tester);
+      await settle(tester);
+      final start = rangeStart();
+      final pad = TestPointer(8, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pad.hover(const Offset(700, 500)));
+      for (var i = 0; i < 8; i++) {
+        await tester.sendEventToBinding(pad.scroll(const Offset(20, 60)));
+      }
+      await tester.pump();
+      expect(rangeStart(), start);
+      await unmount(tester);
+    });
+
+    testWidgets('the setting reverses the direction', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      container.read(devicePrefsProvider.notifier).set(kTouchpadInvertX, true);
+      final start = rangeStart();
+      await swipe(tester, [-100]);
+      expect(rangeStart(), calendarAddDays(start, -1));
+      await unmount(tester);
+    });
+
+    testWidgets('a pinch zooms the hours like Ctrl+scroll', (tester) async {
+      await pump(tester);
+      await settle(tester);
+      expect(hours(), 24);
+      final pad = TestPointer(9, PointerDeviceKind.trackpad);
+      await tester.sendEventToBinding(pad.panZoomStart(const Offset(700, 500)));
+      await tester.sendEventToBinding(
+        pad.panZoomUpdate(const Offset(700, 500), scale: 1.5),
+      );
+      await tester.pump();
+      expect(hours(), 16);
+      await tester.sendEventToBinding(pad.panZoomEnd());
+      await unmount(tester);
+    });
+  });
+
+  group('extra timezones', () {
+    testWidgets('an extra zone adds an hour column and shifts the days right', (
+      tester,
+    ) async {
+      await pump(tester);
+      await settle(tester);
+      final before = tester.getTopLeft(find.byKey(const ValueKey('day-column-0'))).dx;
+
+      final id = (await tester.runAsync(
+        () => container
+            .read(calendarZoneServiceProvider)
+            .add('America/New_York'),
+      ))!;
+      await settle(tester);
+
+      // The header carries the zone's name (flag + city) ...
+      final header = find.byKey(ValueKey('zone-header-$id'));
+      expect(header, findsOneWidget);
+      expect(tester.widget<Text>(header).data, '🇺🇸 New York');
+      // ... its hours are the same instants there (not the Istanbul labels) ...
+      final hour = find.byKey(ValueKey('zone-hour-$id-13'));
+      expect(hour, findsOneWidget);
+      expect(
+        find.descendant(of: hour, matching: find.textContaining(RegExp(r'^\d\d:\d\d'))),
+        findsOneWidget,
+      );
+      // ... and the day columns moved right by one zone column.
+      final after = tester.getTopLeft(find.byKey(const ValueKey('day-column-0'))).dx;
+      expect(after - before, 46);
+
+      // Removing it brings the layout back.
+      await tester.runAsync(
+        () => container.read(calendarZoneServiceProvider).remove(id),
+      );
+      await settle(tester);
+      expect(find.byKey(ValueKey('zone-header-$id')), findsNothing);
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('day-column-0'))).dx,
+        before,
+      );
       await unmount(tester);
     });
   });

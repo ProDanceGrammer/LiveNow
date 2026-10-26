@@ -1,3 +1,4 @@
+import 'emoji_picker_button.dart' show pickEmoji;
 import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -858,22 +859,13 @@ class _FormBuilderDialogState extends ConsumerState<FormBuilderDialog>
           children: [
             Tooltip(
               message: 'Icon (an emoji)',
-              child: SizedBox(
-              width: 36,
-              child: TextFormField(
-                key: const ValueKey('form-icon'),
-                initialValue: _form.icon ?? '',
-                textAlign: TextAlign.center,
-                decoration: const InputDecoration(
-                  hintText: '🙂',
-                  isDense: true,
-                  contentPadding: _kIconPadding,
-                ),
-                style: _iconStyle,
+              child: _FormIconField(
+                fieldKey: const ValueKey('form-icon'),
+                initial: _form.icon ?? '',
+                width: 36,
                 onChanged: (v) => _form = v.trim().isEmpty
                     ? _form.copyWith(clearIcon: true)
                     : _form.copyWith(icon: v.trim()),
-              ),
               ),
             ),
             const SizedBox(width: 10),
@@ -958,24 +950,15 @@ class _FormBuilderDialogState extends ConsumerState<FormBuilderDialog>
                 ),
                 Tooltip(
                   message: 'Icon (an emoji)',
-                  child: SizedBox(
+                  child: _FormIconField(
+                    fieldKey: ValueKey('form-q-icon-${q.id}'),
+                    initial: q.icon ?? '',
                     width: 36,
-                    child: TextFormField(
-                      key: ValueKey('form-q-icon-${q.id}'),
-                      initialValue: q.icon ?? '',
-                      textAlign: TextAlign.center,
-                      decoration: const InputDecoration(
-                        hintText: '🙂',
-                        isDense: true,
-                        contentPadding: _kIconPadding,
-                      ),
-                      style: _iconStyle,
-                      onChanged: (v) => _setQuestion(
-                        i,
-                        v.trim().isEmpty
-                            ? _form.questions[i].copyWith(clearIcon: true)
-                            : _form.questions[i].copyWith(icon: v.trim()),
-                      ),
+                    onChanged: (v) => _setQuestion(
+                      i,
+                      v.trim().isEmpty
+                          ? _form.questions[i].copyWith(clearIcon: true)
+                          : _form.questions[i].copyWith(icon: v.trim()),
                     ),
                   ),
                 ),
@@ -1175,25 +1158,16 @@ class _FormBuilderDialogState extends ConsumerState<FormBuilderDialog>
               const SizedBox(width: 30),
               Tooltip(
                 message: 'Icon (an emoji)',
-                child: SizedBox(
+                child: _FormIconField(
+                  fieldKey: ValueKey('form-opt-icon-${o.id}'),
+                  initial: o.icon ?? '',
                   width: 32,
-                  child: TextFormField(
-                    key: ValueKey('form-opt-icon-${o.id}'),
-                    initialValue: o.icon ?? '',
-                    textAlign: TextAlign.center,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      hintText: '🙂',
-                      contentPadding: _kIconPadding,
-                    ),
-                    style: _iconStyle,
-                    onChanged: (v) => _setOption(
-                      qi,
-                      oi,
-                      v.trim().isEmpty
-                          ? _form.questions[qi].options[oi].copyWith(clearIcon: true)
-                          : _form.questions[qi].options[oi].copyWith(icon: v.trim()),
-                    ),
+                  onChanged: (v) => _setOption(
+                    qi,
+                    oi,
+                    v.trim().isEmpty
+                        ? _form.questions[qi].options[oi].copyWith(clearIcon: true)
+                        : _form.questions[qi].options[oi].copyWith(icon: v.trim()),
                   ),
                 ),
               ),
@@ -1312,4 +1286,71 @@ Future<String?> _askText(
     // The closing animation still builds the field: dispose a frame later.
     WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
   });
+}
+
+/// The small icon box of a form, question or option, with a button that opens
+/// the emoji / flag chooser (typing an emoji still works).
+class _FormIconField extends StatefulWidget {
+  const _FormIconField({
+    required this.fieldKey,
+    required this.initial,
+    required this.width,
+    required this.onChanged,
+  });
+
+  final Key fieldKey;
+  final String initial;
+  final double width;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_FormIconField> createState() => _FormIconFieldState();
+}
+
+class _FormIconFieldState extends State<_FormIconField> {
+  late final _controller = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pick() async {
+    final emoji = await pickEmoji(context);
+    if (emoji == null) return;
+    _controller.text = emoji;
+    widget.onChanged(emoji);
+  }
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      SizedBox(
+        width: widget.width,
+        child: TextFormField(
+          key: widget.fieldKey,
+          controller: _controller,
+          textAlign: TextAlign.center,
+          decoration: const InputDecoration(
+            hintText: '🙂',
+            isDense: true,
+            contentPadding: _kIconPadding,
+          ),
+          style: _iconStyle,
+          onChanged: widget.onChanged,
+        ),
+      ),
+      InkResponse(
+        key: ValueKey('${widget.fieldKey}-pick'),
+        onTap: _pick,
+        radius: 14,
+        child: const Padding(
+          padding: EdgeInsets.all(3),
+          child: Icon(Icons.emoji_emotions_outlined, size: 15),
+        ),
+      ),
+    ],
+  );
 }

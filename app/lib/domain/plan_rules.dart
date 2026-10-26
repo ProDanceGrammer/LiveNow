@@ -41,8 +41,25 @@ tz.Location get _loc => tz.getLocation(AppSettings.timeZoneName);
 
 /// The instant of [minutes] after local midnight of [date] (minutes may exceed
 /// 1440: the time then falls on a later day).
-DateTime planInstant(DateTime date, int minutes) =>
-    tz.TZDateTime(_loc, date.year, date.month, date.day, 0, minutes).toUtc();
+DateTime planInstant(DateTime date, int minutes, [String? zone]) =>
+    tz.TZDateTime(
+      zone == null ? _loc : _zoneOrMain(zone),
+      date.year,
+      date.month,
+      date.day,
+      0,
+      minutes,
+    ).toUtc();
+
+/// A row's own timezone; the main one when its name is not in the database
+/// (a plan synced from a newer version must still generate something).
+tz.Location _zoneOrMain(String zone) {
+  try {
+    return tz.getLocation(zone);
+  } on Object {
+    return _loc;
+  }
+}
 
 /// A whole number from stored JSON; null for a missing, NaN or infinite value
 /// (`1e999` decodes to Infinity, and `Infinity.toInt()` throws).
@@ -147,11 +164,16 @@ class CycleOccurrence {
     this.templateId,
     this.extras = const PlanExtras(),
     this.allDay = false,
+    this.tz,
   });
 
   final int day;
   final int startMin;
   final PlanExtras extras;
+
+  /// The IANA timezone [startMin] is read in (e.g. "America/New_York": 09:00
+  /// there every day, following its daylight saving); null = the app's own.
+  final String? tz;
 
   /// An all-day row: it makes an all-day action on its day (the time, length and
   /// Previous / Next actions do not apply; transactions still do).
@@ -171,6 +193,7 @@ class CycleOccurrence {
     if (name != null) 'name': name,
     if (templateId != null) 'templateId': templateId,
     if (allDay) 'allDay': true,
+    if (tz != null) 'tz': tz,
     ...extras.toJson(),
   };
 
@@ -182,6 +205,7 @@ class CycleOccurrence {
     templateId: j['templateId'] as String?,
     extras: PlanExtras.fromJson(j),
     allDay: j['allDay'] == true,
+    tz: j['tz'] as String?,
   );
 }
 
@@ -217,9 +241,13 @@ class MonthlyRule {
     this.name,
     this.extras = const PlanExtras(),
     this.allDay = false,
+    this.tz,
   });
 
   final PlanExtras extras;
+
+  /// See [CycleOccurrence.tz].
+  final String? tz;
 
   /// See [CycleOccurrence.allDay].
   final bool allDay;
@@ -250,6 +278,7 @@ class MonthlyRule {
     if (durationMin != null) 'durationMin': durationMin,
     if (name != null) 'name': name,
     if (allDay) 'allDay': true,
+    if (tz != null) 'tz': tz,
     ...extras.toJson(),
   };
 
@@ -267,6 +296,7 @@ class MonthlyRule {
     name: j['name'] as String?,
     extras: PlanExtras.fromJson(j),
     allDay: j['allDay'] == true,
+    tz: j['tz'] as String?,
   );
 }
 
@@ -390,7 +420,47 @@ class PlanOccurrence {
     this.ownName = false,
     this.extras = const PlanExtras(),
     this.allDay = false,
+    this.tz,
   });
+
+  /// The timezone of the row this came from (null = the app's own): [date] and
+  /// [startMin] are read there, so on the calendar use [displayed].
+  final String? tz;
+
+  /// This occurrence as the calendar shows it: [date] and [startMin] in the
+  /// app's own timezone (the same object when the row has no zone of its own).
+  /// [key] and [planItemId] stay those of the row.
+  PlanOccurrence displayed() {
+    if (tz == null || allDay) return this;
+    final shownDate = planDateOf(startUtc);
+    return PlanOccurrence(
+      planItemId: planItemId,
+      key: key,
+      date: shownDate,
+      startUtc: startUtc,
+      endUtc: endUtc,
+      name: name,
+      templateId: templateId,
+      index: index,
+      startMin: startUtc.difference(planInstant(shownDate, 0)).inMinutes,
+      durationMin: durationMin,
+      ownName: ownName,
+      extras: extras,
+      allDay: allDay,
+      tz: tz,
+    );
+  }
+
+  /// [minutes] after midnight of [shownDate] (the app's own zone) expressed as
+  /// minutes after the midnight of this row's own date in its own zone, which
+  /// is what a stored override / rule holds.
+  int rowMinutesFor(DateTime shownDate, int minutes) {
+    if (tz == null) return minutes;
+    final rowDate = planDateFromKey(key.split('#').first);
+    return planInstant(shownDate, minutes)
+        .difference(planInstant(rowDate, 0, tz))
+        .inMinutes;
+  }
 
   /// Previous / Next companions and transactions of this occurrence's row.
   final PlanExtras extras;
@@ -449,6 +519,7 @@ List<PlanOccurrence> occurrencesInRange(
     String? templateId,
     PlanExtras extras,
     bool allDay,
+    String? zone,
   ) {
     final key = '${planDateKey(date)}#$index';
     final o = byKey[key];
@@ -463,8 +534,8 @@ List<PlanOccurrence> occurrencesInRange(
         planItemId: item.id,
         key: key,
         date: date,
-        startUtc: planInstant(date, start),
-        endUtc: planInstant(date, start + dur),
+        startUtc: planInstant(date, start, zone),
+        endUtc: planInstant(date, start + dur, zone),
         allDay: allDay,
         name: o?.name ?? name ?? item.name,
         templateId: templateId ?? item.templateId,
@@ -473,6 +544,7 @@ List<PlanOccurrence> occurrencesInRange(
         durationMin: dur,
         ownName: (o?.name ?? name) != null,
         extras: extras,
+        tz: zone,
       ),
     );
   }
@@ -491,7 +563,7 @@ List<PlanOccurrence> occurrencesInRange(
       final k = _daysBetween(item.startDate, date);
       for (final i in byDay[k % n] ?? const <int>[]) {
         final o = rule.occurrences[i];
-        add(date, i, o.startMin, o.durationMin, o.name, o.templateId, o.extras, o.allDay);
+        add(date, i, o.startMin, o.durationMin, o.name, o.templateId, o.extras, o.allDay, o.tz);
       }
       date = DateTime.utc(date.year, date.month, date.day + 1);
     }
@@ -536,7 +608,7 @@ List<PlanOccurrence> occurrencesInRange(
       if (day == null) continue; // e.g. no 5th Monday this month
       final date = DateTime.utc(y, m, day);
       if (date.isBefore(first) || date.isAfter(last)) continue;
-      add(date, 0, rule.startMin, rule.durationMin, rule.name, null, rule.extras, rule.allDay);
+      add(date, 0, rule.startMin, rule.durationMin, rule.name, null, rule.extras, rule.allDay, rule.tz);
     }
   }
   out.sort((a, b) {
@@ -545,6 +617,11 @@ List<PlanOccurrence> occurrencesInRange(
   });
   return out;
 }
+
+/// "09:00" or "09:00 (New York)" for a row read in its own timezone.
+String planTimeIn(int minutes, String? zone) => zone == null
+    ? planTime(minutes)
+    : '${planTime(minutes)} (${zone.split('/').last.replaceAll('_', ' ')})';
 
 String planTime(int minutes) {
   final m = minutes % (24 * 60);
@@ -574,7 +651,7 @@ String describePlan(PlanItemData item) {
       MonthlyMode.nthWeekday =>
         '${m.nth == -1 ? 'last' : _ordinal(m.nth)} ${_weekdayNames[m.weekday - 1]}',
     };
-    return '$every: $when ${m.allDay ? 'all day' : planTime(m.startMin)}';
+    return '$every: $when ${m.allDay ? 'all day' : planTimeIn(m.startMin, m.tz)}';
   }
   final c = item.cycle;
   if (c == null || c.occurrences.isEmpty) return 'Nothing planned';
@@ -592,11 +669,12 @@ String describePlan(PlanItemData item) {
   final parts = [
     for (final o in sorted)
       switch (c.cycleDays) {
-        1 => o.allDay ? 'all day' : planTime(o.startMin),
+        1 => o.allDay ? 'all day' : planTimeIn(o.startMin, o.tz),
         7 =>
           '${_weekdayNames[(startWeekday + o.day) % 7]} '
-              '${o.allDay ? 'all day' : planTime(o.startMin)}',
-        _ => 'day ${o.day + 1} ${o.allDay ? 'all day' : planTime(o.startMin)}',
+              '${o.allDay ? 'all day' : planTimeIn(o.startMin, o.tz)}',
+        _ =>
+          'day ${o.day + 1} ${o.allDay ? 'all day' : planTimeIn(o.startMin, o.tz)}',
       },
   ];
   return '$head: ${parts.join(', ')}';

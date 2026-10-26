@@ -31,6 +31,7 @@ part 'database.g.dart';
     BudgetTxTemplatesTable,
     PlanCollectionsTable,
     FormsTable,
+    CalendarZonesTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -47,7 +48,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 17;
+  int get schemaVersion => 18;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -176,6 +177,10 @@ class AppDatabase extends _$AppDatabase {
       if (from < 17) {
         // Forms (purely additive).
         await m.createTable(formsTable);
+      }
+      if (from < 18) {
+        // Extra calendar timezones (purely additive).
+        await m.createTable(calendarZonesTable);
       }
       if (from < 14) {
         // Planning: plan items, their per-day overrides, and the link from a

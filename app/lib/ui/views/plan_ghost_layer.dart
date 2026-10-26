@@ -278,6 +278,24 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
   }
 
   List<_Slot>? _slotsCache;
+
+  /// The occurrences as the host gave them (row date / row-zone minutes), by id:
+  /// the slots hold [PlanOccurrence.displayed] copies.
+  final _originals = <String, PlanOccurrence>{};
+
+  /// What a drag / tap reports to the host: the ORIGINAL occurrence, with a
+  /// start in the minutes of its own row.
+  void _report(PlanOccurrence shown, int startMin, int durationMin) {
+    final original = _originals[_idOf(shown)] ?? shown;
+    widget.onChanged(
+      original,
+      original.rowMinutesFor(shown.date, startMin),
+      durationMin,
+    );
+  }
+
+  void _edit(PlanOccurrence shown) =>
+      widget.onEdit(_originals[_idOf(shown)] ?? shown);
   List<PlanOccurrence>? _slotsFor;
   int _slotsDays = 0;
   DateTime? _slotsFirstDay;
@@ -306,9 +324,13 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
       }
     }
 
-    for (final o in widget.occurrences) {
+    _originals.clear();
+    for (final original in widget.occurrences) {
       // All-day occurrences are chips in the all-day strip, not blocks here.
-      if (o.allDay) continue;
+      if (original.allDay) continue;
+      // A row with its own timezone is placed where it falls in the app's own.
+      final o = original.displayed();
+      _originals[_idOf(o)] = original;
       final mainStart = o.startMin;
       final mainEnd = o.startMin + o.durationMin;
       add(o, _Kind.main, 0, null, mainStart, mainEnd);
@@ -400,10 +422,10 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     if (delta == 0) return;
     if (d.resize) {
       final len = math.max(_kMinLen, s.occ.durationMin + delta);
-      widget.onChanged(s.occ, s.occ.startMin, len);
+      _report(s.occ, s.occ.startMin, len);
     } else {
       final start = (s.occ.startMin + delta).clamp(0, _kDay - _kMinLen);
-      widget.onChanged(s.occ, start, s.occ.durationMin);
+      _report(s.occ, start, s.occ.durationMin);
     }
   }
 
@@ -524,14 +546,14 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
       // A Previous / Next action is changed in the plan item, not dragged.
       body = GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.phone ? () => widget.onEdit(s.occ) : null,
-        onDoubleTap: widget.phone ? null : () => widget.onEdit(s.occ),
+        onTap: widget.phone ? () => _edit(s.occ) : null,
+        onDoubleTap: widget.phone ? null : () => _edit(s.occ),
         child: body,
       );
     } else if (widget.phone) {
       body = GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: () => widget.onEdit(s.occ),
+        onTap: () => _edit(s.occ),
         onLongPressStart: (d) =>
             _beginDrag(_idOf(s.occ), false, d.globalPosition.dy),
         onLongPressMoveUpdate: (u) => _moveDrag(u.globalPosition.dy),
@@ -545,7 +567,7 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onDoubleTap: () => widget.onEdit(s.occ),
+              onDoubleTap: () => _edit(s.occ),
               dragStartBehavior: DragStartBehavior.down,
               onVerticalDragStart: (d) => start(d, false),
               onVerticalDragUpdate: update,

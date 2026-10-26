@@ -27,6 +27,7 @@ import 'param_icons.dart';
 import '../theme/glass_theme.dart';
 import '../time_format.dart' show formatUtcDateTime;
 import 'glass_pill_selector.dart';
+import 'emoji_picker_button.dart';
 import 'label_icon.dart';
 import 'section_block.dart';
 
@@ -954,9 +955,11 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             key: const ValueKey('category-name'),
             controller: _name,
             autofocus: true,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Name',
               helperText: 'Tip: put the currency first, e.g. "(TL) Groceries"',
+              // The category's icon is an emoji at the start of its name.
+              suffixIcon: EmojiPickerButton(controller: _name),
             ),
             validator: (v) =>
                 nameFieldError(v, required: 'Name is required'),

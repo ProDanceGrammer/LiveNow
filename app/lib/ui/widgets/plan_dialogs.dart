@@ -18,6 +18,7 @@ import '../theme/glass_theme.dart';
 import '../undo.dart';
 import 'app_toast.dart';
 import 'section_block.dart';
+import 'time_zone_picker.dart';
 import 'tx_templates.dart';
 
 // Planning mode's dialogs: the plan item editor, the "this day only / whole
@@ -273,6 +274,7 @@ class _OccRow extends _Extras {
     String? name,
     this.templateId,
     this.allDay = false,
+    this.tz,
   }) : name = TextEditingController(text: name ?? ''),
        duration = TextEditingController(
          text: durationMin == null ? '' : '$durationMin',
@@ -284,6 +286,9 @@ class _OccRow extends _Extras {
 
   /// An all-day row: no time, minutes or Previous / Next actions.
   bool allDay;
+
+  /// The IANA zone the row's time is read in; null = the app's own.
+  String? tz;
   final TextEditingController name;
   final TextEditingController duration;
 
@@ -295,6 +300,7 @@ class _OccRow extends _Extras {
       name: name.text,
       templateId: templateId,
       allDay: allDay,
+      tz: tz,
     );
     r.copyFrom(this);
     return r;
@@ -317,10 +323,17 @@ class PlanItemEditorDialog extends ConsumerStatefulWidget {
     this.initialMinutes,
     this.initialTemplateId,
     this.initialName,
+    this.initialNotes,
+    this.initialMetricIds = const [],
   });
 
   /// A name a new item starts with (e.g. the action it is made from).
   final String? initialName;
+
+  /// The notes and growth directions of the action the item is made from; they
+  /// end up in the item's template.
+  final String? initialNotes;
+  final List<String> initialMetricIds;
 
   final String? itemId;
 
@@ -336,6 +349,8 @@ class PlanItemEditorDialog extends ConsumerStatefulWidget {
     int? initialMinutes,
     String? initialName,
     String? initialTemplateId,
+    String? initialNotes,
+    List<String> initialMetricIds = const [],
   }) => showStackedDialog<String>(
     context: context,
     builder: (_) => PlanItemEditorDialog(
@@ -344,6 +359,8 @@ class PlanItemEditorDialog extends ConsumerStatefulWidget {
       initialMinutes: initialMinutes,
       initialName: initialName,
       initialTemplateId: initialTemplateId,
+      initialNotes: initialNotes,
+      initialMetricIds: initialMetricIds,
     ),
   );
 
@@ -371,6 +388,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
   int _weekday = DateTime.monday;
   int _monthlyStart = 9 * 60;
   bool _monthlyAllDay = false;
+  String? _monthlyTz;
   bool _loaded = false;
   PlanItem? _existing;
 
@@ -469,6 +487,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               name: o.name,
               templateId: o.templateId,
               allDay: o.allDay,
+              tz: o.tz,
             );
             r.copyFrom(_Extras.from(o.extras));
             _rows.add(r);
@@ -483,6 +502,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
           _weekday = m.weekday;
           _monthlyStart = m.startMin;
           _monthlyAllDay = m.allDay;
+          _monthlyTz = m.tz;
           if (m.durationMin != null) _manual.text = '${m.durationMin}';
           _monthlyExtras.copyFrom(_Extras.from(m.extras));
         }
@@ -599,6 +619,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
               name: r.name.text.trim().isEmpty ? null : r.name.text.trim(),
               templateId: r.templateId,
               allDay: r.allDay,
+              tz: r.allDay ? null : r.tz,
               // An all-day row keeps only its transactions.
               extras: r.allDay
                   ? PlanExtras(txTemplateIds: [...r.tx])
@@ -618,6 +639,7 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         startMin: _monthlyStart,
         durationMin: manual,
         allDay: _monthlyAllDay,
+        tz: _monthlyAllDay ? null : _monthlyTz,
         extras: _monthlyAllDay
             ? PlanExtras(txTemplateIds: [..._monthlyExtras.tx])
             : _monthlyExtras.toExtras(),
@@ -637,6 +659,8 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         monthly: monthly,
         manualMinutes: manual,
         collectionIds: _collectionIds,
+        templateNotes: widget.initialNotes,
+        templateMetricIds: widget.initialMetricIds,
       ),
     );
     if (nav.mounted) nav.pop(id);
@@ -688,6 +712,27 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
         key: key,
         onPressed: () => _pickTime(minutes, set),
         child: Text(planTime(minutes)),
+      );
+
+  /// The timezone a row's time is read in: "Zone" = the app's own, else the
+  /// city. Tapping opens the timezone list (with "use my timezone").
+  Widget _zoneButton(Key key, String? zone, ValueChanged<String?> set) =>
+      TextButton.icon(
+        key: key,
+        icon: const Icon(Icons.public, size: 16),
+        label: Text(
+          zone == null ? 'Zone' : zone.split('/').last.replaceAll('_', ' '),
+        ),
+        onPressed: () async {
+          final picked = await pickTimeZone(
+            context,
+            current: zone,
+            title: 'Timezone of this time',
+            defaultOption: 'Use my timezone',
+          );
+          if (picked == null) return;
+          setState(() => set(picked.isEmpty ? null : picked));
+        },
       );
 
   /// A labelled switch: ONLY the switch toggles, not the whole block.
@@ -780,6 +825,11 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
       r.startMin,
       (v) => r.startMin = v,
     );
+    final zone = _zoneButton(
+      ValueKey('plan-row-zone-$i'),
+      r.tz,
+      (v) => r.tz = v,
+    );
     final allDayChip = FilterChip(
       key: ValueKey('plan-row-allday-$i'),
       label: const Text('All day'),
@@ -829,7 +879,12 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
             Wrap(
               spacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [day, allDayChip, if (!r.allDay) ...[time, minutes], buttons],
+              children: [
+                day,
+                allDayChip,
+                if (!r.allDay) ...[time, minutes],
+                buttons,
+              ],
             ),
             const SizedBox(height: 4),
             name,
@@ -850,6 +905,9 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                 buttons,
               ],
             ),
+          // The timezone this row's time is read in: a line of its own, so the
+          // row above keeps its width.
+          if (!r.allDay) Align(alignment: Alignment.centerLeft, child: zone),
           if (!r.allDay)
             ?_averageNote(r.duration.text, ValueKey('plan-row-avg-$i')),
           _extrasEditor(r, 'row-$i', allRows: true, companions: !r.allDay),
@@ -1246,6 +1304,12 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
                 const ValueKey('plan-monthly-time'),
                 _monthlyStart,
                 (v) => _monthlyStart = v,
+              ),
+            if (!_monthlyAllDay)
+              _zoneButton(
+                const ValueKey('plan-monthly-zone'),
+                _monthlyTz,
+                (v) => _monthlyTz = v,
               ),
             if (!_monthlyAllDay)
               SizedBox(

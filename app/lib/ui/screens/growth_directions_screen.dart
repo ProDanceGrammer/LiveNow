@@ -14,6 +14,7 @@ import '../providers.dart';
 import '../saved_views_bar.dart';
 import '../../domain/saved_views.dart' show ViewScreens;
 import '../theme/glass_theme.dart';
+import '../widgets/direction_menu.dart';
 import '../widgets/glass.dart';
 import '../widgets/growth_direction_dialog.dart';
 import '../widgets/growth_filters_bar.dart';
@@ -403,13 +404,13 @@ class _BalanceBoardState extends State<_BalanceBoard> {
   }
 }
 
-class _BalanceRowTile extends StatelessWidget {
+class _BalanceRowTile extends ConsumerWidget {
   final BalanceRow row;
 
   const _BalanceRowTile({required this.row});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final m = row.metric;
     final s = row.stat;
@@ -417,6 +418,8 @@ class _BalanceRowTile extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => GrowthDirectionDialog.show(context, existing: m),
+      onSecondaryTapUp: (d) => showDirectionMenu(context, ref, m, d.globalPosition),
+      onLongPress: () => showDirectionMenu(context, ref, m, centerOf(context)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
@@ -666,7 +669,15 @@ class _ListTabState extends ConsumerState<_ListTab> {
                                 radius: GlassTheme.radiusControl,
                                 shadow: false,
                                 blurWindow: false,
-                                child: Material(
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onSecondaryTapUp: (d) => showDirectionMenu(
+                                    context,
+                                    ref,
+                                    m,
+                                    d.globalPosition,
+                                  ),
+                                  child: Material(
                                   type: MaterialType.transparency,
                                   child: ListTile(
                                     key: ValueKey('direction-${m.id}'),
@@ -735,6 +746,13 @@ class _ListTabState extends ConsumerState<_ListTab> {
                                       context,
                                       existing: m,
                                     ),
+                                    onLongPress: () => showDirectionMenu(
+                                      context,
+                                      ref,
+                                      m,
+                                      centerOf(context),
+                                    ),
+                                  ),
                                   ),
                                 ),
                               ),

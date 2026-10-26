@@ -6,6 +6,7 @@ import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/providers.dart';
+import 'package:livenow/ui/undo.dart';
 import 'package:livenow/ui/widgets/action_editor.dart';
 
 /// A NEW action's editor has the same parts as an existing one: the Delete icon
@@ -144,6 +145,30 @@ void main() {
         (idOf('Fresh'), idOf('Later action')),
       },
     );
+    await unmount(tester);
+  });
+
+  testWidgets('Ctrl+Z (Undo) takes back an action created in the editor', (
+    tester,
+  ) async {
+    await mount(tester);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MaterialApp)),
+    );
+    await tester.enterText(find.byType(TextFormField).first, 'Fresh');
+    await tester.tap(find.text('Save'));
+    await settle(tester, 600);
+    expect((await actions(tester)).map((a) => a.name), contains('Fresh'));
+    expect(container.read(undoHistoryProvider).last.description, 'Created "Fresh"');
+
+    // Newest step first: the new action goes, nothing older is touched.
+    await tester.runAsync(
+      () => undoNewest(container.read(undoHistoryProvider.notifier)),
+    );
+    expect((await actions(tester)).map((a) => a.name).toSet(), {
+      'Old action',
+      'Later action',
+    });
     await unmount(tester);
   });
 }

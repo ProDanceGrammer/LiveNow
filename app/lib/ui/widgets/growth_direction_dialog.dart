@@ -8,7 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/text_rules.dart';
 import '../../core/number_rules.dart';
-import '../../data/database.dart' show Metric;
+import '../../data/database.dart' show ActionRow, Metric;
 import '../../domain/growth_rules.dart';
 import '../../domain/metric_service.dart';
 import '../dialog_back.dart';
@@ -19,6 +19,7 @@ import '../theme/glass_theme.dart';
 import '../undo.dart';
 import 'glass_pill_selector.dart';
 import 'direction_actions_panel.dart';
+import 'emoji_picker_button.dart';
 import 'metric_picker.dart';
 import 'param_icons.dart';
 import 'section_block.dart';
@@ -214,6 +215,11 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
     final snapshot = ref.watch(growthSnapshotProvider).value;
     final live = _isEditing ? snapshot?.byId[widget.existing!.id] : null;
     final stat = _isEditing ? snapshot?.statOf(widget.existing!.id) : null;
+    final hasLinkedActions =
+        _isEditing &&
+        (ref.watch(metricLinkedActionsProvider).value ??
+                const <(String, ActionRow)>[])
+            .any((l) => l.$1 == widget.existing!.id);
     final infoStyle = Theme.of(context).textTheme.bodySmall
         ?.copyWith(color: context.glass.textSecondary);
 
@@ -260,8 +266,13 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
                         const SizedBox(height: 12),
                         TextFormField(
                           controller: _icon,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Icon (an emoji, optional)',
+                            suffixIcon: EmojiPickerButton(
+                              controller: _icon,
+                              replace: true,
+                              onChanged: () => setState(() {}),
+                            ),
                           ),
                           textInputAction: TextInputAction.done,
                           onFieldSubmitted: (_) {
@@ -356,21 +367,29 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
                         ? const LinearProgressIndicator()
                         : _twoLists(
                             phone,
-                            MetricPicker(
-                              label: 'Depends on',
-                              labelTooltip: 'Sub-directions that build it',
-                              selectedIds: _dependsOn,
-                              excludeId: widget.existing?.id,
-                              onOpen: _openRelated,
-                              onChanged: (ids) =>
-                                  setState(() => _dependsOn = ids),
-                            ),
+                            // Linked actions ARE what this direction depends
+                            // on, so the list is hidden while there are any
+                            // (its saved edges are kept as they are).
+                            hasLinkedActions
+                                ? null
+                                : MetricPicker(
+                                    label: 'Depends on',
+                                    labelTooltip:
+                                        'Sub-directions that build it',
+                                    selectedIds: _dependsOn,
+                                    excludeId: widget.existing?.id,
+                                    onOpen: _openRelated,
+                                    allowCreate: true,
+                                    onChanged: (ids) =>
+                                        setState(() => _dependsOn = ids),
+                                  ),
                             MetricPicker(
                               label: 'Leads to',
                               labelTooltip: 'Larger goals it feeds',
                               selectedIds: _leadsTo,
                               excludeId: widget.existing?.id,
                               onOpen: _openRelated,
+                              allowCreate: true,
                               onChanged: (ids) =>
                                   setState(() => _leadsTo = ids),
                             ),
@@ -455,7 +474,9 @@ class _GrowthDirectionDialogState extends ConsumerState<GrowthDirectionDialog>
   }
 
   /// Depends on | Leads to side by side; on a phone one list over the other.
-  static Widget _twoLists(bool phone, Widget a, Widget b) => phone
+  static Widget _twoLists(bool phone, Widget? a, Widget b) => a == null
+      ? b
+      : phone
       ? Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [a, const SizedBox(height: 16), b],

@@ -31,6 +31,60 @@ void main() {
           .map((e) => (e.metricId, e.dependsOnId))
           .toSet();
 
+  group('duplicateMetric', () {
+    test('copies settings, relations, linked actions and offsets the node', () async {
+      final main = await service.saveMetric(
+        name: 'Main',
+        kind: MetricKind.boolean,
+        isMain: true,
+      );
+      final sub = await service.saveMetric(
+        name: 'Sub',
+        kind: MetricKind.boolean,
+      );
+      final src = await service.saveMetric(
+        name: 'Run',
+        kind: MetricKind.hours,
+        window: MetricWindow.month,
+        target: 12,
+        icon: const Value('🏃'),
+        dependsOnIds: [sub],
+        leadsToIds: [main],
+      );
+      await service.savePositions({src: (100, 200)});
+      final actions = ActionService(db);
+      final a = await actions.createAction(name: 'Jog');
+      await service.linkAction(a, src);
+
+      final copy = await service.duplicateMetric(src);
+      final c = await row(copy);
+      expect(copy, isNot(src));
+      expect(
+        (c.name, c.kind, c.timeWindow, c.target, c.icon, c.isMain),
+        ('Run (copy)', 'hours', 'month', 12.0, '🏃', false),
+      );
+      expect((c.posX, c.posY), (160.0, 260.0));
+      expect(await edges(), containsAll({(copy, sub), (main, copy)}));
+      final links = await db.select(db.actionMetricsTable).get();
+      expect(
+        links.where((l) => l.metricId == copy).map((l) => l.actionId),
+        [a],
+      );
+      // The original is untouched.
+      expect((await row(src)).name, 'Run');
+    });
+
+    test('keeps the main flag of a main direction', () async {
+      final main = await service.saveMetric(
+        name: 'Main',
+        kind: MetricKind.boolean,
+        isMain: true,
+      );
+      final copy = await service.duplicateMetric(main);
+      expect((await row(copy)).isMain, isTrue);
+    });
+  });
+
   group('saveMetric', () {
     test('creates a direction and computes weights down the graph', () async {
       final main = await service.saveMetric(

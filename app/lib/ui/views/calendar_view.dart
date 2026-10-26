@@ -12,6 +12,9 @@ import 'package:flutter/gestures.dart'
         PointerDownEvent,
         PointerEvent,
         PointerMoveEvent,
+        PointerPanZoomEndEvent,
+        PointerPanZoomStartEvent,
+        PointerPanZoomUpdateEvent,
         PointerScrollEvent,
         PointerSignalEvent,
         PointerUpEvent,
@@ -31,7 +34,7 @@ import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/settings.dart';
-import '../../data/database.dart' show ActionTemplate;
+import '../../data/database.dart' show ActionTemplate, CalendarZone;
 import '../../data/queries.dart';
 import '../../domain/action_service.dart';
 import '../../domain/duration_rules.dart';
@@ -41,12 +44,14 @@ import '../calendar_fullscreen.dart';
 import '../calendar_allday.dart';
 import '../calendar_icons.dart';
 import '../calendar_selection.dart';
+import '../calendar_zone_providers.dart';
 import '../edit_action.dart';
 import '../layout.dart';
 import '../plan_providers.dart';
 import '../providers.dart';
 import '../undo.dart';
 import '../theme/glass_theme.dart';
+import '../touchpad.dart';
 import '../urgency_colors.dart';
 import '../widgets/round_check.dart';
 import '../widgets/action_editor.dart';
@@ -63,6 +68,17 @@ import 'plan_ghost_layer.dart';
 import 'calendar_layout.dart';
 
 const double _kGutter = 56;
+
+/// Width of one extra timezone's hour column (left of the main hours).
+const double _kZoneCol = 46;
+
+/// The extra timezones shown beside the hours. Set by [CalendarView.build]
+/// before its children are built: the pieces that measure from the left edge
+/// (day columns, drag hit tests, the header) all read [_gutterW].
+List<CalendarZone> _zones = const [];
+
+/// Everything left of the day columns: the extra zones' columns + the hours.
+double get _gutterW => _kGutter + _zones.length * _kZoneCol;
 
 /// Dragging a block within this many px of the grid's left/right edge, for
 /// [_kEdgeHold], turns the visible range by a day.
@@ -369,7 +385,7 @@ class _CrossDrag {
     final box = stripKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return null;
     final local = box.globalToLocal(global);
-    final x = local.dx - _kGutter;
+    final x = local.dx - _gutterW;
     if (local.dy < 0 || local.dy > box.size.height) return null;
     if (x < 0 || x >= dayWidth * dayCount) return null;
     return (x / dayWidth).floor().clamp(0, dayCount - 1);
@@ -451,6 +467,9 @@ class CalendarView extends ConsumerWidget {
     };
 
     final phone = usePhoneLayout(context);
+    // The extra timezone columns (one on a phone: its width is short).
+    final zones = ref.watch(calendarZonesProvider).value ?? const [];
+    _zones = phone ? zones.take(1).toList() : zones;
     // Planning mode always shows the strip: its all-day plan items live there.
     final allDay =
         ref.watch(calendarAllDayProvider) || ref.watch(calendarPlanningProvider);
@@ -493,7 +512,7 @@ class CalendarView extends ConsumerWidget {
                           : LayoutBuilder(
                               builder: (context, box) {
                                 final dayW =
-                                    (box.maxWidth - _kGutter) / dayCount;
+                                    (box.maxWidth - _gutterW) / dayCount;
                                 final content = Column(
                                   children: [
                                     _DayHeaderRow(
@@ -550,7 +569,7 @@ class CalendarView extends ConsumerWidget {
                       Positioned(
                         top: 4,
                         left: 8,
-                        width: _kGutter,
+                        width: _gutterW,
                         height: 38,
                         child: Builder(
                           builder: (context) {
@@ -767,8 +786,13 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
   }
 
   void _onPointerSignal(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent ||
-        !HardwareKeyboard.instance.isShiftPressed) {
+    if (event is! PointerScrollEvent) return;
+    if (!HardwareKeyboard.instance.isShiftPressed) {
+      // A sideways two-finger swipe of an older touchpad driver (or a tilt
+      // wheel): one day per swipe. Vertical movement keeps scrolling the grid.
+      final d = event.scrollDelta;
+      if (isPrimaryPressed() || d.dx.abs() <= d.dy.abs()) return;
+      _swipeDays(d.dx, event.timeStamp);
       return;
     }
     // Some mice report Shift+wheel on the horizontal axis instead.
@@ -781,6 +805,26 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
     _scrollAccumulated -= days * _pixelsPerDay;
     shiftCalendarDays(ref, days);
   }
+
+  /// Two-finger swipe: left = next day, right = previous (Settings can swap it),
+  /// exactly ONE day per swipe however long or fast it is.
+  final _swipe = SwipeStepper();
+
+  void _swipeDays(double dx, Duration at) {
+    final invert = ref.read(touchpadInvertXProvider);
+    final step = _swipe.feed(invert ? -dx : dx, at);
+    if (step != 0) shiftCalendarDays(ref, step);
+  }
+
+  void _panZoomStart(PointerPanZoomStartEvent e) => _swipe.end();
+
+  void _panZoomUpdate(PointerPanZoomUpdateEvent e) {
+    // Precision touchpad / MacBook: fingers moving left = negative pan.
+    if (e.pan.dx.abs() <= e.pan.dy.abs()) return;
+    _swipeDays(-e.panDelta.dx, e.timeStamp);
+  }
+
+  void _panZoomEnd(PointerPanZoomEndEvent e) => _swipe.end();
 
   /// Deletes every selected event (one Undo brings them all back). Only ids
   /// that are in the current data count, so nothing invisible is deleted.
@@ -814,6 +858,9 @@ class _CalendarInputState extends ConsumerState<_CalendarInput> {
         if (!_focus.hasFocus) _focus.requestFocus();
       },
       onPointerSignal: _onPointerSignal,
+      onPointerPanZoomStart: _panZoomStart,
+      onPointerPanZoomUpdate: _panZoomUpdate,
+      onPointerPanZoomEnd: _panZoomEnd,
       child: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
@@ -1283,6 +1330,26 @@ class _DayHeaderRow extends StatelessWidget {
       ),
       child: Row(
         children: [
+          for (final z in _zones)
+            SizedBox(
+              width: _kZoneCol,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  z.label,
+                  key: ValueKey('zone-header-${z.id}'),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 9,
+                    height: 1.1,
+                    color: g.textSecondary,
+                    fontFamilyFallback: emojiLabelStyle.fontFamilyFallback,
+                  ),
+                ),
+              ),
+            ),
           const SizedBox(width: _kGutter),
           for (var i = 0; i < dayCount; i++)
             Builder(
@@ -1297,7 +1364,7 @@ class _DayHeaderRow extends StatelessWidget {
                   width: dayWidth,
                   child: Padding(
                     padding: EdgeInsets.only(
-                      right: centerOnPanel ? _kGutter : 0,
+                      right: centerOnPanel ? _gutterW : 0,
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -1478,7 +1545,7 @@ class _AllDayStripState extends ConsumerState<_AllDayStrip> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: _kGutter,
+                    width: _gutterW,
                     child: Padding(
                       padding: const EdgeInsets.only(top: 8, left: 6),
                       child: Text(
@@ -2437,10 +2504,20 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
   /// resolver from *inside* the scroll view, so it wins over the scrollable's
   /// own claim on the same event and the grid doesn't also scroll.
   void _onWheel(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent ||
-        !isPrimaryPressed()) {
+    if (event is PointerScrollEvent && !isPrimaryPressed()) {
+      // "Invert vertical scroll" (Settings): a touchpad's up/down swipe scrolls
+      // the other way. Only a touchpad: a notched wheel keeps its direction.
+      final d = event.scrollDelta;
+      if (ref.read(touchpadInvertYProvider) &&
+          isTouchpadScroll(event) &&
+          d.dy.abs() >= d.dx.abs()) {
+        GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+          _scrollBy(-d.dy);
+        });
+      }
       return;
     }
+    if (event is! PointerScrollEvent) return;
     final focalInViewport = event.localPosition.dy - _scroll.offset;
     GestureBinding.instance.pointerSignalResolver.register(event, (_) {
       _wheelAccumulated += event.scrollDelta.dy;
@@ -2456,6 +2533,40 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
 
   /// One mouse-wheel notch reports 100; a touchpad's small deltas add up.
   static const _wheelPixelsPerStep = 100.0;
+
+  void _scrollBy(double dy) {
+    if (!_scroll.hasClients) return;
+    final p = _scroll.position;
+    _scroll.jumpTo((p.pixels + dy).clamp(0.0, p.maxScrollExtent));
+  }
+
+  // ---- touchpad pinch / swipe (Precision Touchpad, MacBook) -----------------
+  // PointerPanZoom events: a pinch zooms the hours like Ctrl+wheel; when the
+  // vertical direction is inverted the grid is scrolled here (its own
+  // scrolling ignores the touchpad then, see build()).
+  final _pinchStep = PinchStepper();
+
+  /// The mouse cursor's y inside the grid content (the touchpad moves it): a
+  /// pinch zooms about THAT, not about the gesture's reported start position.
+  double? _cursorY;
+
+  void _panZoomStart(PointerPanZoomStartEvent e) {
+    _cursorY ??= e.localPosition.dy;
+    _pinchStep.start();
+  }
+
+  void _panZoomUpdate(PointerPanZoomUpdateEvent e) {
+    final step = _pinchStep.feed(e.scale);
+    if (step != 0) {
+      _zoomFocal = (_cursorY ?? e.localPosition.dy) - _scroll.offset;
+      zoomCalendar(ref, step);
+      return;
+    }
+    if (ref.read(touchpadInvertYProvider) &&
+        e.pan.dy.abs() >= e.pan.dx.abs()) {
+      _scrollBy(e.panDelta.dy);
+    }
+  }
 
   // ---- two-finger pinch (touch) -------------------------------------------
   // Raw pointers (no gesture recognizer, so one finger still scrolls and
@@ -2658,7 +2769,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final travelled = d != null && (pos - d.origin).distance >= _kEdgeTravel;
     if (travelled && box is RenderBox && box.attached && box.hasSize) {
       final x = box.globalToLocal(pos).dx;
-      if (x < _kGutter + _kEdgeZone) {
+      if (x < _gutterW + _kEdgeZone) {
         dir = -1;
       } else if (x > box.size.width - _kEdgeZone) {
         dir = 1;
@@ -2759,7 +2870,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
     final box = context.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return null;
     final local = box.globalToLocal(pos);
-    final x = local.dx - _kGutter;
+    final x = local.dx - _gutterW;
     if (local.dy < 0 || local.dy > box.size.height) return null;
     if (x < 0 || x >= widget.dayWidth * widget.dayCount) return null;
     final day = (x / widget.dayWidth).floor().clamp(0, widget.dayCount - 1);
@@ -3178,6 +3289,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           dragStartBehavior: DragStartBehavior.down,
+          // A two-finger touchpad swipe pans the calendar (days / scroll); it
+          // must not also sweep out a new action.
+          supportedDevices: kNoTrackpadDevices,
           onTapDown: (_) {
             if (!isAdditiveCalendarClick()) clearCalendarSelection(ref);
           },
@@ -3280,7 +3394,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
       ),
     ];
 
-    return SingleChildScrollView(
+    final invertY = ref.watch(touchpadInvertYProvider);
+    final behavior = ScrollConfiguration.of(context);
+    final scrollView = SingleChildScrollView(
       controller: _scroll,
       // Two fingers pinch-zoom the hours; the grid must not also scroll then.
       physics: _pinching ? const NeverScrollableScrollPhysics() : null,
@@ -3289,6 +3405,9 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         // the wheel must still reach us there.
         behavior: HitTestBehavior.translucent,
         onPointerSignal: _onWheel,
+        onPointerPanZoomStart: _panZoomStart,
+        onPointerPanZoomUpdate: _panZoomUpdate,
+        onPointerHover: (e) => _cursorY = e.localPosition.dy,
         onPointerDown: _pinchDown,
         onPointerMove: _pinchMove,
         onPointerUp: _pinchEnd,
@@ -3309,25 +3428,57 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
         ),
       ),
     );
+    if (!invertY) return scrollView;
+    // The touchpad no longer drags the grid by itself (the handler above does
+    // it, reversed); touch and mouse dragging stay as they are.
+    return ScrollConfiguration(
+      behavior: behavior.copyWith(
+        dragDevices: behavior.dragDevices.difference({
+          PointerDeviceKind.trackpad,
+        }),
+      ),
+      child: scrollView,
+    );
   }
 
-  /// The hour labels; rebuilt only when the hour height or colour changes.
+  /// The hour labels; rebuilt only when the hour height, colour, first day or
+  /// the extra timezones change.
   Widget _gutter(Color labelColor, double gridHeight) {
+    final zonesKey = [
+      widget.start.millisecondsSinceEpoch,
+      for (final z in _zones) '${z.tz}|${z.id}',
+    ].join(',');
     final cached = _gutterCache;
     if (cached != null &&
         _gutterHeight == _hourHeight &&
-        _gutterColor == labelColor) {
+        _gutterColor == labelColor &&
+        _gutterZonesKey == zonesKey) {
       return cached;
     }
     _gutterHeight = _hourHeight;
     _gutterColor = labelColor;
+    _gutterZonesKey = zonesKey;
     final style = TextStyle(fontSize: 10, color: labelColor);
+    final small = TextStyle(fontSize: 9, color: labelColor);
     return _gutterCache = RepaintBoundary(
       child: SizedBox(
-        width: _kGutter,
+        width: _gutterW,
         height: gridHeight,
         child: Stack(
           children: [
+            // Each extra zone: the clock there at every hour of this zone's
+            // first day ("+1" / "-1" when it is the next / previous date).
+            for (var i = 0; i < _zones.length; i++)
+              for (var h = 1; h < 24; h++)
+                Positioned(
+                  key: ValueKey('zone-hour-${_zones[i].id}-$h'),
+                  top: h * _hourHeight - 7,
+                  left: i * _kZoneCol,
+                  width: _kZoneCol,
+                  child: Center(
+                    child: _zoneHourText(_zones[i].tz, h, small),
+                  ),
+                ),
             for (var h = 1; h < 24; h++)
               Positioned(
                 top: h * _hourHeight - 7,
@@ -3337,6 +3488,26 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
           ],
         ),
       ),
+    );
+  }
+
+  String? _gutterZonesKey;
+
+  /// "03:00" / "03:00 +1": the time in [zone] when it is hour [h] on the first
+  /// shown day here.
+  Widget _zoneHourText(String zone, int h, TextStyle style) {
+    final instant = widget.start.add(Duration(hours: h));
+    final there = tz.TZDateTime.from(instant, tz.getLocation(zone));
+    final here = _local(instant);
+    final days = DateTime.utc(there.year, there.month, there.day)
+        .difference(DateTime.utc(here.year, here.month, here.day))
+        .inDays;
+    final mark = days == 0 ? '' : (days > 0 ? ' +$days' : ' $days');
+    return Text(
+      '${twoDigits(there.hour)}:${twoDigits(there.minute)}$mark',
+      style: style,
+      maxLines: 1,
+      softWrap: false,
     );
   }
 
@@ -4006,6 +4177,17 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
     final template = templates
         .where((t) => t.name.trim().toLowerCase() == key)
         .firstOrNull;
+    // The calendar's rows carry no notes: read them (and the directions) from
+    // the database so the plan's template - and so every action the plan
+    // creates - keeps what this action has.
+    final notes = await (db.selectOnly(db.actionsTable)
+          ..addColumns([db.actionsTable.notes])
+          ..where(db.actionsTable.id.equals(item.id)))
+        .map((r) => r.read(db.actionsTable.notes))
+        .getSingleOrNull();
+    final metricIds = await (db.select(
+      db.actionMetricsTable,
+    )..where((t) => t.actionId.equals(item.id))).map((l) => l.metricId).get();
     if (!navContext.mounted) return;
     await PlanItemEditorDialog.show(
       navContext,
@@ -4013,6 +4195,8 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
       initialMinutes: _effectiveEnd(item).difference(item.startAt!).inMinutes,
       initialName: item.name,
       initialTemplateId: template?.id,
+      initialNotes: notes,
+      initialMetricIds: metricIds,
     );
   }
   Offset _pressPos = Offset.zero;
@@ -4304,6 +4488,7 @@ class _EventBlockState extends ConsumerState<_EventBlock> {
             : null,
         onLongPressEnd: usePhoneLayout(context) ? (_) => _disarm() : null,
         onLongPressCancel: usePhoneLayout(context) ? _disarm : null,
+        supportedDevices: kNoTrackpadDevices,
         onPanStart: usePhoneLayout(context)
             ? null
             : (d) => widget.onDragStart(

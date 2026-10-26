@@ -1157,6 +1157,10 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
       await service.setMetrics(id, _selectedMetricIds.toList());
       await service.setCountableActivity(id, _countableActivityId);
     } else {
+      // Read before the first await (the helpers' rule): Ctrl+Z then takes the
+      // new action back instead of an older, unrelated step (a Mindmap layout).
+      final overlay = rootOverlayOf(context);
+      final history = ref.read(undoHistoryProvider.notifier);
       _createdId = await service.createAction(
         name: name,
         postponeFlex: _postponeFlex,
@@ -1171,6 +1175,13 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
       await service.setDiaryBlocks(_createdId!, widget.initialDraft?.diaryBlocks);
       await _linkCreated(_createdId!);
       await _linkPending(_createdId!);
+      final created = _createdId!;
+      offerUndo(
+        overlay,
+        history,
+        'Created "$name"',
+        () => service.deleteAction(created),
+      );
     }
     return true;
   }

@@ -108,17 +108,15 @@ void main() {
     final dialog = tester.getSize(find.byType(AlertDialog));
     expect(dialog.width, greaterThanOrEqualTo(720));
 
-    // Two columns, titles on the same row, + at the right of each title.
-    final dep = tester.getRect(find.text('Depends on'));
+    // The direction has linked actions, so "Depends on" is hidden (they ARE
+    // what it depends on); "Leads to" stays, with its + at the right of the
+    // title and a "New growth direction" button beside it.
+    expect(find.text('Depends on'), findsNothing);
     final leads = tester.getRect(find.text('Leads to'));
-    expect(leads.left, greaterThan(dep.right));
-    expect((leads.top - dep.top).abs(), lessThan(2));
     final plus = find.byTooltip('Add…');
-    expect(plus, findsNWidgets(2));
-    final p0 = tester.getRect(plus.at(0)), p1 = tester.getRect(plus.at(1));
-    expect(p0.left, greaterThanOrEqualTo(dep.right));
-    expect(p1.left, greaterThanOrEqualTo(leads.right));
-    expect(p1.left, greaterThan(p0.right));
+    expect(plus, findsOneWidget);
+    expect(tester.getRect(plus).left, greaterThanOrEqualTo(leads.right));
+    expect(find.byKey(const ValueKey('metric-picker-new')), findsOneWidget);
     expect(find.text('Add…'), findsNothing); // no text button below the chips
 
     // Linked actions: a list to the RIGHT of the settings, at the same height.
@@ -360,6 +358,33 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     await settle(tester);
     expect(find.textContaining('Linked actions'), findsNothing);
+
+    // Without linked actions both lists are there, each with a "New" button.
+    expect(find.text('Depends on'), findsOneWidget);
+    expect(find.text('Leads to'), findsOneWidget);
+    final newButtons = find.byKey(const ValueKey('metric-picker-new'));
+    expect(newButtons, findsNWidgets(2));
+
+    // "New" in Depends on: a direction dialog opens on top, saving it adds the
+    // new direction to that list.
+    await tester.tap(newButtons.first);
+    await tester.pump(const Duration(milliseconds: 500));
+    await settle(tester);
+    expect(find.byType(AlertDialog), findsNWidgets(2));
+    await tester.enterText(
+      find
+          .descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.byType(TextFormField),
+      ).first,
+      'Brand new',
+    );
+    await tester.tap(find.text('Save').last);
+    for (var i = 0; i < 4; i++) {
+      await settle(tester);
+    }
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.widgetWithText(InputChip, 'Brand new'), findsOneWidget);
     await teardown(tester);
   });
 }

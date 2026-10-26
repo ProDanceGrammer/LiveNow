@@ -10,6 +10,7 @@ import '../../core/error_log.dart';
 import '../backup_providers.dart';
 import '../data_imports.dart';
 import '../device_prefs.dart' show setDevicePrefBool;
+import '../touchpad.dart';
 import '../reminders.dart';
 import '../notch_side.dart';
 import '../text_tool_access.dart';
@@ -20,6 +21,7 @@ import '../theme_mode.dart';
 import '../theme/glass_theme.dart';
 import '../widgets/param_icons.dart';
 import '../widgets/section_block.dart';
+import '../widgets/time_zone_settings.dart';
 import '../widgets/sync_settings_dialog.dart' show SyncSettingsBody;
 
 /// The Settings page (phone and desktop): sync, light/dark mode and every
@@ -101,6 +103,8 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
               ),
+              title('Time zones'),
+              const _Panel(child: TimeZoneSettings()),
               title('Actions'),
               _Panel(
                 child: SwitchListTile(
@@ -116,6 +120,47 @@ class SettingsScreen extends ConsumerWidget {
                       setDevicePrefBool(ref, kShowDoneAllDayKey, v),
                 ),
               ),
+              if (defaultTargetPlatform == TargetPlatform.windows ||
+                  defaultTargetPlatform == TargetPlatform.macOS ||
+                  defaultTargetPlatform == TargetPlatform.linux) ...[
+                title('Touchpad'),
+                _Panel(
+                  child: Column(
+                    children: [
+                      SwitchListTile(
+                        key: const ValueKey('settings-touchpad-invert-x'),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                        ),
+                        title: const Text('Reverse the sideways swipe'),
+                        subtitle: const Text(
+                          'Calendar: two fingers left = next day, right = '
+                          'previous day. On: the other way round. Also moves '
+                          'the Mindmap sideways',
+                        ),
+                        value: ref.watch(touchpadInvertXProvider),
+                        onChanged: (v) =>
+                            setDevicePrefBool(ref, kTouchpadInvertX, v),
+                      ),
+                      SwitchListTile(
+                        key: const ValueKey('settings-touchpad-invert-y'),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                        ),
+                        title: const Text('Reverse the up / down swipe'),
+                        subtitle: const Text(
+                          'Scrolling the Calendar and moving the Mindmap '
+                          'up and down by touchpad. A mouse wheel is not '
+                          'changed',
+                        ),
+                        value: ref.watch(touchpadInvertYProvider),
+                        onChanged: (v) =>
+                            setDevicePrefBool(ref, kTouchpadInvertY, v),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (defaultTargetPlatform == TargetPlatform.windows) ...[
                 title('Other programs'),
                 _Panel(

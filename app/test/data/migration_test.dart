@@ -692,6 +692,29 @@ void main() {
     expect(n.read<int>('n'), 1);
   });
 
+  test('an old database gets the v18 calendar zones table and its sync triggers', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db
+        .into(db.calendarZonesTable)
+        .insert(
+          CalendarZonesTableCompanion.insert(
+            id: 'z1',
+            tz: 'Asia/Tokyo',
+            createdAt: 't',
+            updatedAt: 't',
+          ),
+        );
+    final z = (await db.select(db.calendarZonesTable).get()).single;
+    expect((z.tz, z.label, z.position), ('Asia/Tokyo', '', 0));
+    final n = await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = 'calendar_zones' AND row_id = 'z1'",
+        )
+        .getSingle();
+    expect(n.read<int>('n'), 1);
+  });
+
   test('an old database gets the v17 forms table and its sync triggers', () async {
     final db = _oldDatabase(version: 1);
     addTearDown(db.close);

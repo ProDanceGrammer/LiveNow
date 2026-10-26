@@ -33,6 +33,7 @@ const List<String> backupTableOrder = [
   'budget_settings',
   'saved_views',
   'forms',
+  'calendar_zones',
   'plan_overrides',
 ];
 

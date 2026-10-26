@@ -1,5 +1,6 @@
 ﻿import 'dart:convert';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
@@ -104,6 +105,65 @@ void main() {
         ),
       );
       expect((await plans.items()).single.name, 'Run more');
+    });
+
+    test('a new plan item keeps the notes and directions it was made from', () async {
+      final metric = newId();
+      await db.into(db.metricsTable).insert(
+        MetricsTableCompanion(
+          id: Value(metric),
+          name: const Value('Health'),
+          kind: const Value('boolean'),
+        ),
+      );
+      final id = await plans.saveItem(
+        PlanItemInput(
+          name: 'Gym',
+          kind: PlanKind.cycle,
+          startDate: day(19),
+          cycle: CycleRule(
+            cycleDays: 1,
+            occurrences: [CycleOccurrence(day: 0, startMin: 9 * 60)],
+          ),
+          templateNotes: '{"document":{"type":"page","children":[]}}',
+          templateMetricIds: [metric],
+        ),
+      );
+      expect(id, isNotEmpty);
+      final r = await plans.confirm(from: day(20), to: day(20), nowUtc: now);
+      final a = (await allActions()).single;
+      expect(r.createdIds, [a.id]);
+      expect(a.notes, isNotNull);
+      final links = await db.select(db.actionMetricsTable).get();
+      expect(links.map((l) => (l.actionId, l.metricId)), [(a.id, metric)]);
+    });
+
+    test('a same-name template only gets what it is missing', () async {
+      final own = await template(notes: '{"own":true}');
+      await plans.saveItem(
+        PlanItemInput(
+          name: 'Breakfast plan',
+          templateId: own,
+          kind: PlanKind.cycle,
+          startDate: day(19),
+          cycle: CycleRule(
+            cycleDays: 1,
+            occurrences: [CycleOccurrence(day: 0, startMin: 9 * 60)],
+          ),
+          templateNotes: '{"other":true}',
+          templateMetricIds: const ['m1'],
+        ),
+      );
+      final payload =
+          jsonDecode(
+                (await (db.select(db.actionTemplatesTable)
+                          ..where((t) => t.id.equals(own)))
+                        .getSingle())
+                    .payload,
+              )
+              as Map;
+      expect(payload['notes'], '{"own":true}'); // never overwritten
+      expect(payload['metricIds'], ['m1']); // was empty: filled
     });
 
     test('a nameless plan item is refused', () async {

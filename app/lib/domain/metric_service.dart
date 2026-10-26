@@ -153,6 +153,39 @@ class MetricService {
     );
   }
 
+  /// Copies [id]: same type, period, target, icon, main flag, relations and
+  /// linked actions, named "name (copy)" and placed [offset] away from the
+  /// original on the Mindmap. Returns the new id (undo with [deleteMetric]).
+  Future<String> duplicateMetric(String id, {double offset = 60}) {
+    return db.transaction(() async {
+      final src = await (db.select(
+        db.metricsTable,
+      )..where((t) => t.id.equals(id))).getSingleOrNull();
+      if (src == null) throw ArgumentError('Direction not found.');
+      final rel = await relationsOf(id);
+      final copyId = await saveMetric(
+        name: '${src.name} (copy)',
+        kind: MetricKind.fromDb(src.kind),
+        window: MetricWindow.fromDb(src.timeWindow),
+        target: src.target,
+        isMain: src.isMain,
+        icon: Value(src.icon),
+        dependsOnIds: rel.dependsOn.toList(),
+        leadsToIds: rel.leadsTo.toList(),
+      );
+      final links = await (db.select(
+        db.actionMetricsTable,
+      )..where((t) => t.metricId.equals(id))).get();
+      for (final l in links) {
+        await linkAction(l.actionId, copyId);
+      }
+      if (src.posX != null && src.posY != null) {
+        await savePositions({copyId: (src.posX! + offset, src.posY! + offset)});
+      }
+      return copyId;
+    });
+  }
+
   /// Deletes a direction with its relations and the links from actions, and
   /// returns what was removed so [undoDelete] can restore it.
   Future<MetricDeleteUndo> deleteMetric(String id) {

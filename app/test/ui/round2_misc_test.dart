@@ -373,8 +373,12 @@ void main() {
     final container = ProviderScope.containerOf(
       tester.element(find.byType(SettingsScreen)),
     );
-    Future<void> see(String key) async =>
-        tester.ensureVisible(find.byKey(ValueKey(key)));
+    // The list is lazy: scroll down to the row (it may be below the fold).
+    Future<void> see(String key) => tester.scrollUntilVisible(
+      find.byKey(ValueKey(key)),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await see('settings-work-end');
     await tester.pump();
     expect(

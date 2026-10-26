@@ -378,6 +378,62 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('a touchpad pinch zooms about the mouse cursor, not a corner', (
+    tester,
+  ) async {
+    await pumpMap(tester);
+    final alpha = node(alphaId);
+    final w0 = shownWidth(tester);
+    // The cursor sits on the middle of the Alpha node (the touchpad moves it).
+    final cursor = tester.getCenter(alpha);
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(cursor));
+    await tester.pump();
+
+    // The platform reports the gesture's start somewhere else on the map (its
+    // top-left corner): the zoom must still follow the cursor.
+    final corner = tester.getTopLeft(find.byType(InteractiveViewer)) +
+        const Offset(20, 20);
+    final pad = TestPointer(5, PointerDeviceKind.trackpad);
+    await tester.sendEventToBinding(pad.panZoomStart(corner));
+    for (final scale in [1.1, 1.3, 1.6, 2.0]) {
+      await tester.sendEventToBinding(pad.panZoomUpdate(corner, scale: scale));
+      await tester.pump();
+    }
+    await tester.sendEventToBinding(pad.panZoomEnd());
+    await tester.pump();
+
+    expect(shownWidth(tester), closeTo(w0 * 2, w0 * 0.05));
+    // The point under the cursor did not move.
+    expect((tester.getCenter(alpha) - cursor).distance, lessThan(2));
+    await unmount(tester);
+  });
+
+  testWidgets('a touchpad pinch out zooms about the cursor as well', (
+    tester,
+  ) async {
+    await pumpMap(tester);
+    final alpha = node(alphaId);
+    final w0 = shownWidth(tester);
+    final cursor = tester.getCenter(alpha);
+    final mouse = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(cursor));
+    await tester.pump();
+
+    final pad = TestPointer(5, PointerDeviceKind.trackpad);
+    await tester.sendEventToBinding(pad.panZoomStart(cursor));
+    for (final scale in [0.9, 0.7, 0.5]) {
+      await tester.sendEventToBinding(pad.panZoomUpdate(cursor, scale: scale));
+      await tester.pump();
+    }
+    await tester.sendEventToBinding(pad.panZoomEnd());
+    await tester.pump();
+
+    expect(shownWidth(tester), closeTo(w0 * 0.5, w0 * 0.05));
+    expect((tester.getCenter(alpha) - cursor).distance, lessThan(2));
+    await unmount(tester);
+  });
+
   // ---- drag follows the mouse at any zoom -----------------------------------
 
   for (final zoom in [(-3, 'zoomed out'), (0, 'at 100%'), (5, 'zoomed in')]) {

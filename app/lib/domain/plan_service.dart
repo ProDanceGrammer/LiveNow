@@ -30,7 +30,15 @@ class PlanItemInput {
     this.monthly,
     this.manualMinutes,
     this.collectionIds = const [],
+    this.templateNotes,
+    this.templateMetricIds = const [],
   });
+
+  /// Notes and growth directions of the action a NEW plan item is made from:
+  /// they go into the item's template (a template that already has its own is
+  /// left as it is), so every action the plan creates carries them.
+  final String? templateNotes;
+  final List<String> templateMetricIds;
 
   /// The plan collections the item belongs to.
   final List<String> collectionIds;
@@ -178,7 +186,14 @@ class PlanService {
     // plans and the Templates list stay one catalogue.
     var templateId = i.templateId;
     if (templateId == null && i.id == null) {
-      templateId = await _createTemplate(clean, i.manualMinutes);
+      templateId = await _createTemplate(
+        clean,
+        i.manualMinutes,
+        notes: i.templateNotes,
+        metricIds: i.templateMetricIds,
+      );
+    } else if (templateId != null && i.id == null) {
+      await _fillTemplate(templateId, i.templateNotes, i.templateMetricIds);
     }
     final companion = PlanItemsTableCompanion(
       name: Value(clean),
@@ -211,7 +226,12 @@ class PlanService {
 
   /// A new template (name, optional manual minutes) - the same payload the
   /// Templates editor writes.
-  Future<String> _createTemplate(String name, int? minutes) async {
+  Future<String> _createTemplate(
+    String name,
+    int? minutes, {
+    String? notes,
+    List<String> metricIds = const [],
+  }) async {
     final id = newId();
     await db
         .into(db.actionTemplatesTable)
@@ -223,11 +243,47 @@ class PlanService {
               'name': name,
               'isAllDay': false,
               if (minutes != null && minutes > 0) 'estimatedMinutes': minutes,
-              'metricIds': const <String>[],
+              'metricIds': metricIds,
+              if (notes != null && notes.isNotEmpty) 'notes': notes,
             }),
           ),
         );
     return id;
+  }
+
+  /// Gives an existing template the [notes] / [metricIds] it is MISSING (a
+  /// template's own notes and directions are never overwritten).
+  Future<void> _fillTemplate(
+    String templateId,
+    String? notes,
+    List<String> metricIds,
+  ) async {
+    if ((notes == null || notes.isEmpty) && metricIds.isEmpty) return;
+    final row = await (db.select(
+      db.actionTemplatesTable,
+    )..where((t) => t.id.equals(templateId))).getSingleOrNull();
+    if (row == null) return;
+    final Map<String, dynamic> payload;
+    try {
+      payload = Map<String, dynamic>.from(jsonDecode(row.payload) as Map);
+    } on Object {
+      return;
+    }
+    var changed = false;
+    final hasNotes = (payload['notes'] as String?)?.isNotEmpty ?? false;
+    if (!hasNotes && notes != null && notes.isNotEmpty) {
+      payload['notes'] = notes;
+      changed = true;
+    }
+    final hasMetrics = ((payload['metricIds'] as List?) ?? const []).isNotEmpty;
+    if (!hasMetrics && metricIds.isNotEmpty) {
+      payload['metricIds'] = metricIds;
+      changed = true;
+    }
+    if (!changed) return;
+    await (db.update(db.actionTemplatesTable)
+          ..where((t) => t.id.equals(templateId)))
+        .write(ActionTemplatesTableCompanion(payload: Value(jsonEncode(payload))));
   }
 
   // ---- collections -------------------------------------------------------------

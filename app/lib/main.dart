@@ -12,6 +12,7 @@ import 'hub/hub_main.dart';
 import 'ui/accounts/account_gate.dart';
 import 'ui/link_launcher.dart';
 import 'ui/root_navigator.dart';
+import 'data/time_zone_setup.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/theme/app_theme.dart';
 import 'ui/widgets/glass.dart';
@@ -21,6 +22,7 @@ import 'ui/undo.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   initPostponeTimeZoneData();
+  await applyConfiguredTimeZone();
   // Anything that throws out of an async callback (a button's write failing,
   // a stream erroring) is also written to error.log; the default handling
   // (console) stays.

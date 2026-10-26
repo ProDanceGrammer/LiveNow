@@ -9150,6 +9150,405 @@ class FormsTableCompanion extends UpdateCompanion<FormRow> {
   }
 }
 
+class $CalendarZonesTableTable extends CalendarZonesTable
+    with TableInfo<$CalendarZonesTableTable, CalendarZone> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CalendarZonesTableTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _tzMeta = const VerificationMeta('tz');
+  @override
+  late final GeneratedColumn<String> tz = GeneratedColumn<String>(
+    'tz',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _labelMeta = const VerificationMeta('label');
+  @override
+  late final GeneratedColumn<String> label = GeneratedColumn<String>(
+    'label',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _positionMeta = const VerificationMeta(
+    'position',
+  );
+  @override
+  late final GeneratedColumn<int> position = GeneratedColumn<int>(
+    'position',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    tz,
+    label,
+    position,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'calendar_zones';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CalendarZone> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('tz')) {
+      context.handle(_tzMeta, tz.isAcceptableOrUnknown(data['tz']!, _tzMeta));
+    } else if (isInserting) {
+      context.missing(_tzMeta);
+    }
+    if (data.containsKey('label')) {
+      context.handle(
+        _labelMeta,
+        label.isAcceptableOrUnknown(data['label']!, _labelMeta),
+      );
+    }
+    if (data.containsKey('position')) {
+      context.handle(
+        _positionMeta,
+        position.isAcceptableOrUnknown(data['position']!, _positionMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CalendarZone map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CalendarZone(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      tz: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tz'],
+      )!,
+      label: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}label'],
+      )!,
+      position: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}position'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CalendarZonesTableTable createAlias(String alias) {
+    return $CalendarZonesTableTable(attachedDatabase, alias);
+  }
+}
+
+class CalendarZone extends DataClass implements Insertable<CalendarZone> {
+  final String id;
+  final String tz;
+  final String label;
+  final int position;
+  final String createdAt;
+  final String updatedAt;
+  const CalendarZone({
+    required this.id,
+    required this.tz,
+    required this.label,
+    required this.position,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['tz'] = Variable<String>(tz);
+    map['label'] = Variable<String>(label);
+    map['position'] = Variable<int>(position);
+    map['created_at'] = Variable<String>(createdAt);
+    map['updated_at'] = Variable<String>(updatedAt);
+    return map;
+  }
+
+  CalendarZonesTableCompanion toCompanion(bool nullToAbsent) {
+    return CalendarZonesTableCompanion(
+      id: Value(id),
+      tz: Value(tz),
+      label: Value(label),
+      position: Value(position),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory CalendarZone.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CalendarZone(
+      id: serializer.fromJson<String>(json['id']),
+      tz: serializer.fromJson<String>(json['tz']),
+      label: serializer.fromJson<String>(json['label']),
+      position: serializer.fromJson<int>(json['position']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'tz': serializer.toJson<String>(tz),
+      'label': serializer.toJson<String>(label),
+      'position': serializer.toJson<int>(position),
+      'createdAt': serializer.toJson<String>(createdAt),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+    };
+  }
+
+  CalendarZone copyWith({
+    String? id,
+    String? tz,
+    String? label,
+    int? position,
+    String? createdAt,
+    String? updatedAt,
+  }) => CalendarZone(
+    id: id ?? this.id,
+    tz: tz ?? this.tz,
+    label: label ?? this.label,
+    position: position ?? this.position,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  CalendarZone copyWithCompanion(CalendarZonesTableCompanion data) {
+    return CalendarZone(
+      id: data.id.present ? data.id.value : this.id,
+      tz: data.tz.present ? data.tz.value : this.tz,
+      label: data.label.present ? data.label.value : this.label,
+      position: data.position.present ? data.position.value : this.position,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CalendarZone(')
+          ..write('id: $id, ')
+          ..write('tz: $tz, ')
+          ..write('label: $label, ')
+          ..write('position: $position, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, tz, label, position, createdAt, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CalendarZone &&
+          other.id == this.id &&
+          other.tz == this.tz &&
+          other.label == this.label &&
+          other.position == this.position &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CalendarZonesTableCompanion extends UpdateCompanion<CalendarZone> {
+  final Value<String> id;
+  final Value<String> tz;
+  final Value<String> label;
+  final Value<int> position;
+  final Value<String> createdAt;
+  final Value<String> updatedAt;
+  final Value<int> rowid;
+  const CalendarZonesTableCompanion({
+    this.id = const Value.absent(),
+    this.tz = const Value.absent(),
+    this.label = const Value.absent(),
+    this.position = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CalendarZonesTableCompanion.insert({
+    required String id,
+    required String tz,
+    this.label = const Value.absent(),
+    this.position = const Value.absent(),
+    required String createdAt,
+    required String updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       tz = Value(tz),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<CalendarZone> custom({
+    Expression<String>? id,
+    Expression<String>? tz,
+    Expression<String>? label,
+    Expression<int>? position,
+    Expression<String>? createdAt,
+    Expression<String>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (tz != null) 'tz': tz,
+      if (label != null) 'label': label,
+      if (position != null) 'position': position,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CalendarZonesTableCompanion copyWith({
+    Value<String>? id,
+    Value<String>? tz,
+    Value<String>? label,
+    Value<int>? position,
+    Value<String>? createdAt,
+    Value<String>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return CalendarZonesTableCompanion(
+      id: id ?? this.id,
+      tz: tz ?? this.tz,
+      label: label ?? this.label,
+      position: position ?? this.position,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (tz.present) {
+      map['tz'] = Variable<String>(tz.value);
+    }
+    if (label.present) {
+      map['label'] = Variable<String>(label.value);
+    }
+    if (position.present) {
+      map['position'] = Variable<int>(position.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CalendarZonesTableCompanion(')
+          ..write('id: $id, ')
+          ..write('tz: $tz, ')
+          ..write('label: $label, ')
+          ..write('position: $position, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -9186,6 +9585,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $PlanCollectionsTableTable planCollectionsTable =
       $PlanCollectionsTableTable(this);
   late final $FormsTableTable formsTable = $FormsTableTable(this);
+  late final $CalendarZonesTableTable calendarZonesTable =
+      $CalendarZonesTableTable(this);
   late final Index idxActionsDoneStart = Index(
     'idx_actions_done_start',
     'CREATE INDEX idx_actions_done_start ON actions (done, start_at)',
@@ -9257,6 +9658,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     budgetTxTemplatesTable,
     planCollectionsTable,
     formsTable,
+    calendarZonesTable,
     idxActionsDoneStart,
     idxActionsAlldayStart,
     idxActionsStart,
@@ -17613,6 +18015,243 @@ typedef $$FormsTableTableProcessedTableManager =
       FormRow,
       PrefetchHooks Function()
     >;
+typedef $$CalendarZonesTableTableCreateCompanionBuilder =
+    CalendarZonesTableCompanion Function({
+      required String id,
+      required String tz,
+      Value<String> label,
+      Value<int> position,
+      required String createdAt,
+      required String updatedAt,
+      Value<int> rowid,
+    });
+typedef $$CalendarZonesTableTableUpdateCompanionBuilder =
+    CalendarZonesTableCompanion Function({
+      Value<String> id,
+      Value<String> tz,
+      Value<String> label,
+      Value<int> position,
+      Value<String> createdAt,
+      Value<String> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$CalendarZonesTableTableFilterComposer
+    extends Composer<_$AppDatabase, $CalendarZonesTableTable> {
+  $$CalendarZonesTableTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get tz => $composableBuilder(
+    column: $table.tz,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get label => $composableBuilder(
+    column: $table.label,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CalendarZonesTableTableOrderingComposer
+    extends Composer<_$AppDatabase, $CalendarZonesTableTable> {
+  $$CalendarZonesTableTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get tz => $composableBuilder(
+    column: $table.tz,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get label => $composableBuilder(
+    column: $table.label,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get position => $composableBuilder(
+    column: $table.position,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CalendarZonesTableTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CalendarZonesTableTable> {
+  $$CalendarZonesTableTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get tz =>
+      $composableBuilder(column: $table.tz, builder: (column) => column);
+
+  GeneratedColumn<String> get label =>
+      $composableBuilder(column: $table.label, builder: (column) => column);
+
+  GeneratedColumn<int> get position =>
+      $composableBuilder(column: $table.position, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$CalendarZonesTableTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CalendarZonesTableTable,
+          CalendarZone,
+          $$CalendarZonesTableTableFilterComposer,
+          $$CalendarZonesTableTableOrderingComposer,
+          $$CalendarZonesTableTableAnnotationComposer,
+          $$CalendarZonesTableTableCreateCompanionBuilder,
+          $$CalendarZonesTableTableUpdateCompanionBuilder,
+          (
+            CalendarZone,
+            BaseReferences<
+              _$AppDatabase,
+              $CalendarZonesTableTable,
+              CalendarZone
+            >,
+          ),
+          CalendarZone,
+          PrefetchHooks Function()
+        > {
+  $$CalendarZonesTableTableTableManager(
+    _$AppDatabase db,
+    $CalendarZonesTableTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CalendarZonesTableTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CalendarZonesTableTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CalendarZonesTableTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> tz = const Value.absent(),
+                Value<String> label = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CalendarZonesTableCompanion(
+                id: id,
+                tz: tz,
+                label: label,
+                position: position,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String tz,
+                Value<String> label = const Value.absent(),
+                Value<int> position = const Value.absent(),
+                required String createdAt,
+                required String updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CalendarZonesTableCompanion.insert(
+                id: id,
+                tz: tz,
+                label: label,
+                position: position,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$CalendarZonesTableTable, CalendarZone>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $CalendarZonesTableTable,
+                    CalendarZone
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CalendarZonesTableTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CalendarZonesTableTable,
+      CalendarZone,
+      $$CalendarZonesTableTableFilterComposer,
+      $$CalendarZonesTableTableOrderingComposer,
+      $$CalendarZonesTableTableAnnotationComposer,
+      $$CalendarZonesTableTableCreateCompanionBuilder,
+      $$CalendarZonesTableTableUpdateCompanionBuilder,
+      (
+        CalendarZone,
+        BaseReferences<_$AppDatabase, $CalendarZonesTableTable, CalendarZone>,
+      ),
+      CalendarZone,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -17671,4 +18310,6 @@ class $AppDatabaseManager {
       $$PlanCollectionsTableTableTableManager(_db, _db.planCollectionsTable);
   $$FormsTableTableTableManager get formsTable =>
       $$FormsTableTableTableManager(_db, _db.formsTable);
+  $$CalendarZonesTableTableTableManager get calendarZonesTable =>
+      $$CalendarZonesTableTableTableManager(_db, _db.calendarZonesTable);
 }
