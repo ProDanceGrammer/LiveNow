@@ -133,6 +133,28 @@ void main() {
     expect(e.selection!.isCollapsed, isTrue);
   });
 
+  testWidgets('Ctrl+Left / Ctrl+Shift+Left at offset 0 stay put', (
+    tester,
+  ) async {
+    final s = await pump(tester, [
+      paragraphNode(text: 'above'),
+      todoListNode(checked: false, text: 'text'),
+    ]);
+    final e = s.editorState;
+    e.selection = at([1], 0);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.arrowLeft, ctrl: true);
+    expect(e.selection, at([1], 0));
+    await key(tester, LogicalKeyboardKey.arrowLeft, ctrl: true, shift: true);
+    expect(e.selection, at([1], 0));
+
+    // Mid-text the package still moves by word.
+    e.selection = at([1], 4);
+    await tester.pump();
+    await key(tester, LogicalKeyboardKey.arrowLeft, ctrl: true);
+    expect(e.selection, at([1], 0));
+  });
+
   testWidgets('pasting many lines into a code block keeps them ALL in it', (
     tester,
   ) async {

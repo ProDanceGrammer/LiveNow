@@ -114,7 +114,34 @@ CommandShortcutEvent _key(
   handler: handler,
 );
 
+/// Ctrl+Left at offset 0 of a block stays put (the package jumps to the end of
+/// the previous block). Anywhere else the package's word move runs.
+KeyEventResult _stayAtBlockStart(EditorState state, {required bool select}) {
+  final sel = state.selection;
+  if (sel == null) return KeyEventResult.ignored;
+  if (!select && !sel.isCollapsed) return KeyEventResult.ignored;
+  final node = state.getNodeAtPath(sel.end.path);
+  if (node == null || node.delta == null || sel.end.offset != 0) {
+    return KeyEventResult.ignored;
+  }
+  return KeyEventResult.handled;
+}
+
 final List<CommandShortcutEvent> notesHotkeyCommands = [
+  CommandShortcutEvent(
+    key: 'notes: word left stays in the block',
+    getDescription: () => 'Move a word left (not into the previous block)',
+    command: 'ctrl+arrow left',
+    macOSCommand: 'alt+arrow left',
+    handler: (s) => _stayAtBlockStart(s, select: false),
+  ),
+  CommandShortcutEvent(
+    key: 'notes: select word left stays in the block',
+    getDescription: () => 'Select a word left (not into the previous block)',
+    command: 'ctrl+shift+arrow left',
+    macOSCommand: 'alt+shift+arrow left',
+    handler: (s) => _stayAtBlockStart(s, select: true),
+  ),
   _key(
     'notes: line start',
     'Move to the start of the line',
