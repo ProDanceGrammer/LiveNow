@@ -364,6 +364,40 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
     if (_timer?.isActive ?? false) _flush();
   }
 
+  /// Replaces the whole document with [json] (the notes were saved elsewhere)
+  /// in ONE transaction on the existing [EditorState]: the editor is not
+  /// rebuilt, so the caret (kept where it still fits), the expand state and the
+  /// scroll survive. Nothing is reported through `onChanged`: the new text came
+  /// from the database, there is nothing to write back.
+  Future<void> replaceDocument(String? json) async {
+    final next = notesDocumentFromJson(json);
+    final nodes = next.root.children.toList();
+    final root = _editorState.document.root;
+    final tx = _editorState.transaction;
+    if (root.children.isNotEmpty) tx.deleteNodes(root.children.toList());
+    tx.insertNodes([0], nodes);
+    Position? fit(Position p) {
+      final node = next.nodeAtPath(p.path);
+      if (node == null) return null;
+      return Position(
+        path: p.path,
+        offset: p.offset.clamp(0, node.delta?.length ?? 0),
+      );
+    }
+
+    final sel = _editorState.selection;
+    final start = sel == null ? null : fit(sel.start);
+    final end = sel == null ? null : fit(sel.end);
+    tx.afterSelection = start == null || end == null
+        ? null
+        : Selection(start: start, end: end);
+    await _editorState.apply(tx);
+    if (!mounted) return;
+    // The transaction started the debounce: what is shown now IS the saved text.
+    _timer?.cancel();
+    _lastEmitted = notesDocumentToJson(_editorState.document);
+  }
+
   void _flush() {
     _timer?.cancel();
     final json = notesDocumentToJson(_editorState.document);
@@ -873,10 +907,15 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
           const SizedBox(width: 6),
         ],
         if (widget.onToggleExpand != null)
-          TextButton(
-            style: buttonStyle,
+          IconButton(
+            key: const ValueKey('notes-expand-toggle'),
+            padding: EdgeInsets.zero,
+            iconSize: 17,
+            tooltip: widget.expanded ? 'Collapse' : 'Expand',
+            icon: Icon(
+              widget.expanded ? Icons.fullscreen_exit : Icons.fullscreen,
+            ),
             onPressed: widget.onToggleExpand,
-            child: Text(widget.expanded ? 'Collapse' : 'Expand'),
           ),
       ],
     );

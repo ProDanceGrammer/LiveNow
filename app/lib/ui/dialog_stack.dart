@@ -2,6 +2,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import '../core/error_log.dart';
 import 'dialog_back.dart';
 
 /// Number of dialogs opened through [showStackedDialog] that are still open.
@@ -14,7 +15,37 @@ int get openStackedDialogCount => _openDialogs;
 /// the widget tree was torn down mid-test.
 void resetStackedDialogsForTest() {
   _openDialogs = 0;
+  _saveHooks.clear();
   setDialogBackHandler(false);
+}
+
+/// "Write my form if it has unsaved, valid edits" of every open EDIT dialog, in
+/// opening order (the last one is the topmost).
+final List<Future<void> Function()> _saveHooks = [];
+
+/// An edit dialog calls this in `initState` and [unregisterEditorSaveHook] in
+/// `dispose`. [save] must not close the dialog and must not throw for an
+/// invalid form (it just does nothing).
+void registerEditorSaveHook(Future<void> Function() save) =>
+    _saveHooks.add(save);
+
+void unregisterEditorSaveHook(Future<void> Function() save) =>
+    _saveHooks.remove(save);
+
+/// True while some edit dialog is open (so an opener knows it has to await).
+bool get hasOpenEditors => _saveHooks.isNotEmpty;
+
+/// Call FIRST when another item (action, direction ...) is about to open over
+/// the current dialog: the topmost edit dialog saves its whole form, so the new
+/// dialog loads the saved row. Lower dialogs were saved when the one above them
+/// opened. A failed save never blocks opening.
+Future<void> saveOpenEditorBeforeOpening() async {
+  if (_saveHooks.isEmpty) return;
+  try {
+    await _saveHooks.last();
+  } catch (e, st) {
+    ErrorLog.write(e, st, context: 'Save before opening');
+  }
 }
 
 /// Like [showDialog], but only the bottom-most dialog dims the background.

@@ -392,7 +392,7 @@ void main() {
       built,
       reason: 'the editor was not rebuilt',
     );
-    expect(find.text('Expand'), findsOneWidget, reason: 'still not expanded');
+    expect(find.byTooltip('Expand'), findsOneWidget, reason: 'still not expanded');
 
     // Typing replaces the selected word and the edit is the dialog's notes.
     final ed = state.editorState;

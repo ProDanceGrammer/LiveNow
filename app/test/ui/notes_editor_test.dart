@@ -83,7 +83,7 @@ void main() {
     expect(find.byType(AppFlowyEditor), findsOneWidget);
     // Windows: Paste as Markdown is the Ctrl+Shift+V shortcut, no button.
     expect(find.text('Paste as Markdown'), findsNothing);
-    expect(find.text('Expand'), findsOneWidget);
+    expect(find.byTooltip('Expand'), findsOneWidget);
     expect(
       dumpDoc(state.editorState.document),
       'todo_list!:Задача | paragraph:Текст',
@@ -109,14 +109,14 @@ void main() {
     tester,
   ) async {
     await pumpEditor(tester);
-    expect(find.text('Expand'), findsNothing);
-    expect(find.text('Collapse'), findsNothing);
+    expect(find.byKey(const ValueKey('notes-expand-toggle')), findsNothing);
     await unmount(tester);
 
     var calls = 0;
     await pumpEditor(tester, onToggle: () => calls++, expanded: true);
-    expect(find.text('Collapse'), findsOneWidget);
-    await tester.tap(find.text('Collapse'));
+    expect(find.byTooltip('Collapse'), findsOneWidget);
+    expect(find.byIcon(Icons.fullscreen_exit), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('notes-expand-toggle')));
     expect(calls, 1);
     await unmount(tester);
   });

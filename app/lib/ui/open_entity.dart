@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/growth_rules.dart';
+import 'dialog_stack.dart';
 import 'providers.dart';
 import 'widgets/action_editor.dart';
 import 'widgets/app_toast.dart' show showMissingToast;
@@ -21,6 +22,8 @@ Future<void> openActionById(
 ) async {
   // Read before the await: the caller's `ref` can be gone afterwards.
   final db = ref.read(databaseProvider);
+  // The edit dialog below (if any) saves first, so the row read next is current.
+  await saveOpenEditorBeforeOpening();
   final row = await (db.select(
     db.actionsTable,
   )..where((t) => t.id.equals(id))).getSingleOrNull();
@@ -36,6 +39,7 @@ Future<void> openDirectionById(
   String id,
 ) async {
   final db = ref.read(databaseProvider);
+  await saveOpenEditorBeforeOpening();
   final row = await (db.select(
     db.metricsTable,
   )..where((t) => t.id.equals(id))).getSingleOrNull();

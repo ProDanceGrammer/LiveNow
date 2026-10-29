@@ -68,7 +68,12 @@ class GrowthDirectionDialog extends ConsumerStatefulWidget {
     BuildContext context, {
     GrowthMetric? existing,
     GrowthDirectionDraft? draft,
-  }) {
+  }) async {
+    // Over another edit dialog: that one saves first (no await otherwise).
+    if (hasOpenEditors) {
+      await saveOpenEditorBeforeOpening();
+      if (!context.mounted) return null;
+    }
     return showStackedDialog<String>(
       context: context,
       // Phone: a tap outside (e.g. to hide the keyboard) must not close the

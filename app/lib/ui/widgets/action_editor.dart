@@ -119,7 +119,12 @@ class ActionEditorDialog extends ConsumerStatefulWidget {
     ActionEditorDraft? draft,
     ActionDraft? initialDraft,
     ({String actionId, bool asPredecessor})? linkTo,
-  }) {
+  }) async {
+    // Over another edit dialog: that one saves first (no await otherwise).
+    if (hasOpenEditors) {
+      await saveOpenEditorBeforeOpening();
+      if (!context.mounted) return null;
+    }
     return showStackedDialog<String>(
       context: context,
       builder: (_) => ActionEditorDialog(
@@ -156,6 +161,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   bool _notesOpen = false; // the Notes section (tile) is open
   bool _notesExpanded = false; // the editor's wide "Expand" mode
   final _notesKey = GlobalKey<NotesEditorState>();
+  final _blocksKey = GlobalKey<WhatIsDoneControlState>();
   final _contentScroll = ScrollController();
   StreamSubscription<ActionRow?>? _rowSub;
   ActionRow? _seen; // the last database row seen (to spot external changes)
@@ -203,8 +209,9 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    registerEditorSaveHook(_saveBeforeOpening);
     final existing = widget.existing;
-    _nameController = TextEditingController(text: existing?.name ?? '');
+    _nameController =TextEditingController(text: existing?.name ?? '');
     _notes = existing?.notes;
     // Open the Notes section only when there already is text to show.
     _notesOpen =
@@ -380,7 +387,25 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
         row.isAllDay != prev.isAllDay;
     final nameChanged = row.name != prev.name;
     final doneChanged = row.done != prev.done;
-    if (!scheduleChanged && !nameChanged && !doneChanged) return;
+    final notesChanged = row.notes != prev.notes;
+    final blocksChanged = row.resultNote != prev.resultNote;
+    if (!scheduleChanged &&
+        !nameChanged &&
+        !doneChanged &&
+        !notesChanged &&
+        !blocksChanged) {
+      return;
+    }
+    // Notes (and the Blocks field, see WhatIsDoneControl) written elsewhere, e.g.
+    // by another dialog of the same action stacked above this one, are adopted
+    // unless this form has its own unsaved edit of them.
+    if (notesChanged) {
+      _notesKey.currentState?.flushPending();
+      if (_notes == prev.notes && _notes != row.notes) {
+        _notes = row.notes;
+        _notesKey.currentState?.replaceDocument(row.notes);
+      }
+    }
     setState(() {
       _done = row.done;
       if (scheduleChanged) {
@@ -413,6 +438,7 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    unregisterEditorSaveHook(_saveBeforeOpening);
     unregisterDraftDialog(this);
     _notesTimer?.cancel();
     _rowSub?.cancel();
@@ -595,9 +621,11 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                           toolbarExtra: widget.existing == null
                               ? null
                               : WhatIsDoneControl(
+                                  key: _blocksKey,
                                   actionId: widget.existing!.id,
                                   notesKey: _notesKey,
-                                  initialBlocks: widget.existing!.resultNote,
+                                  initialBlocks: (_seen ?? widget.existing!)
+                                      .resultNote,
                                 ),
                           height: notesHeight,
                           expanded: expanded,
@@ -1144,6 +1172,8 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
 
     if (id != null) {
       if (!await _confirmOverwriteRemote(id)) return false;
+      // The "What is done?" Blocks field is part of the form (its own column).
+      await _blocksKey.currentState?.saveBlocks();
       await service.updateAction(
         actionId: id,
         name: name,
@@ -1254,6 +1284,20 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
       showInfoToast(overlay, 'Not saved: $friendly.');
       return false;
     }
+  }
+
+  /// The editor-save hook (see `saveOpenEditorBeforeOpening`): another item is
+  /// about to open over this dialog, so the whole form is written first (the
+  /// dialog stays). An invalid form or a declined overwrite is left as it is. A
+  /// NEW action that was never saved is not created as a side effect: it stays
+  /// in the form (unlike Ctrl+S, nothing asked for it).
+  Future<void> _saveBeforeOpening() async {
+    if (!mounted || _id == null) return;
+    _notesKey.currentState?.flushPending();
+    final blocks = _blocksKey.currentState;
+    final blocksDirty = blocks?.isDirty ?? false;
+    if (!_isDirty && !blocksDirty) return;
+    await _persistOrToast();
   }
 
   Future<void> _save() async {

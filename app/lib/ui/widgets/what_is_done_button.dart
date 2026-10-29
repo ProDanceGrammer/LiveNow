@@ -33,16 +33,42 @@ class WhatIsDoneControl extends ConsumerStatefulWidget {
 
   final String actionId;
   final GlobalKey<NotesEditorState> notesKey;
+
+  /// The saved codes. When the parent passes a NEW value (the row was changed
+  /// elsewhere, e.g. by another dialog of the same action) the field follows it,
+  /// unless the user has typed something of their own.
   final String? initialBlocks;
 
   @override
-  ConsumerState<WhatIsDoneControl> createState() => _WhatIsDoneControlState();
+  ConsumerState<WhatIsDoneControl> createState() => WhatIsDoneControlState();
 }
 
-class _WhatIsDoneControlState extends ConsumerState<WhatIsDoneControl> {
+class WhatIsDoneControlState extends ConsumerState<WhatIsDoneControl> {
   late final TextEditingController _blocks = TextEditingController(
     text: widget.initialBlocks ?? '',
   );
+
+  /// What the database holds, as far as this control knows (trimmed).
+  late String _saved;
+
+  @override
+  void initState() {
+    super.initState();
+    _saved = (widget.initialBlocks ?? '').trim();
+  }
+
+  /// True when the field holds codes that are not written yet.
+  bool get isDirty => _blocks.text.trim() != _saved;
+
+  @override
+  void didUpdateWidget(WhatIsDoneControl oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final next = (widget.initialBlocks ?? '').trim();
+    if (next == (oldWidget.initialBlocks ?? '').trim()) return;
+    // Untouched field: show the new value; a typed one is kept.
+    if (!isDirty && _blocks.text != next) _blocks.text = next;
+    _saved = next;
+  }
 
   @override
   void dispose() {
@@ -50,9 +76,13 @@ class _WhatIsDoneControlState extends ConsumerState<WhatIsDoneControl> {
     super.dispose();
   }
 
+  /// Writes the codes when they changed (also part of the action form's Save).
+  Future<void> saveBlocks() => isDirty ? _saveBlocks() : Future.value();
+
   Future<void> _saveBlocks() {
     final db = ref.read(databaseProvider);
     final text = _blocks.text.trim();
+    _saved = text;
     return (db.update(
       db.actionsTable,
     )..where((t) => t.id.equals(widget.actionId))).write(
@@ -186,16 +216,21 @@ class _WhatIsDoneControlState extends ConsumerState<WhatIsDoneControl> {
             ),
           ),
           const SizedBox(width: 6),
-          TextButton(
+          IconButton(
             key: const ValueKey('diary-transfer'),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              minimumSize: const Size(0, 28),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              textStyle: const TextStyle(fontSize: 12),
-            ),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 28),
+            tooltip: 'List what was done during previous working day',
             onPressed: _run,
-            child: const Text('What is done?'),
+            icon: Image.asset(
+              'assets/icons/what_is_done.png',
+              width: 20,
+              height: 20,
+              // The glyph is black on transparent: tint it like any icon.
+              color: IconTheme.of(context).color,
+              semanticLabel: 'What is done?',
+            ),
           ),
         ],
       ),
