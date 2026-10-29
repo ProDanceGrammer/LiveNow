@@ -1,6 +1,7 @@
 # Packs the Windows release build into a portable zip: livenow.exe + its DLLs +
 # the three Visual C++ runtime DLLs (app-local deployment, so it also starts on a
-# PC that never installed the redistributable) + a short README.
+# PC that never installed the redistributable) + a short README + the hub
+# install/uninstall/start scripts from app/windows/hub/.
 #
 #   flutter build windows --release
 #   pwsh app/windows/package/pack_windows.ps1 [-Out <zip path>]
@@ -26,6 +27,9 @@ foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
   Copy-Item $src $root
 }
 Copy-Item (Join-Path $PSScriptRoot 'README.txt') $root
+foreach ($f in 'install_hub.ps1', 'uninstall_hub.ps1', 'install_hub.cmd', 'uninstall_hub.cmd', 'start_hub.cmd') {
+  Copy-Item (Join-Path $PSScriptRoot "..\hub\$f") $root
+}
 
 if (Test-Path $Out) { Remove-Item $Out -Force }
 Compress-Archive -Path $root -DestinationPath $Out
