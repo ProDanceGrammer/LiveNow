@@ -1,0 +1,41 @@
+# Static analysis + the pure-Dart tests (domain, data, hub, core: they use an
+# in-memory database, no window), including the AI assistant's rules, runner and
+# the mock model/OCR servers. UI tests are not run here: they need the desktop
+# fonts and are run locally.
+#
+# Runs ONLY when you ask: press "Run workflow" on the Actions page, or open a
+# pull request. It never builds or publishes anything.
+name: Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      # Actions are pinned to a commit (the comment names the tag it was taken
+      # from), the same ones the build workflows use.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Static analysis
+        run: flutter analyze lib test
+
+      - name: Tests (domain, data, hub, core)
+        run: flutter test test/domain test/data test/hub test/core
