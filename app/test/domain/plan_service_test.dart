@@ -176,6 +176,25 @@ void main() {
     });
   });
 
+  group('occurrences', () {
+    test('an item whose template is unreadable does not hide the others', () async {
+      final bad = newId();
+      await db.into(db.actionTemplatesTable).insert(
+        ActionTemplatesTableCompanion.insert(
+          id: bad,
+          name: 'Broken',
+          payload: 'not json at all',
+        ),
+      );
+      await daily(bad);
+      await daily(await template(minutes: 20));
+      final out = await plans.occurrences(day(19), day(19));
+      expect(out, hasLength(2));
+      // The unreadable template gives the default 60 minutes; the other its 20.
+      expect(out.map((o) => o.durationMin).toSet(), {60, 20});
+    });
+  });
+
   group('confirm', () {
     test('creates real actions from the template, once per occurrence', () async {
       final t = await template(notes: '{"document":{"type":"page","children":[]}}');

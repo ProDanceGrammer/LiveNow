@@ -37,7 +37,15 @@ DateTime planDateOf(DateTime utc) {
   return DateTime.utc(l.year, l.month, l.day);
 }
 
-tz.Location get _loc => tz.getLocation(AppSettings.timeZoneName);
+/// The app's zone; an unknown name (a damaged `time_zone.txt`) falls back to UTC
+/// instead of throwing, which would hide every plan block.
+tz.Location get _loc {
+  try {
+    return tz.getLocation(AppSettings.timeZoneName);
+  } on Object {
+    return tz.UTC;
+  }
+}
 
 /// The instant of [minutes] after local midnight of [date] (minutes may exceed
 /// 1440: the time then falls on a later day).

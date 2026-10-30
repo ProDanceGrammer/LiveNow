@@ -146,6 +146,27 @@ void main() {
       )
       .data!;
 
+  testWidgets('moving the view a day keeps the blocks and recomputes nothing', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    expect(ghosts(), findsNWidgets(7));
+    final before = container.read(planOccurrencesProvider).value;
+
+    final start = container.read(calendarRangeStartProvider);
+    container.read(calendarRangeStartProvider.notifier).state = start.add(
+      const Duration(days: 1),
+    );
+    await settle(tester);
+
+    // The same list (inside the generated window), and the day still has blocks.
+    expect(identical(container.read(planOccurrencesProvider).value, before), isTrue);
+    expect(ghosts(), findsNWidgets(7));
+    await unmount(tester);
+  });
+
   testWidgets('a block whose average is longer is red and shows the average', (
     tester,
   ) async {

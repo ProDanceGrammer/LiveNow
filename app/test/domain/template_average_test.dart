@@ -93,6 +93,30 @@ void main() {
     expect(await service.averagesByName(const []), isEmpty);
   });
 
+  test('templateDurations answers many templates like templateDuration', () async {
+    await run('Walk', 20);
+    final avg = await template({'name': 'Walk', 'estimatedMinutes': 45});
+    final manual = await template({
+      'name': 'Swim',
+      'estimatedMinutes': 45,
+    });
+    final off = await template({
+      'name': 'Walk',
+      'estimatedMinutes': 45,
+      'useAverage': false,
+    });
+    final none = await template({'name': 'Nap'});
+    final all = await service.templateDurations([avg, manual, off, none, 'missing']);
+    expect(all[avg], const Duration(minutes: 20));
+    expect(all[manual], const Duration(minutes: 45));
+    expect(all[off], const Duration(minutes: 45));
+    expect(all[none], const Duration(minutes: 60));
+    expect(all.containsKey('missing'), isFalse);
+    for (final id in [avg, manual, off, none]) {
+      expect(await service.templateDuration(id), all[id]);
+    }
+  });
+
   test('runs linked to the same-name Countable Activity count too', () async {
     final activityId = await service.createCountableActivity('Read');
     await run('Read', 20);

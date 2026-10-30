@@ -462,7 +462,14 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
   }
 
   /// The mean real length (minutes) of this block's name, null without history.
-  int? _averageOf(_Slot s) => widget.averages[normalizeForMatch(_nameOf(s))];
+  int? _averageOf(_Slot s) {
+    if (widget.averages.isEmpty) return null;
+    // The match key of a name is computed once, not per rebuild / drag move.
+    final name = _nameOf(s);
+    return widget.averages[_keys.putIfAbsent(name, () => normalizeForMatch(name))];
+  }
+
+  final _keys = <String, String>{};
 
   String _label(_Slot s, int absStart, int absEnd, int? average) {
     final time = '${planTime(absStart)}-${planTime(absEnd)}';

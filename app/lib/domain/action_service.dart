@@ -1075,36 +1075,51 @@ class ActionService {
       activityByName.putIfAbsent(c.name.trim().toLowerCase(), () => c.id);
     }
     final cutoff = dateTimeToDb(now.subtract(_countableAverageWindow))!;
+    // Only the five columns the average needs (a row's notes can be large).
+    final t = db.actionsTable;
     final rows =
-        await (db.select(db.actionsTable)..where(
-              (t) =>
-                  t.done.equals(true) &
-                  t.completedAt.isBiggerOrEqualValue(cutoff) &
-                  t.startAt.isNotNull() &
-                  t.endAt.isNotNull(),
-            ))
+        await (db.selectOnly(t)
+              ..addColumns([t.name, t.startAt, t.endAt, t.countableActivityId])
+              ..where(
+                t.done.equals(true) &
+                    t.completedAt.isBiggerOrEqualValue(cutoff) &
+                    t.startAt.isNotNull() &
+                    t.endAt.isNotNull(),
+              ))
             .get();
-    final byName = <String, List<ActionRow>>{};
-    final byActivity = <String, List<ActionRow>>{};
+    // Row index -> actual length (null = unusable), grouped by name / activity.
+    final lengths = <Duration?>[];
+    final byName = <String, List<int>>{};
+    final byActivity = <String, List<int>>{};
     for (final r in rows) {
-      byName.putIfAbsent(normalizeForMatch(r.name), () => []).add(r);
-      final a = r.countableActivityId;
-      if (a != null) byActivity.putIfAbsent(a, () => []).add(r);
+      final start = dateTimeFromDb(r.read(t.startAt));
+      final end = dateTimeFromDb(r.read(t.endAt));
+      final i = lengths.length;
+      lengths.add(
+        start == null || end == null || end.isBefore(start)
+            ? null
+            : end.difference(start),
+      );
+      byName.putIfAbsent(normalizeForMatch(r.read(t.name) ?? ''), () => []).add(i);
+      final a = r.read(t.countableActivityId);
+      if (a != null) byActivity.putIfAbsent(a, () => []).add(i);
     }
     final result = <String, Duration>{};
     for (final e in wanted.entries) {
       final activityId = activityByName[e.value.trim().toLowerCase()];
-      final matched = <ActionRow>{
+      final matched = <int>{
         ...?byName[e.key],
         if (activityId != null) ...?byActivity[activityId],
       };
-      final durations = _actualDurations(matched);
-      if (durations.isEmpty) continue;
-      final totalMicros = durations.fold<int>(
-        0,
-        (s, d) => s + d.inMicroseconds,
-      );
-      result[e.key] = Duration(microseconds: totalMicros ~/ durations.length);
+      var total = 0, count = 0;
+      for (final i in matched) {
+        final d = lengths[i];
+        if (d == null) continue;
+        total += d.inMicroseconds;
+        count++;
+      }
+      if (count == 0) continue;
+      result[e.key] = Duration(microseconds: total ~/ count);
     }
     return result;
   }
@@ -1427,24 +1442,55 @@ class ActionService {
   /// average of its finished runs - whichever the template's switch prefers,
   /// the other as the fallback, else [defaultActionDuration]. Null when the
   /// template does not exist. (All-day templates have no length: 1 h here.)
-  Future<Duration?> templateDuration(String templateId, {DateTime? nowUtc}) async {
-    final Map<String, dynamic> payload;
-    try {
-      payload = await _templatePayload(templateId);
-    } catch (_) {
-      return null;
+  Future<Duration?> templateDuration(String templateId, {DateTime? nowUtc}) async =>
+      (await templateDurations([templateId], nowUtc: nowUtc))[templateId];
+
+  /// [templateDuration] for many templates with ONE read of the templates and
+  /// ONE read of the finished actions. A template that does not exist, or whose
+  /// stored payload is unreadable, is absent from the result (never throws).
+  Future<Map<String, Duration>> templateDurations(
+    Iterable<String> templateIds, {
+    DateTime? nowUtc,
+  }) async {
+    final ids = templateIds.toSet();
+    if (ids.isEmpty) return const {};
+    final templates = await (db.select(
+      db.actionTemplatesTable,
+    )..where((t) => t.id.isIn(ids))).get();
+    // id -> (name, manual minutes, useAverage), skipping unreadable payloads.
+    final infos = <String, ({String name, Duration? manual, bool useAverage})>{};
+    for (final t in templates) {
+      try {
+        final payload = decodeTemplatePayload(
+          t.payload,
+          fallbackName: t.name,
+        );
+        final minutes = payload['estimatedMinutes'];
+        final name = payload['name'];
+        infos[t.id] = (
+          name: name is String ? name : t.name,
+          manual: minutes is int && minutes > 0
+              ? Duration(minutes: minutes)
+              : null,
+          useAverage: payload['useAverage'] != false,
+        );
+      } catch (_) {
+        // This template stays out; the others are still answered.
+      }
     }
-    final minutes = payload['estimatedMinutes'] as int?;
-    final manual = (minutes != null && minutes > 0)
-        ? Duration(minutes: minutes)
-        : null;
-    final average = await templateAverage(
-      payload['name'] as String,
-      nowUtc: nowUtc,
-    );
-    return payload['useAverage'] != false
-        ? (average ?? manual ?? defaultActionDuration)
-        : (manual ?? average ?? defaultActionDuration);
+    final averages = await averagesByName([
+      for (final i in infos.values) i.name,
+    ], nowUtc: nowUtc);
+    return {
+      for (final e in infos.entries)
+        e.key: () {
+          final average = averages[normalizeForMatch(e.value.name)];
+          final manual = e.value.manual;
+          return e.value.useAverage
+              ? (average ?? manual ?? defaultActionDuration)
+              : (manual ?? average ?? defaultActionDuration);
+        }(),
+    };
   }
 
   /// A new action from a template at a GIVEN time (planning): [startUtc], lasting

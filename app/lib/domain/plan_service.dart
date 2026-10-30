@@ -735,19 +735,43 @@ class PlanService {
     for (final o in await db.select(db.planOverridesTable).get()) {
       overrides.putIfAbsent(o.planItemId, () => []).add(decodeOverride(o));
     }
-    final out = <PlanOccurrence>[];
+    // A bad row must not hide every other plan block: it is skipped and logged.
+    final decoded = <(PlanItem, PlanItemData)>[];
     for (final r in rows) {
-      final data = decode(r);
-      if (data.paused) continue;
-      out.addAll(
-        occurrencesInRange(
-          data,
-          from,
-          to,
-          overrides: overrides[r.id] ?? const [],
-          defaultMinutes: await defaultMinutes(data),
-        ),
-      );
+      try {
+        final data = decode(r);
+        if (!data.paused) decoded.add((r, data));
+      } catch (e, s) {
+        await ErrorLog.write(e, s, context: 'plan item "${r.name}" unreadable');
+      }
+    }
+    // The template lengths of ALL items in one go (one scan of the finished
+    // actions, not one per item).
+    Map<String, Duration> lengths = const {};
+    try {
+      lengths = await actions.templateDurations([
+        for (final (_, d) in decoded)
+          if (d.templateId != null) d.templateId!,
+      ]);
+    } catch (e, s) {
+      await ErrorLog.write(e, s, context: 'plan template lengths');
+    }
+    final out = <PlanOccurrence>[];
+    for (final (r, data) in decoded) {
+      try {
+        final d = data.templateId == null ? null : lengths[data.templateId!];
+        out.addAll(
+          occurrencesInRange(
+            data,
+            from,
+            to,
+            overrides: overrides[r.id] ?? const [],
+            defaultMinutes: (d ?? defaultActionDuration).inMinutes,
+          ),
+        );
+      } catch (e, s) {
+        await ErrorLog.write(e, s, context: 'plan item "${r.name}" occurrences');
+      }
     }
     out.sort((a, b) => a.startUtc.compareTo(b.startUtc));
     return out;

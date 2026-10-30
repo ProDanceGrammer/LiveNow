@@ -21,5 +21,8 @@ String formatSequenceName(int number, String baseName) =>
 /// `replaceAll("\d+")`), then the rest is trimmed and lowercased.
 String normalizeForMatch(String name) {
   final (_, base) = parseSequencePrefix(name);
-  return base.replaceAll(RegExp(r'\d+'), '').trim().toLowerCase();
+  return base.replaceAll(_digits, '').trim().toLowerCase();
 }
+
+// Hoisted: this runs once per finished action when averages are computed.
+final _digits = RegExp(r'\d+');
