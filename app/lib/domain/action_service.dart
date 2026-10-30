@@ -198,8 +198,17 @@ class ActionService {
     List<String> metricIds = const [],
     String? planItemId,
     String? planKey,
+    // A caller-chosen id makes the call idempotent (AI jobs): when a row with
+    // that id exists it is returned unchanged.
+    String? id,
   }) async {
-    final id = newId();
+    final newActionId = id ?? newId();
+    if (id != null) {
+      final existing = await (db.select(
+        db.actionsTable,
+      )..where((t) => t.id.equals(newActionId))).getSingleOrNull();
+      if (existing != null) return existing.id;
+    }
     final cleanedName = requireName(name, what: 'action name');
     if (estimatedMinutes != null &&
         (estimatedMinutes < 0 || estimatedMinutes > kMaxEstimatedMinutes)) {
@@ -214,7 +223,7 @@ class ActionService {
           .into(db.actionsTable)
           .insert(
             ActionsTableCompanion.insert(
-              id: id,
+              id: newActionId,
               name: cleanedName,
               postponeFlex: Value(postponeFlex),
               depthLevel: Value(depthLevel),
@@ -238,14 +247,14 @@ class ActionService {
             .insert(
               ActionMetricsTableCompanion.insert(
                 id: newId(),
-                actionId: id,
+                actionId: newActionId,
                 metricId: metricId,
               ),
             );
       }
     });
 
-    return id;
+    return newActionId;
   }
 
   /// Updates an existing action's editable fields (used by the editor form).

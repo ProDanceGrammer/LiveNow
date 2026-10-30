@@ -546,6 +546,7 @@ class _FlakyService extends ActionService {
     List<String> metricIds = const [],
     String? planItemId,
     String? planKey,
+    String? id,
   }) {
     if (failing()) {
       throw sqlite.SqliteException(extendedResultCode: 13, message: 'database or disk is full');
@@ -563,6 +564,7 @@ class _FlakyService extends ActionService {
       metricIds: metricIds,
       planItemId: planItemId,
       planKey: planKey,
+      id: id,
     );
   }
 }

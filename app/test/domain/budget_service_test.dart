@@ -214,6 +214,44 @@ void main() {
       expect(row.unitPrice, 400);
     });
 
+    test('updateAccountRate: false keeps the account rate; explicit id is idempotent',
+        () async {
+      final tl = await budget.saveAccount(
+        name: 'Lira',
+        currency: 'TRY',
+        rateToBase: 40,
+      );
+      final cat = await budget.saveCategory(
+        CategoryInput(name: 'Market', price: 1, accountCountId: tl),
+      );
+      final id = await budget.createTransaction(
+        id: 'fixed-id',
+        categoryId: cat,
+        rateCount: 45,
+        updateAccountRate: false,
+      );
+      expect(id, 'fixed-id');
+      expect((await tx(id)).rateCount, 45);
+      expect(
+        (await db.select(db.budgetAccountsTable).getSingle()).rateToBase,
+        40,
+      );
+      final again = await budget.createTransaction(
+        id: 'fixed-id',
+        categoryId: cat,
+        quantity: 9,
+      );
+      expect(again, 'fixed-id');
+      expect((await tx(id)).quantity, 1);
+      expect(await db.select(db.budgetTransactionsTable).get(), hasLength(1));
+      await budget.updateTransaction(id, rateCount: 50, updateAccountRate: false);
+      expect((await tx(id)).rateCount, 50);
+      expect(
+        (await db.select(db.budgetAccountsTable).getSingle()).rateToBase,
+        40,
+      );
+    });
+
     test('a rate typed on a transaction becomes the account rate', () async {
       final tl = await budget.saveAccount(
         name: 'Lira',

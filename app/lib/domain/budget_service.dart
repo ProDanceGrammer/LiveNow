@@ -525,8 +525,13 @@ class BudgetService {
 
   /// Creates a transaction, snapshotting the category's income flag, accounts,
   /// price and the accounts' current rates. A rate typed here ([rateCount] /
-  /// [rateInteract]) also becomes the account's current rate.
+  /// [rateInteract]) also becomes the account's current rate, unless
+  /// [updateAccountRate] is false (AI writes: the rate then belongs to this
+  /// transaction only). A given [id] makes the call idempotent: when a row with
+  /// that id exists it is returned unchanged.
   Future<String> createTransaction({
+    String? id,
+    bool updateAccountRate = true,
     required String categoryId,
     String name = '',
     String? actionId,
@@ -543,20 +548,27 @@ class BudgetService {
     final typedCount = checkNumberOrNull(rateCount, 'exchange rate');
     final typedInteract = checkNumberOrNull(rateInteract, 'exchange rate');
     return db.transaction(() async {
+      if (id != null) {
+        final existing = await (db.select(
+          db.budgetTransactionsTable,
+        )..where((t) => t.id.equals(id))).getSingleOrNull();
+        if (existing != null) return existing.id;
+      }
       final category = await _leafCategory(categoryId);
-      final id = newId();
+      final newTxId = id ?? newId();
       final now = DateTime.now();
       final snap = await _snapshot(
         category,
         unitPrice: price,
         typedCount: typedCount,
         typedInteract: typedInteract,
+        updateAccountRate: updateAccountRate,
       );
       await db
           .into(db.budgetTransactionsTable)
           .insert(
             BudgetTransactionsTableCompanion.insert(
-              id: id,
+              id: newTxId,
               name: Value(cleanName(name, what: 'transaction name')),
               categoryId: Value(categoryId),
               actionId: Value(actionId),
@@ -573,7 +585,7 @@ class BudgetService {
               updatedAt: dateTimeToDb(now)!,
             ),
           );
-      return id;
+      return newTxId;
     });
   }
 
@@ -588,6 +600,7 @@ class BudgetService {
     double? unitPrice,
     double? rateCount,
     double? rateInteract,
+    bool updateAccountRate = true,
   }) {
     final qty = quantity == null
         ? null
@@ -630,6 +643,7 @@ class BudgetService {
           typedInteract: rateInteract,
           keepCount: categoryChanged ? null : row.rateCount,
           keepInteract: categoryChanged ? null : row.rateInteract,
+          updateAccountRate: updateAccountRate,
         );
         companion = companion.copyWith(
           categoryId: Value(newCategoryId),
@@ -793,6 +807,7 @@ class BudgetService {
     double? typedInteract,
     double? keepCount,
     double? keepInteract,
+    bool updateAccountRate = true,
   }) async {
     Future<double?> accountRate(String? accountId) async {
       if (accountId == null) return null;
@@ -815,8 +830,10 @@ class BudgetService {
     }
 
     bool ok(double? v) => v != null && v > 0;
-    await setAccountRate(category.accountCountId, typedCount);
-    await setAccountRate(category.accountUseId, typedInteract);
+    if (updateAccountRate) {
+      await setAccountRate(category.accountCountId, typedCount);
+      await setAccountRate(category.accountUseId, typedInteract);
+    }
 
     final isAmount = category.unit == BudgetUnit.percentPerMonth.db;
     return (
