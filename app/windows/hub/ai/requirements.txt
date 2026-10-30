@@ -1,0 +1,5 @@
+rapidocr_onnxruntime
+Pillow
+numpy
+# Fallback engine (also needs the Tesseract program with the Turkish language data installed):
+pytesseract

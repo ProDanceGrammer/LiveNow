@@ -47,7 +47,23 @@ const _maxBody = {
   '/v1/hello': 64 * 1024,
   '/v1/pull': 64 * 1024,
   '/v1/push': 32 * 1024 * 1024,
+  '/v1/ai/history': 64 * 1024,
+  '/v1/ai/blob': 64 * 1024,
 };
+
+/// What the hub answers to the two read routes of the AI chat archive (the
+/// plain desktop host has none and answers `{error: unavailable}`).
+abstract class AiReadHandler {
+  /// `{messages: [rows], more: bool}`.
+  Future<Map<String, Object?>> history(
+    String threadId,
+    String? before,
+    int limit,
+  );
+
+  /// `{mime, data (base64)}` or `{error: not_found}`.
+  Future<Map<String, Object?>> blob(String blobId);
+}
 
 /// Whole-request deadline for reading a body: a trickle (slowloris) is cut.
 const _smallBodyDeadline = Duration(seconds: 20);
@@ -92,6 +108,9 @@ class SyncServer {
 
   /// The admin routes (the hub sets it; null = every admin path is a 404).
   AdminHandler? admin;
+
+  /// The AI archive routes (the hub sets it; null = "unavailable").
+  AiReadHandler? ai;
 
   HttpServer? _http;
   _Offer? _offer;
@@ -321,6 +340,8 @@ class SyncServer {
       )).toJson(),
       '/v1/push' => (await host.push(peer.deviceId, _changes(request),
           last: _boolField(request, 'last'))).toJson(),
+      '/v1/ai/history' => await _aiHistory(request),
+      '/v1/ai/blob' => await _aiBlob(request),
       _ when path.startsWith(adminPrefix) => await _adminCall(
         path.substring(adminPrefix.length),
         peer,
@@ -329,6 +350,31 @@ class SyncServer {
       _ => throw const _NotFound(),
     };
     return SyncReply.seal(peer.key, path, env.counter, answer);
+  }
+
+  Future<Map<String, Object?>> _aiHistory(Map<String, Object?> m) async {
+    final thread = m['thread_id'];
+    final before = m['before'];
+    if (thread is! String || thread.isEmpty || thread.length > 100) {
+      throw const _BadRequest();
+    }
+    if (before != null && (before is! String || before.length > 100)) {
+      throw const _BadRequest();
+    }
+    final limit = _intField(m, 'limit', min: 1, max: 100);
+    final handler = ai;
+    if (handler == null) return const {'error': 'unavailable'};
+    return handler.history(thread, before as String?, limit);
+  }
+
+  Future<Map<String, Object?>> _aiBlob(Map<String, Object?> m) async {
+    final id = m['blob_id'];
+    if (id is! String || id.isEmpty || id.length > 100) {
+      throw const _BadRequest();
+    }
+    final handler = ai;
+    if (handler == null) return const {'error': 'unavailable'};
+    return handler.blob(id);
   }
 
   /// A route only the admin device may call (the call is already

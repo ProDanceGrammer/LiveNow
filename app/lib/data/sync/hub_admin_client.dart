@@ -77,4 +77,16 @@ class HubAdminClient {
       (await _call('conflicts/restore', {'id': id}))['restored'] == true;
 
   Future<void> markConflictsSeen() => _call('conflicts/seen');
+
+  /// The hub's AI settings: every key, but the token only as `llm_token_set`.
+  Future<Map<String, Object?>> fetchAiSettings() => _call('ai-settings');
+
+  /// Saves the given AI settings (a bad value changes nothing and throws) and
+  /// returns the settings as they are now. An empty `llm_token` clears it.
+  Future<Map<String, Object?>> saveAiSettings(Map<String, Object?> values) =>
+      _call('ai-settings', {'values': values});
+
+  /// Reachability of the model server and the OCR service, the job queue per
+  /// state, the model names and the last job error.
+  Future<Map<String, Object?>> fetchAiStatus() => _call('ai-status');
 }

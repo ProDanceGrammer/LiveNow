@@ -10,6 +10,10 @@ import '../data/sync/sync_store.dart';
 import '../domain/metric_service.dart';
 import '../domain/sync/sync_engine.dart';
 import '../domain/sync/sync_protocol.dart';
+import 'ai_admin_routes.dart';
+import 'ai_hub_reads.dart';
+import 'ai_photo_store.dart';
+import 'ai_worker.dart';
 
 /// The file the hub writes its one-time local pairing text to, until the
 /// desktop window has connected.
@@ -68,6 +72,12 @@ class HubRunner {
   late final SyncPeers peers;
   late final SyncServer server;
   late final HubAdmin admin;
+
+  /// The photo originals, `<dir>/ai_photos`.
+  late final AiPhotoStore photos;
+
+  /// Runs the assistant's jobs (idle while there are none).
+  late final AiWorker aiWorker;
   AutoBackupScheduler? _backupScheduler;
   Timer? _renewal;
 
@@ -90,6 +100,11 @@ class HubRunner {
       peers: peers,
       deviceName: deviceName,
     );
+    photos = AiPhotoStore(
+      Directory('${dir.path}${Platform.pathSeparator}ai_photos'),
+    );
+    await photos.root.create(recursive: true);
+    server.ai = AiHubReads(db: db, photos: photos);
     admin = HubAdmin(
       server: server,
       store: store,
@@ -98,6 +113,8 @@ class HubRunner {
       bootstrapFile: File('${dir.path}${Platform.pathSeparator}$kHubLocalPairFile'),
       hosts: hosts ?? localAddresses,
     );
+    admin.extraRoutes = AiAdminRoutes(db).handle;
+    aiWorker = AiWorker(db: db, photos: photos, log: log.write);
     // Throws a SocketException when the port is taken (another hub runs).
     await server.start(port: port);
     log.write('hub listening on port ${server.port}');
@@ -109,6 +126,7 @@ class HubRunner {
       });
     });
     if (backups) await _startBackups();
+    await aiWorker.start();
   }
 
   Future<void> _startBackups() async {
@@ -135,6 +153,7 @@ class HubRunner {
 
   Future<void> stop() async {
     _renewal?.cancel();
+    await aiWorker.stop();
     _backupScheduler?.dispose();
     admin.dispose();
     await server.stop();

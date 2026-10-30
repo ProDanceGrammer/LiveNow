@@ -17,6 +17,13 @@ class SyncUnreachable implements Exception {
   String toString() => 'The other device could not be reached.';
 }
 
+/// The server has no AI assistant (a plain desktop host), or refused the read.
+class AiUnavailable implements Exception {
+  const AiUnavailable();
+  @override
+  String toString() => 'The assistant is not available on that device.';
+}
+
 /// The phone side: encrypted requests to the PC's [SyncServer]. Tries the
 /// stored addresses in turn and keeps the one that worked first.
 class HttpTransport implements SyncTransport {
@@ -63,6 +70,44 @@ class HttpTransport implements SyncTransport {
   /// routes use it; sync itself goes through hello / pull / push).
   Future<Map<String, Object?>> call(String path, Map<String, Object?> body) =>
       _call(path, body);
+
+  /// One page of a chat thread's archive from the hub: messages older than
+  /// [before] (a `created_at` cursor, null = newest), oldest first, as sync
+  /// rows. Throws [AiUnavailable] when the server has no assistant.
+  Future<({List<Map<String, Object?>> messages, bool more})> fetchAiHistory(
+    String threadId, {
+    String? before,
+    int limit = 50,
+  }) async {
+    final r = await _call('/v1/ai/history', {
+      'thread_id': threadId,
+      'before': before,
+      'limit': limit,
+    });
+    _checkAi(r);
+    return (
+      messages: [
+        for (final m in r['messages']! as List)
+          (m as Map).cast<String, Object?>(),
+      ],
+      more: r['more']! as bool,
+    );
+  }
+
+  /// A photo original from the hub, or null when it has none by that id.
+  Future<({String mime, Uint8List data})?> fetchAiBlob(String blobId) async {
+    final r = await _call('/v1/ai/blob', {'blob_id': blobId});
+    if (r['error'] == 'not_found') return null;
+    _checkAi(r);
+    return (
+      mime: r['mime']! as String,
+      data: base64.decode(r['data']! as String),
+    );
+  }
+
+  static void _checkAi(Map<String, Object?> r) {
+    if (r['error'] != null) throw const AiUnavailable();
+  }
 
   /// Calls from this device to one peer run one after the other: each takes
   /// the next request counter from the stored one, so two at once (a sync and

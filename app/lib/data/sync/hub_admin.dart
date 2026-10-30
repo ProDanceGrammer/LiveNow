@@ -38,6 +38,10 @@ class HubAdmin {
   /// Addresses put into a pairing code (default: this machine's).
   final Future<List<String>> Function()? hosts;
 
+  /// Routes of other hub features (the AI assistant's `ai-settings` /
+  /// `ai-status`); it throws a FormatException for a route it does not know.
+  AdminHandler? extraRoutes;
+
   PairRequest? _pending;
   Completer<bool>? _answer;
   Timer? _timeout;
@@ -178,6 +182,8 @@ class HubAdmin {
         await store.markConflictsSeen();
         return {};
       default:
+        final extra = extraRoutes;
+        if (extra != null) return extra(route, request);
         throw const FormatException('unknown admin route');
     }
   }
