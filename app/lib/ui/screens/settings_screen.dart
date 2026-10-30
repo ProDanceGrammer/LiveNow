@@ -22,6 +22,8 @@ import '../theme/glass_theme.dart';
 import '../widgets/param_icons.dart';
 import '../widgets/section_block.dart';
 import '../widgets/time_zone_settings.dart';
+import '../sync_providers.dart' show hubConnectedProvider;
+import '../widgets/ai_hub_settings.dart';
 import '../widgets/sync_settings_dialog.dart' show SyncSettingsBody;
 
 /// The Settings page (phone and desktop): sync, light/dark mode and every
@@ -77,6 +79,11 @@ class SettingsScreen extends ConsumerWidget {
                   child: SyncSettingsBody(),
                 ),
               ),
+              // The assistant's settings live on the hub: shown when connected.
+              if (ref.watch(hubConnectedProvider)) ...[
+                title('Assistant'),
+                const _Panel(child: AiHubSettings()),
+              ],
               title('Appearance'),
               SectionBlock(
                 padding: const EdgeInsets.all(12),

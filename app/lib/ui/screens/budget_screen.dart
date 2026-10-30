@@ -31,6 +31,7 @@ import '../widgets/glass.dart';
 import '../widgets/label_icon.dart';
 import '../widgets/param_icons.dart';
 import '../widgets/sort_chips.dart';
+import 'ai_threads_screen.dart';
 
 enum BudgetTab {
   overview('Overview'),
@@ -189,16 +190,29 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: null,
-        key: const ValueKey('budget-fab'),
-        onPressed: _onFab,
-        tooltip: switch (tab) {
-          BudgetTab.overview || BudgetTab.transactions => 'Add transaction',
-          BudgetTab.categories => 'New category',
-          BudgetTab.accounts => 'New account',
-        },
-        child: const Icon(Icons.add),
+      floatingActionButton: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: null,
+            key: const ValueKey('ai-chat-button'),
+            onPressed: () => AiThreadsScreen.open(context),
+            tooltip: 'Assistant',
+            child: const Icon(Icons.chat_bubble_outline),
+          ),
+          const SizedBox(width: 12),
+          FloatingActionButton(
+            heroTag: null,
+            key: const ValueKey('budget-fab'),
+            onPressed: _onFab,
+            tooltip: switch (tab) {
+              BudgetTab.overview || BudgetTab.transactions => 'Add transaction',
+              BudgetTab.categories => 'New category',
+              BudgetTab.accounts => 'New account',
+            },
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }

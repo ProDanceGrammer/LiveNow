@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/capped_read.dart';
+import '../core/error_log.dart';
 import '../core/time_codec.dart';
 import '../data/sync/http_transport.dart';
 import '../data/sync/hub_admin_client.dart';
@@ -18,6 +19,7 @@ import '../domain/sync/sync_crypto.dart';
 import '../domain/sync/sync_engine.dart';
 import '../domain/sync/sync_models.dart';
 import '../domain/sync/sync_protocol.dart';
+import 'ai_providers.dart' show aiChatServiceProvider;
 import 'providers.dart';
 
 /// The PC serves, the phone asks. A desktop that is connected to the always-on
@@ -553,6 +555,22 @@ class SyncClientController extends Notifier<SyncStatus>
     _debounce = Timer(const Duration(seconds: 3), () => unawaited(syncNow()));
   }
 
+  DateTime? _lastAssistantPrune;
+
+  /// Right after a sync that succeeded (everything this device wrote is on the
+  /// other side now) old assistant chat is dropped from THIS device, silently
+  /// (no delete is synced): the hub stays the archive. At most every 6 hours.
+  Future<void> _pruneAssistantHistory(DateTime now) async {
+    final last = _lastAssistantPrune;
+    if (last != null && now.difference(last) < const Duration(hours: 6)) return;
+    _lastAssistantPrune = now;
+    try {
+      await ref.read(aiChatServiceProvider).pruneLocal();
+    } on Object catch (e, s) {
+      await ErrorLog.write(e, s, context: 'assistant: pruning old chat');
+    }
+  }
+
   Future<SyncReport?> syncNow() async {
     if (state.phase == SyncPhase.syncing) return null;
     final peer = await _peer();
@@ -580,6 +598,7 @@ class SyncClientController extends Notifier<SyncStatus>
         lastSync: now,
         lastReport: report,
       );
+      unawaited(_pruneAssistantHistory(now));
       return report;
     } on SyncUnreachable {
       _offlineStreak++;
