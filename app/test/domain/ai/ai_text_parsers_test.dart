@@ -53,6 +53,37 @@ void main() {
     test('nothing readable', () {
       expect(parseBankScreenshot('hello').hasAnything, isFalse);
     });
+
+    test('a reading survives the job payload', () {
+      final r = ScreenshotReading.fromJson(
+        const ScreenshotReading(useAmount: 361.64, countAmount: 391.5, rate: 0.9237).toJson(),
+      );
+      expect((r.useAmount, r.countAmount, r.rate), (361.64, 391.5, 0.9237));
+    });
+  });
+
+  group('which screenshot belongs to which receipt', () {
+    const a = ScreenshotReading(useAmount: 361.64, countAmount: 391.5, rate: 0.9237);
+    const b = ScreenshotReading(useAmount: 180, countAmount: 200, rate: 0.9);
+
+    test('the one whose shop amount equals the receipt total', () {
+      expect(pickScreenshot([a, b], 200.0, solo: false), same(b));
+      expect(pickScreenshot([a, b], 391.5, solo: false), same(a));
+      expect(pickScreenshot([a, b], 391.0, solo: false), same(a), reason: 'within the tolerance');
+    });
+
+    test('no match: only a single receipt with a single screenshot are trusted together', () {
+      expect(pickScreenshot([a], 999, solo: true), same(a));
+      expect(pickScreenshot([a], 999, solo: false), isNull);
+      expect(pickScreenshot([a, b], 999, solo: true), isNull);
+      expect(pickScreenshot(const [], 391.5, solo: true), isNull);
+    });
+
+    test('a screenshot with only a rate cannot be matched by amount', () {
+      const onlyRate = ScreenshotReading(rate: 0.92);
+      expect(pickScreenshot([onlyRate], 391.5, solo: false), isNull);
+      expect(pickScreenshot([onlyRate], 391.5, solo: true), same(onlyRate));
+    });
   });
 
   test('U7 answers: grams, kilograms, by the piece', () {

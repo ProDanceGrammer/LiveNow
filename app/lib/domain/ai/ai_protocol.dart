@@ -219,7 +219,22 @@ class LineEdit {
 
 /// `ai_jobs.payload_json`: what the worker needs to start.
 class JobPayload {
-  const JobPayload({this.messageId, this.blobIds = const [], this.text});
+  const JobPayload({
+    this.messageId,
+    this.blobIds = const [],
+    this.text,
+    this.screenshots = const [],
+    this.receiptCount = 0,
+  });
+
+  /// Bank-screenshot readings (`rate` / `use` / `count`) found in the same
+  /// message as this receipt; the receipt job picks the one that fits its
+  /// total. Written by the hub when it splits a multi-receipt message.
+  final List<Map<String, dynamic>> screenshots;
+
+  /// How many receipts the original message had (1 = the receipt and its
+  /// screenshot were sent together).
+  final int receiptCount;
 
   /// The user message that started the job.
   final String? messageId;
@@ -234,6 +249,8 @@ class JobPayload {
     'message_id': messageId,
     'blob_ids': blobIds,
     'text': text,
+    if (screenshots.isNotEmpty) 'screenshots': screenshots,
+    if (receiptCount > 0) 'receipt_count': receiptCount,
   });
 
   factory JobPayload.decode(String json) {
@@ -247,6 +264,12 @@ class JobPayload {
             for (final b in j['blob_ids'] as List) b.toString(),
         ],
         text: j['text']?.toString(),
+        screenshots: [
+          if (j['screenshots'] is List)
+            for (final s in j['screenshots'] as List)
+              if (s is Map) Map<String, dynamic>.from(s),
+        ],
+        receiptCount: (j['receipt_count'] as num?)?.toInt() ?? 0,
       );
     } catch (_) {
       return const JobPayload();

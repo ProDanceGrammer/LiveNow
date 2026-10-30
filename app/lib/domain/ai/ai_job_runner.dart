@@ -21,7 +21,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:drift/drift.dart'
-    show BooleanExpressionOperators, OrderingTerm, Value, Variable;
+    show BooleanExpressionOperators, InsertMode, OrderingTerm, Value, Variable;
 
 import '../../core/ids.dart';
 import '../../core/time_codec.dart';
@@ -253,13 +253,16 @@ class AiJobRunner {
     }
   }
 
-  /// [photo] is the receipt among the job's photos (default: the first),
-  /// [screenshot] the bank's amounts/rate sent in the same message and
-  /// [release] every photo of the job (default: the job's own blobs).
+  /// [photo] is the receipt among the job's photos (default: the first) and
+  /// [release] every photo of the job (default: the job's own blobs). [shots]
+  /// are the bank screenshots sent in the same message ([solo]: the only
+  /// receipt of it); default: those the hub left in the job's payload. After
+  /// reading the receipt the one that fits its total is applied to the draft.
   Future<void> _startDraftJob(
     AiJob job, {
     AiBlob? photo,
-    ScreenshotReading? screenshot,
+    List<ScreenshotReading>? shots,
+    bool solo = false,
     List<AiBlob> release = const [],
   }) async {
     final existing = await _draftOf(job);
@@ -274,6 +277,7 @@ class AiJobRunner {
     final messageTime = await _messageTime(job, payload);
     final Map<String, dynamic> source;
     final blobs = <AiBlob>[];
+    ScreenshotReading? screenshot;
     if (job.kind == AiJobKind.bazaar) {
       final text = payload.text ?? await _messageBody(payload.messageId) ?? '';
       source = {'text': text};
@@ -289,6 +293,11 @@ class AiJobRunner {
         mime: first.mime,
       );
       source = {'receipt': receipt.toJson()};
+      screenshot = pickScreenshot(
+        shots ?? [for (final s in payload.screenshots) ScreenshotReading.fromJson(s)],
+        receipt.total,
+        solo: shots != null ? solo : payload.receiptCount == 1,
+      );
     }
     await _status(job, AiStage.matching);
     final b = await _builder.build(
@@ -296,12 +305,7 @@ class AiJobRunner {
       kind: job.kind,
       source: source,
       overrides: {
-        if (screenshot != null && screenshot.hasAnything)
-          'screenshot': {
-            'rate': screenshot.rate,
-            'use': screenshot.useAmount,
-            'count': screenshot.countAmount,
-          },
+        if (screenshot != null && screenshot.hasAnything) 'screenshot': screenshot.toJson(),
       },
       messageTime: messageTime,
     );
@@ -1200,35 +1204,91 @@ class AiJobRunner {
       throw const AiJobFailure('Фото не знайдено: надішліть їх ще раз.');
     }
     final receipts = <AiBlob>[];
+    final shotBlobs = <AiBlob>[];
     final shots = <ScreenshotReading>[];
     for (final b in blobs) {
       final reading = await _screenshotReading(b);
       if (reading == null) {
         receipts.add(b);
       } else {
+        shotBlobs.add(b);
         shots.add(reading);
       }
     }
-    if (receipts.length > 1) {
-      await _replyAndFinish(
+    if (receipts.length == 1) {
+      await _startDraftJob(
         job,
-        'У повідомленні ${receipts.length} чеків. Надішліть кожен чек '
-        'окремим повідомленням разом з його скріншотом.',
+        photo: receipts.first,
+        shots: shots,
+        solo: true,
+        release: blobs,
       );
-      await _releasePhotos(blobs);
       return;
     }
-    if (receipts.isEmpty) {
+    if (receipts.isEmpty && shots.length == 1) {
       await _status(job, AiStage.matching);
       await _applyScreenshot(job, payload, blobs, shots.first);
       return;
     }
-    await _startDraftJob(
+    // Several receipts, or several screenshots alone: one job each, so every
+    // receipt has its own draft, Confirm and Undo. A receipt job gets all the
+    // screenshots and takes the one whose amount fits its total.
+    final kids = <({String kind, JobPayload payload})>[
+      if (receipts.isNotEmpty)
+        for (final r in receipts)
+          (
+            kind: AiJobKind.receipt,
+            payload: JobPayload(
+              messageId: payload.messageId,
+              blobIds: [r.id],
+              screenshots: [for (final s in shots) s.toJson()],
+              receiptCount: receipts.length,
+            ),
+          )
+      else
+        for (final s in shotBlobs)
+          (
+            kind: AiJobKind.screenshot,
+            payload: JobPayload(messageId: payload.messageId, blobIds: [s.id]),
+          ),
+    ];
+    await _spawn(job, kids);
+    final what = receipts.isNotEmpty
+        ? '${receipts.length} чеків${shots.isEmpty ? '' : ' і ${shots.length} скріншотів'}'
+        : '${shots.length} скріншотів';
+    await _replyAndFinish(
       job,
-      photo: receipts.first,
-      screenshot: shots.firstOrNull,
-      release: blobs,
+      'Знайшов $what. Обробляю кожен чек окремо, по черзі.',
     );
+    // The screenshots are already read; the receipts keep their bytes until
+    // their own job is done.
+    if (receipts.isNotEmpty) await _releasePhotos(shotBlobs);
+  }
+
+  /// Creates the follow-up jobs of [parent] in the same thread. Their ids are
+  /// derived from the parent, so running this again adds nothing.
+  Future<void> _spawn(
+    AiJob parent,
+    List<({String kind, JobPayload payload})> kids,
+  ) async {
+    for (var i = 0; i < kids.length; i++) {
+      final now = _stamp();
+      await db
+          .into(db.aiJobsTable)
+          .insert(
+            AiJobsTableCompanion.insert(
+              id: deriveId(parent.id, 'job', i),
+              threadId: parent.threadId,
+              kind: Value(kids[i].kind),
+              state: const Value(AiJobState.queued),
+              stage: const Value(AiStage.queued),
+              payloadJson: Value(kids[i].payload.encode()),
+              createdAt: now,
+              updatedAt: now,
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+    }
   }
 
   // ===========================================================================

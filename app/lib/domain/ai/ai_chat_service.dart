@@ -48,8 +48,12 @@ class AiChatService {
   /// Largest photo (already resized JPEG) accepted by [sendPhoto].
   static const maxPhotoBytes = 6 * 1024 * 1024;
 
-  /// Most photos in one message (a receipt, its bank screenshot, a spare).
-  static const maxPhotosPerMessage = 6;
+  /// Most photos in one message (several receipts and their bank screenshots).
+  static const maxPhotosPerMessage = 20;
+
+  /// Largest sum of the photos of one message: a sync push is capped at 32 MB
+  /// and the photos travel inside it (a prepared photo is well under 1 MB).
+  static const maxMessagePhotoBytes = 20 * 1024 * 1024;
 
   // ---- threads --------------------------------------------------------------
 
@@ -314,6 +318,10 @@ class AiChatService {
     if (photos.isEmpty) throw const AiChatException('Add at least one photo.');
     if (photos.length > maxPhotosPerMessage) {
       throw const AiChatException('Too many photos in one message.');
+    }
+    if (photos.fold<int>(0, (n, p) => n + p.bytes.length) >
+        maxMessagePhotoBytes) {
+      throw const AiChatException('The photos are too large to send together.');
     }
     final hashes = <String>[];
     for (final p in photos) {

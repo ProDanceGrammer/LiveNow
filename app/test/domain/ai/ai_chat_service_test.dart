@@ -257,6 +257,17 @@ void main() {
       expect(await jobs(), isEmpty);
       expect(await messages(), isEmpty);
     });
+
+    test('up to the limit is accepted, and the total size is capped for the sync push', () async {
+      await chat.sendPhotos(thread, [for (var i = 0; i < AiChatService.maxPhotosPerMessage; i++) photo(i)]);
+      expect(await db.select(db.aiBlobsTable).get(), hasLength(AiChatService.maxPhotosPerMessage));
+      final big = (bytes: Uint8List(5 * 1024 * 1024), width: 1, height: 1);
+      await expectLater(
+        chat.sendPhotos(thread, [big, big, big, big, big]),
+        throwsA(isA<AiChatException>()),
+      );
+      expect(await jobs(), hasLength(1), reason: 'the refused message wrote nothing');
+    });
   });
 
   group('confirm / reject', () {

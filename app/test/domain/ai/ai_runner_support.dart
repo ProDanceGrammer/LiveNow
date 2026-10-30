@@ -24,6 +24,9 @@ class FakeExtractor implements ReceiptExtractor {
   FakeExtractor([this.receipt]);
 
   ExtractedReceipt? receipt;
+
+  /// Receipts handed out one per call, before falling back to [receipt].
+  final queue = <ExtractedReceipt>[];
   Object? error;
   int calls = 0;
 
@@ -31,7 +34,7 @@ class FakeExtractor implements ReceiptExtractor {
   Future<ExtractedReceipt> extract(Uint8List image, {String? mime}) async {
     calls++;
     if (error != null) throw error!;
-    return receipt!;
+    return queue.isNotEmpty ? queue.removeAt(0) : receipt!;
   }
 }
 

@@ -738,15 +738,65 @@ void main() {
       expect(await env.count('ai_batches'), 2);
     });
 
-    test('two receipts in one message are refused with a clear reply', () async {
+    test('two receipts and two screenshots: one job per receipt, each with ITS screenshot', () async {
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url)); // draft-first
+      // Photos 1 and 3 are receipts, 2 and 4 their screenshots (4 comes first
+      // for the second receipt's amount: 200,00 TL).
+      ocrServer.replyFor = (image) => switch (image.first) {
+        2 => ocrReply(['Сума 361,64 ₴', 'У валюті 391,50 TL', 'курс 0,9237']),
+        4 => ocrReply(['Сума 180,00 ₴', 'У валюті 200,00 TL', 'курс 0,9000']),
+        _ => ocrReply(['BIM', 'TOPLAM']),
+      };
+      await bazaarAction();
+      env.extractor.queue
+        ..add(receiptOf(e1Lines())) // 391,50
+        ..add(receiptOf([rl('SAKA SU', 200.0)])); // 200,00
+      final parent = await env.sendPhotos([1, 4, 3, 2]); // shuffled on purpose
+      await env.drain();
+
+      expect((await env.job(parent)).state, AiJobState.done);
+      expect((await env.message(parent, AiMessageKind.text))!.body, contains('2 чеків'));
+      final first = deriveId(parent, 'job', 0);
+      final second = deriveId(parent, 'job', 1);
+      for (final id in [first, second]) {
+        expect((await env.job(id)).kind, AiJobKind.receipt);
+        expect(
+          {(await env.job(id)).state},
+          anyOf({AiJobState.draftReady}, {AiJobState.needsInput}),
+          reason: 'its own draft, waiting for Confirm',
+        );
+      }
+      Map<String, dynamic> shotOf(DraftCardView d) =>
+          Map<String, dynamic>.from((d.json['overrides'] as Map)['screenshot'] as Map);
+      final a = await env.draft(first);
+      final b = await env.draft(second);
+      expect(a.json['fx_source'], 'screenshot');
+      expect(b.json['fx_source'], 'screenshot');
+      expect(shotOf(a)['count'], 391.5, reason: 'the 391,50 screenshot belongs to the 391,50 receipt');
+      expect(shotOf(b)['count'], 200.0);
+      expect(await env.count('budget_transactions'), 0, reason: 'nothing before Confirm');
+      expect(env.extractor.calls, 2);
+      expect(env.stored, hasLength(4), reason: 'all four originals end up on the hub');
+    });
+
+    test('splitting a message twice creates the child jobs only once', () async {
       await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
       ocrServer.replyFor = ocrFor;
-      final job = await env.sendPhotos([1, 3]);
+      env.extractor.receipt = receiptOf(e1Lines());
+      final parent = await env.sendPhotos([1, 3]);
       await env.drain();
-      expect((await env.job(job)).state, AiJobState.done);
-      expect((await env.message(job, AiMessageKind.text))!.body, contains('2 чеків'));
-      expect(await env.count('budget_transactions'), 0);
-      expect(env.extractor.calls, 0);
+      await env.db.customStatement("UPDATE ai_jobs SET state = 'queued' WHERE id = '$parent'");
+      await env.drain();
+      expect(await env.count('ai_jobs', "kind = 'receipt'"), 2);
+    });
+
+    test('several screenshots alone become one screenshot job each', () async {
+      await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = (_) => ocrReply(['Сума 100,00 ₴', 'У валюті 110,00 TL', 'курс 0,9091']);
+      final parent = await env.sendPhotos([2, 4]);
+      await env.drain();
+      expect((await env.job(parent)).state, AiJobState.done);
+      expect(await env.count('ai_jobs', "kind = 'screenshot' AND state = 'done'"), 2);
     });
 
     test('without an OCR service every photo is read as a receipt', () async {

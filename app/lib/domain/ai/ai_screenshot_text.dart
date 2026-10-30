@@ -12,6 +12,39 @@ class ScreenshotReading {
   final double? rate;
 
   bool get hasAnything => rate != null || (useAmount != null && countAmount != null);
+
+  Map<String, dynamic> toJson() => {
+    'rate': rate,
+    'use': useAmount,
+    'count': countAmount,
+  };
+
+  factory ScreenshotReading.fromJson(Map<String, dynamic> j) => ScreenshotReading(
+    rate: (j['rate'] as num?)?.toDouble(),
+    useAmount: (j['use'] as num?)?.toDouble(),
+    countAmount: (j['count'] as num?)?.toDouble(),
+  );
+}
+
+/// The screenshot that belongs to a receipt of [receiptTotal]: the one whose
+/// shop amount equals the total (within 0.5 %, at least 1). When the user sent
+/// exactly one receipt ([solo]) with exactly one screenshot they belong
+/// together even if the amounts do not match. Otherwise none (the rates then
+/// come from the market).
+ScreenshotReading? pickScreenshot(
+  List<ScreenshotReading> shots,
+  double? receiptTotal, {
+  required bool solo,
+}) {
+  if (receiptTotal != null) {
+    for (final s in shots) {
+      final c = s.countAmount;
+      if (c == null) continue;
+      final tol = c * 0.005 > 1.0 ? c * 0.005 : 1.0;
+      if ((c - receiptTotal).abs() <= tol) return s;
+    }
+  }
+  return solo && shots.length == 1 ? shots.first : null;
 }
 
 const _num = r'(\d[\d\s  .,]*\d|\d)';
