@@ -127,6 +127,9 @@ class MockOcrServer {
   };
   int status = 200;
 
+  /// When set, answers each /ocr call from its image bytes (instead of [reply]).
+  Object Function(List<int> image)? replyFor;
+
   static Future<MockOcrServer> start() async =>
       MockOcrServer._(await HttpServer.bind(InternetAddress.loopbackIPv4, 0));
 
@@ -138,13 +141,14 @@ class MockOcrServer {
     final body = await req.fold<BytesBuilder>(BytesBuilder(), (b, c) => b..add(c));
     final headers = <String, String>{};
     req.headers.forEach((k, v) => headers[k] = v.join(','));
-    requests.add(RecordedRequest(req.method, req.uri.path, headers, body.takeBytes()));
+    final image = body.takeBytes();
+    requests.add(RecordedRequest(req.method, req.uri.path, headers, image));
     final res = req.response;
     if (req.uri.path == '/health') {
       res.write('{"ok":true}');
     } else if (req.uri.path == '/ocr') {
       res.statusCode = status;
-      res.write(status == 200 ? jsonEncode(reply) : 'error');
+      res.write(status == 200 ? jsonEncode(replyFor?.call(image) ?? reply) : 'error');
     } else {
       res.statusCode = 404;
     }

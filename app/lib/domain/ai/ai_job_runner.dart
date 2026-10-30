@@ -181,7 +181,7 @@ class AiJobRunner {
               ]))
             .get();
     for (final j in jobs) {
-      if (j.kind != AiJobKind.receipt && j.kind != AiJobKind.bazaar) continue;
+      if (!AiJobKind.recordsBatch(j.kind)) continue;
       final d = await _draftOf(j);
       if (d == null) continue;
       if ((await _pendingMessages(j, d)).isNotEmpty ||
@@ -231,7 +231,9 @@ class AiJobRunner {
   // ===========================================================================
 
   Future<void> _start(AiJob job) async {
-    final stage = job.kind == AiJobKind.receipt || job.kind == AiJobKind.screenshot
+    final stage = job.kind == AiJobKind.receipt ||
+            job.kind == AiJobKind.screenshot ||
+            job.kind == AiJobKind.photos
         ? AiStage.reading
         : AiStage.matching;
     await _setJob(job.id, state: AiJobState.running, stage: stage);
@@ -240,6 +242,8 @@ class AiJobRunner {
       case AiJobKind.receipt:
       case AiJobKind.bazaar:
         await _startDraftJob(job);
+      case AiJobKind.photos:
+        await _startPhotos(job);
       case AiJobKind.screenshot:
         await _startScreenshot(job);
       case AiJobKind.text:
@@ -249,7 +253,15 @@ class AiJobRunner {
     }
   }
 
-  Future<void> _startDraftJob(AiJob job) async {
+  /// [photo] is the receipt among the job's photos (default: the first),
+  /// [screenshot] the bank's amounts/rate sent in the same message and
+  /// [release] every photo of the job (default: the job's own blobs).
+  Future<void> _startDraftJob(
+    AiJob job, {
+    AiBlob? photo,
+    ScreenshotReading? screenshot,
+    List<AiBlob> release = const [],
+  }) async {
     final existing = await _draftOf(job);
     if (existing != null) {
       // A previous attempt got this far: no second extraction.
@@ -266,9 +278,10 @@ class AiJobRunner {
       final text = payload.text ?? await _messageBody(payload.messageId) ?? '';
       source = {'text': text};
     } else {
-      blobs.addAll(await _blobsOf(job, payload));
-      final first = blobs.where((b) => (b.data ?? '').isNotEmpty).firstOrNull;
-      if (first == null) {
+      blobs.addAll(release.isNotEmpty ? release : await _blobsOf(job, payload));
+      final first =
+          photo ?? blobs.where((b) => (b.data ?? '').isNotEmpty).firstOrNull;
+      if (first == null || (first.data ?? '').isEmpty) {
         throw const AiJobFailure('Фото чека не знайдено: надішліть його ще раз.');
       }
       final receipt = await extractor.extract(
@@ -282,7 +295,14 @@ class AiJobRunner {
       job: job,
       kind: job.kind,
       source: source,
-      overrides: {},
+      overrides: {
+        if (screenshot != null && screenshot.hasAnything)
+          'screenshot': {
+            'rate': screenshot.rate,
+            'use': screenshot.useAmount,
+            'count': screenshot.countAmount,
+          },
+      },
       messageTime: messageTime,
     );
     await _saveDraft(job, b.card);
@@ -1150,6 +1170,68 @@ class AiJobRunner {
   }
 
   // ===========================================================================
+  // A2. One message, several photos
+  // ===========================================================================
+
+  /// What a photo says when it is a bank screenshot (the amount charged in ₴
+  /// and/or the bank's rate); null for a receipt. Without an OCR service the
+  /// photos cannot be told apart, so each one counts as a receipt.
+  Future<ScreenshotReading?> _screenshotReading(AiBlob b) async {
+    try {
+      final text = await _ocrText(base64Decode(b.data!), b.mime);
+      final reading = parseBankScreenshot(text);
+      return reading.hasAnything ? reading : null;
+    } on AiJobFailure {
+      return null;
+    }
+  }
+
+  /// The photos of one message: a receipt and its bank screenshot in any
+  /// order. The screenshot's amounts/rate go into the receipt's draft (the
+  /// rates of that transaction only); a screenshot alone is applied to the
+  /// receipt recorded earlier, as a separate screenshot job would.
+  Future<void> _startPhotos(AiJob job) async {
+    final payload = JobPayload.decode(job.payloadJson);
+    final blobs = [
+      for (final b in await _blobsOf(job, payload))
+        if ((b.data ?? '').isNotEmpty) b,
+    ];
+    if (blobs.isEmpty) {
+      throw const AiJobFailure('Фото не знайдено: надішліть їх ще раз.');
+    }
+    final receipts = <AiBlob>[];
+    final shots = <ScreenshotReading>[];
+    for (final b in blobs) {
+      final reading = await _screenshotReading(b);
+      if (reading == null) {
+        receipts.add(b);
+      } else {
+        shots.add(reading);
+      }
+    }
+    if (receipts.length > 1) {
+      await _replyAndFinish(
+        job,
+        'У повідомленні ${receipts.length} чеків. Надішліть кожен чек '
+        'окремим повідомленням разом з його скріншотом.',
+      );
+      await _releasePhotos(blobs);
+      return;
+    }
+    if (receipts.isEmpty) {
+      await _status(job, AiStage.matching);
+      await _applyScreenshot(job, payload, blobs, shots.first);
+      return;
+    }
+    await _startDraftJob(
+      job,
+      photo: receipts.first,
+      screenshot: shots.firstOrNull,
+      release: blobs,
+    );
+  }
+
+  // ===========================================================================
   // B. Bank screenshot
   // ===========================================================================
 
@@ -1173,7 +1255,16 @@ class AiJobRunner {
       await _releasePhotos(blobs);
       return;
     }
+    await _applyScreenshot(job, payload, blobs, reading);
+  }
 
+  /// A late screenshot: new rates for the newest recorded receipt it fits.
+  Future<void> _applyScreenshot(
+    AiJob job,
+    JobPayload payload,
+    List<AiBlob> blobs,
+    ScreenshotReading reading,
+  ) async {
     final target = await _batchForScreenshot(job, reading);
     if (target == null) {
       await _replyAndFinish(
@@ -1318,7 +1409,7 @@ class AiJobRunner {
         .customSelect(
           'SELECT b.id AS id FROM ai_batches b JOIN ai_jobs j ON j.id = b.job_id '
           "WHERE b.thread_id = ? AND b.undone_at IS NULL AND j.id <> ? "
-          "AND j.kind IN ('receipt', 'bazaar') ORDER BY b.created_at DESC, b.id DESC",
+          "AND j.kind IN ('receipt', 'bazaar', 'photos') ORDER BY b.created_at DESC, b.id DESC",
           variables: [Variable.withString(job.threadId), Variable.withString(job.id)],
         )
         .get();

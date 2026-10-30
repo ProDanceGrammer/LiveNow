@@ -214,35 +214,76 @@ void main() {
     expect(find.text('moved 100 from FOP to Mono'), findsOneWidget);
   });
 
-  uiTest('sending a photo creates message, blob and job', (tester) async {
+  List<Override> twoPhotos(List<AiPhotoSource> picked) => [
+    aiPhotoPickerProvider.overrideWithValue((s) async {
+      picked.add(s);
+      return [
+        Uint8List.fromList([1, 2, 3, 4]),
+        Uint8List.fromList([5, 6, 7, 8]),
+      ];
+    }),
+    aiPhotoPrepProvider.overrideWithValue(
+      (b) async => (bytes: b, width: 10, height: 20),
+    ),
+  ];
+
+  uiTest('photos wait in the composer and go out with the text as ONE message', (
+    tester,
+  ) async {
     final picked = <AiPhotoSource>[];
     await mount(
       tester,
       AiChatScreenForTest.of(() => thread),
-      overrides: [
-        aiPhotoPickerProvider.overrideWithValue((s) async {
-          picked.add(s);
-          return Uint8List.fromList([1, 2, 3, 4]);
-        }),
-        aiPhotoPrepProvider.overrideWithValue(
-          (b) async => (bytes: b, width: 10, height: 20),
-        ),
-      ],
+      overrides: twoPhotos(picked),
     );
-    await tester.tap(
-      find.byKey(const ValueKey('ai-chat-attach-photo-kind-screenshot')),
-    );
-    await tester.pump();
+    // There is no receipt / bank screenshot switch any more.
+    expect(find.text('Receipt'), findsNothing);
+    expect(find.text('Bank screenshot'), findsNothing);
+
     await tester.tap(find.byKey(const ValueKey('ai-chat-attach')));
     await settle(tester);
     expect(picked, [AiPhotoSource.file]);
-    expect(await count(tester, 'ai_blobs'), 1);
+    expect(find.byKey(const ValueKey('ai-chat-pending-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-chat-pending-1')), findsOneWidget);
+    expect(await count(tester, 'ai_jobs'), 0, reason: 'picking sends nothing');
+
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-chat-input')),
+      'BIM, card 6141',
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-chat-send')));
+    await settle(tester);
+    expect(await count(tester, 'ai_messages'), 1);
+    expect(await count(tester, 'ai_blobs'), 2);
     expect(await count(tester, 'ai_jobs'), 1);
     final kind = (await tester.runAsync(
       () async => (await db.select(db.aiJobsTable).getSingle()).kind,
     ))!;
-    expect(kind, AiJobKind.screenshot);
-    expect(find.byType(Image), findsOneWidget);
+    expect(kind, AiJobKind.photos);
+    expect(find.byKey(const ValueKey('ai-chat-pending-0')), findsNothing);
+    expect(find.text('BIM, card 6141'), findsOneWidget);
+    expect(find.byType(Image), findsNWidgets(2), reason: 'both photos in one bubble');
+  });
+
+  uiTest('a pending photo can be removed, and photos alone can be sent', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      overrides: twoPhotos([]),
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-chat-attach')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('ai-chat-pending-remove-0')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('ai-chat-pending-1')), findsNothing);
+    expect(find.byKey(const ValueKey('ai-chat-pending-0')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('ai-chat-send')));
+    await settle(tester);
+    expect(await count(tester, 'ai_blobs'), 1);
+    expect(await count(tester, 'ai_jobs'), 1);
   });
 
   uiTest('status line follows the status message', (tester) async {

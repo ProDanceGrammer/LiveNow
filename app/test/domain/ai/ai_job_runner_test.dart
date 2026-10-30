@@ -669,6 +669,97 @@ void main() {
     });
   });
 
+  group('A2. one message, several photos', () {
+    // Photo 1 is a receipt (no hryvnia amount, no rate), photo 2 the bank screenshot.
+    Object ocrFor(List<int> image) => image.first == 2
+        ? ocrReply(['Monobank', 'Сума 361,64 ₴', 'У валюті 391,50 TL', 'курс 0,9237'])
+        : ocrReply(['BIM', 'EKMEK KÖY 600G 64,00', 'TOPLAM 391,50 TL']);
+
+    test('a receipt and its screenshot in one message record with the bank rate', () async {
+      await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = ocrFor;
+      await bazaarAction();
+      env.extractor.receipt = receiptOf(e1Lines());
+      final job = await env.sendPhotos([1, 2]);
+      await env.drain();
+      expect((await env.job(job)).state, AiJobState.done, reason: (await env.job(job)).error);
+      final txs = await env.transactions();
+      expect(txs, hasLength(5));
+      for (final t in txs) {
+        expect(t.rateCount, 36);
+        expect(t.rateInteract, closeTo(36 * 0.9237, 1e-6));
+      }
+      final mono = await (env.db.select(env.db.budgetAccountsTable)
+            ..where((t) => t.id.equals(env.monoAcc)))
+          .getSingle();
+      expect(mono.rateToBase, 44, reason: 'a screenshot rate belongs to the transactions only');
+      expect(await env.count('ai_batches'), 1, reason: 'one batch, not a receipt batch plus a rate batch');
+      expect(env.extractor.calls, 1, reason: 'the screenshot is never read as a receipt');
+      expect(env.stored, hasLength(2), reason: 'both originals go to the hub');
+    });
+
+    test('the order of the photos does not matter, and the draft shows the bank rate', () async {
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url)); // draft-first
+      ocrServer.replyFor = ocrFor;
+      await bazaarAction();
+      env.extractor.receipt = receiptOf(e1Lines());
+      final job = await env.sendPhotos([2, 1]);
+      await env.drain();
+      expect((await env.job(job)).state, AiJobState.draftReady);
+      expect((await env.draft(job)).json['fx_source'], 'screenshot');
+      expect(await env.count('budget_transactions'), 0, reason: 'nothing is written before Confirm');
+    });
+
+    test('a receipt alone is still a receipt', () async {
+      await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = ocrFor;
+      await bazaarAction();
+      env.extractor.receipt = receiptOf(e1Lines());
+      final job = await env.sendPhotos([1]);
+      await env.drain();
+      expect((await env.job(job)).state, AiJobState.done);
+      final txs = await env.transactions();
+      expect(txs, hasLength(5));
+      expect(txs.first.rateInteract, isNot(closeTo(36 * 0.9237, 1e-3)), reason: 'market rate, no screenshot');
+    });
+
+    test('a screenshot alone is applied to the receipt recorded earlier', () async {
+      await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = ocrFor;
+      await bazaarAction();
+      await env.sendReceipt(receiptOf(e1Lines()));
+      await env.drain();
+      final job = await env.sendPhotos([2]);
+      await env.drain();
+      expect((await env.job(job)).state, AiJobState.done);
+      for (final t in await env.transactions()) {
+        expect(t.rateInteract, closeTo(36 * 0.9237, 1e-6));
+      }
+      expect(await env.count('ai_batches'), 2);
+    });
+
+    test('two receipts in one message are refused with a clear reply', () async {
+      await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = ocrFor;
+      final job = await env.sendPhotos([1, 3]);
+      await env.drain();
+      expect((await env.job(job)).state, AiJobState.done);
+      expect((await env.message(job, AiMessageKind.text))!.body, contains('2 чеків'));
+      expect(await env.count('budget_transactions'), 0);
+      expect(env.extractor.calls, 0);
+    });
+
+    test('without an OCR service every photo is read as a receipt', () async {
+      await env.init(autoMode: true);
+      await bazaarAction();
+      env.extractor.receipt = receiptOf(e1Lines());
+      final job = await env.sendPhotos([1]);
+      await env.drain();
+      expect((await env.job(job)).state, AiJobState.done);
+      expect(await env.count('budget_transactions'), 5);
+    });
+  });
+
   group('B. screenshot', () {
     test('a late bank screenshot recomputes the rates as a new undoable batch', () async {
       await env.init(

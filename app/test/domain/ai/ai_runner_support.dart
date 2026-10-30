@@ -161,6 +161,15 @@ class RunnerEnv {
     return sent.jobId!;
   }
 
+  /// One message with several photos, as the phone sends it. Each photo is 40
+  /// bytes of its marker, so a test OCR server can tell them apart.
+  Future<String> sendPhotos(List<int> markers, {String caption = ''}) async {
+    final sent = await chat.sendPhotos(thread, [
+      for (final m in markers) (bytes: Uint8List.fromList(List.filled(40, m)), width: null, height: null),
+    ], caption: caption);
+    return sent.jobId!;
+  }
+
   Future<int> drain([int max = 30]) async {
     var n = 0;
     while (n < max && await runner.runNext()) {

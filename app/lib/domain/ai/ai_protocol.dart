@@ -72,11 +72,19 @@ abstract final class AiJobKind {
   /// A photo of a bank screenshot (amount + rate).
   static const screenshot = 'screenshot';
 
+  /// One message with several photos of unknown type: the hub tells receipt
+  /// from bank screenshot by the text on each (the app has no switch).
+  static const photos = 'photos';
+
   /// A bazaar checklist pasted as text.
   static const bazaar = 'bazaar';
 
   /// A free-text request ('moved 12,582.50 from FOP to Monobank').
   static const text = 'text';
+
+  /// Jobs that make a draft / record a batch of transactions.
+  static bool recordsBatch(String kind) =>
+      kind == receipt || kind == bazaar || kind == photos;
 }
 
 /// Stage strings the worker writes to `ai_jobs.stage` and the status message.

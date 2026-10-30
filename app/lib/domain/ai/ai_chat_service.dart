@@ -48,6 +48,9 @@ class AiChatService {
   /// Largest photo (already resized JPEG) accepted by [sendPhoto].
   static const maxPhotoBytes = 6 * 1024 * 1024;
 
+  /// Most photos in one message (a receipt, its bank screenshot, a spare).
+  static const maxPhotosPerMessage = 6;
+
   // ---- threads --------------------------------------------------------------
 
   Future<String> createThread({String title = ''}) async {
@@ -292,6 +295,80 @@ class AiChatService {
         threadId,
         kind,
         JobPayload(messageId: messageId, blobIds: [blobId]),
+        now,
+      );
+      await _touchThread(threadId, now);
+      return SentText(messageId: messageId, jobId: jobId);
+    });
+  }
+
+  /// Sends ONE message with several photos (a receipt and its bank screenshot,
+  /// in any order) and an optional [caption], and ONE `photos` job: the hub
+  /// tells each photo's type by its text. Every photo is a resized JPEG from
+  /// `prepareReceiptPhoto`.
+  Future<SentText> sendPhotos(
+    String threadId,
+    List<({Uint8List bytes, int? width, int? height})> photos, {
+    String caption = '',
+  }) async {
+    if (photos.isEmpty) throw const AiChatException('Add at least one photo.');
+    if (photos.length > maxPhotosPerMessage) {
+      throw const AiChatException('Too many photos in one message.');
+    }
+    final hashes = <String>[];
+    for (final p in photos) {
+      if (p.bytes.isEmpty) throw const AiChatException('The photo is empty.');
+      if (p.bytes.length > maxPhotoBytes) {
+        throw const AiChatException('The photo is too large to send.');
+      }
+      final hash = await Sha256().hash(p.bytes);
+      hashes.add(hash.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join());
+    }
+    return db.transaction(() async {
+      final now = dateTimeToDb(DateTime.now())!;
+      final messageId = newId();
+      final jobId = newId();
+      final blobIds = [for (var i = 0; i < photos.length; i++) newId()];
+      await _insertUserMessage(
+        messageId,
+        threadId,
+        AiMessageKind.photo,
+        _cleanText(caption),
+        jobId,
+        now,
+        contentJson: jsonEncode({
+          'v': 2,
+          'blob_ids': blobIds,
+          'kind': AiJobKind.photos,
+        }),
+      );
+      for (var i = 0; i < photos.length; i++) {
+        await db
+            .into(db.aiBlobsTable)
+            .insert(
+              AiBlobsTableCompanion.insert(
+                id: blobIds[i],
+                messageId: Value(messageId),
+                jobId: Value(jobId),
+                kind: const Value(AiJobKind.photos),
+                data: Value(base64.encode(photos[i].bytes)),
+                sha256: Value(hashes[i]),
+                width: Value(photos[i].width),
+                height: Value(photos[i].height),
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+      }
+      await _insertJob(
+        jobId,
+        threadId,
+        AiJobKind.photos,
+        JobPayload(
+          messageId: messageId,
+          blobIds: blobIds,
+          text: _cleanText(caption).isEmpty ? null : _cleanText(caption),
+        ),
         now,
       );
       await _touchThread(threadId, now);

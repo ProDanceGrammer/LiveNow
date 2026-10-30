@@ -80,8 +80,8 @@ class AiDecisionBubble extends StatelessWidget {
   }
 }
 
-/// A user photo: the thumbnail while the bytes are still on this device, else a
-/// placeholder (the original lives on the hub).
+/// The photos of one user message: each is a thumbnail while its bytes are
+/// still on this device, else a placeholder (the original lives on the hub).
 class AiPhotoBubble extends ConsumerWidget {
   const AiPhotoBubble({super.key, required this.message});
 
@@ -89,27 +89,23 @@ class AiPhotoBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final blob = ref.watch(aiBlobOfMessageProvider(message.id)).asData?.value;
-    Widget pic;
-    final data = blob?.data;
-    if (data != null && data.isNotEmpty) {
-      pic = ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.memory(
-          base64Decode(data),
-          key: ValueKey('ai-photo-${message.id}'),
-          width: 220,
-          cacheWidth: 440,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          errorBuilder: (_, _, _) => const _PhotoPlaceholder(),
+    final blobs =
+        ref.watch(aiBlobsOfMessageProvider(message.id)).asData?.value ??
+        const <AiBlob>[];
+    // One photo is shown large, several side by side.
+    final width = blobs.length > 1 ? 130.0 : 220.0;
+    final pics = <Widget>[];
+    for (var i = 0; i < blobs.length; i++) {
+      // The first photo keeps the plain key (one-photo messages).
+      final suffix = i == 0 ? '' : '-$i';
+      pics.add(_photo(context, ref, blobs[i], width, suffix));
+    }
+    if (blobs.isEmpty) {
+      pics.add(
+        InkWell(
+          key: ValueKey('ai-photo-original-${message.id}'),
+          child: const _PhotoPlaceholder(hub: true),
         ),
-      );
-    } else {
-      pic = InkWell(
-        key: ValueKey('ai-photo-original-${message.id}'),
-        onTap: blob == null ? null : () => _openOriginal(context, ref, blob.id),
-        child: const _PhotoPlaceholder(hub: true),
       );
     }
     return AiBubbleFrame(
@@ -117,8 +113,45 @@ class AiPhotoBubble extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
-        children: [pic, if (message.body.isNotEmpty) Text(message.body)],
+        children: [
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 6,
+            runSpacing: 6,
+            children: pics,
+          ),
+          if (message.body.isNotEmpty) Text(message.body),
+        ],
       ),
+    );
+  }
+
+  Widget _photo(
+    BuildContext context,
+    WidgetRef ref,
+    AiBlob blob,
+    double width,
+    String suffix,
+  ) {
+    final data = blob.data;
+    if (data != null && data.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.memory(
+          base64Decode(data),
+          key: ValueKey('ai-photo-${message.id}$suffix'),
+          width: width,
+          cacheWidth: (width * 2).round(),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => _PhotoPlaceholder(width: width),
+        ),
+      );
+    }
+    return InkWell(
+      key: ValueKey('ai-photo-original-${message.id}$suffix'),
+      onTap: () => _openOriginal(context, ref, blob.id),
+      child: _PhotoPlaceholder(hub: true, width: width),
     );
   }
 }
@@ -148,13 +181,14 @@ Future<void> _openOriginal(
 }
 
 class _PhotoPlaceholder extends StatelessWidget {
-  const _PhotoPlaceholder({this.hub = false});
+  const _PhotoPlaceholder({this.hub = false, this.width = 220});
 
   final bool hub;
+  final double width;
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 220,
+    width: width,
     height: 90,
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,

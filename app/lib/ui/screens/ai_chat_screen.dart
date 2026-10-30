@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
+import '../../domain/ai/ai_chat_service.dart';
 import '../../domain/ai/ai_protocol.dart';
+import '../../domain/ai/photo_prep.dart';
 import '../ai_history_loader.dart';
 import '../ai_providers.dart';
 import '../ai_ui_providers.dart';
@@ -29,8 +31,11 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final _focus = FocusNode();
-  String _photoKind = AiJobKind.receipt;
   bool _sending = false;
+
+  /// Photos picked but not sent yet: they go out with the next Send, together
+  /// with the typed text, as ONE message.
+  final List<PreparedPhoto> _pending = [];
 
   /// Messages loaded by "load older" (oldest first), kept outside the stream.
   List<AiMessage> _older = const [];
@@ -56,15 +61,23 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     super.dispose();
   }
 
+  /// Sends the pending photos and the typed text as one message (a text with
+  /// no photo is an ordinary text message).
   Future<void> _send() async {
     final text = _input.text;
-    if (text.trim().isEmpty || _sending) return;
+    if ((text.trim().isEmpty && _pending.isEmpty) || _sending) return;
     final overlay = rootOverlayOf(context);
     final service = ref.read(aiChatServiceProvider);
+    final photos = List<PreparedPhoto>.of(_pending);
     setState(() => _sending = true);
     try {
-      await service.sendText(widget.threadId, text);
+      if (photos.isEmpty) {
+        await service.sendText(widget.threadId, text);
+      } else {
+        await service.sendPhotos(widget.threadId, photos, caption: text);
+      }
       _input.clear();
+      _pending.clear();
     } catch (e) {
       showInfoToast(overlay, '$e');
     } finally {
@@ -72,25 +85,26 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     }
   }
 
+  /// Picks one or more photos and keeps them in the composer until Send.
   Future<void> _attach(AiPhotoSource source) async {
     if (_sending) return;
     final overlay = rootOverlayOf(context);
     final pick = ref.read(aiPhotoPickerProvider);
     final prep = ref.read(aiPhotoPrepProvider);
-    final service = ref.read(aiChatServiceProvider);
-    final kind = _photoKind;
     setState(() => _sending = true);
     try {
-      final bytes = await pick(source);
-      if (bytes == null) return;
-      final photo = await prep(bytes);
-      await service.sendPhoto(
-        widget.threadId,
-        photo.bytes,
-        kind: kind,
-        width: photo.width,
-        height: photo.height,
-      );
+      final picked = await pick(source);
+      final room = AiChatService.maxPhotosPerMessage - _pending.length;
+      final added = <PreparedPhoto>[
+        for (final bytes in picked.take(room)) await prep(bytes),
+      ];
+      if (picked.length > room && mounted) {
+        showInfoToast(
+          overlay,
+          'Only ${AiChatService.maxPhotosPerMessage} photos fit in one message',
+        );
+      }
+      if (mounted) setState(() => _pending.addAll(added));
     } on FormatException catch (e) {
       showInfoToast(overlay, e.message);
     } catch (e) {
@@ -308,27 +322,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    ChoiceChip(
-                      key: const ValueKey('ai-chat-attach-photo-kind-receipt'),
-                      label: const Text('Receipt'),
-                      selected: _photoKind == AiJobKind.receipt,
-                      onSelected: (_) =>
-                          setState(() => _photoKind = AiJobKind.receipt),
-                    ),
-                    ChoiceChip(
-                      key: const ValueKey(
-                        'ai-chat-attach-photo-kind-screenshot',
-                      ),
-                      label: const Text('Bank screenshot'),
-                      selected: _photoKind == AiJobKind.screenshot,
-                      onSelected: (_) =>
-                          setState(() => _photoKind = AiJobKind.screenshot),
-                    ),
-                  ],
-                ),
+                if (_pending.isNotEmpty) _pendingStrip(),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -372,6 +366,53 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// The photos waiting for Send, each with a small remove button.
+  Widget _pendingStrip() {
+    return SizedBox(
+      height: 68,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: _pending.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (_, i) => Stack(
+          clipBehavior: Clip.none,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.memory(
+                _pending[i].bytes,
+                key: ValueKey('ai-chat-pending-$i'),
+                width: 60,
+                height: 60,
+                cacheWidth: 120,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, _, _) => const SizedBox(
+                  width: 60,
+                  height: 60,
+                  child: Icon(Icons.broken_image_outlined),
+                ),
+              ),
+            ),
+            Positioned(
+              top: -6,
+              right: -6,
+              child: InkWell(
+                key: ValueKey('ai-chat-pending-remove-$i'),
+                onTap: _sending ? null : () => setState(() => _pending.removeAt(i)),
+                child: const CircleAvatar(
+                  radius: 10,
+                  child: Icon(Icons.close, size: 12),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

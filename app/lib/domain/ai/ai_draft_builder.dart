@@ -158,11 +158,26 @@ class _Ctx {
     return cats.any((k) => k.parentId == c.id && CategoryResolver.nameKey(k.name) == key);
   }
 
+  /// The bank screenshot sent in the same message (`overrides['screenshot']`):
+  /// the shop and charged amounts give the rate, else the rate it states.
+  double? get screenshotRate {
+    final s = overrides['screenshot'];
+    if (s is! Map) return null;
+    final use = (s['use'] as num?)?.toDouble();
+    final count = (s['count'] as num?)?.toDouble();
+    if (use != null && count != null && count > 0 && use > 0) {
+      return screenshotRateFromAmounts(useAmount: use, countAmount: count);
+    }
+    final rate = (s['rate'] as num?)?.toDouble();
+    return rate != null && rate > 0 ? rate : null;
+  }
+
   ReceiptFx fx(BudgetAccount count, BudgetAccount use) => _fx.putIfAbsent(
     '${count.id}|${use.id}',
     () => computeReceiptRates(
       countCurrency: count.currency,
       useCurrency: use.currency,
+      screenshotRate: screenshotRate,
       marketEurRates: market,
       baseCurrency: base,
     ),

@@ -45,15 +45,18 @@ final aiQueuedJobCountProvider = StreamProvider.autoDispose<int>((ref) {
   );
 });
 
-/// The photo blob of a message (thumbnail data), if it is still on this device.
-final aiBlobOfMessageProvider = StreamProvider.autoDispose
-    .family<AiBlob?, String>((ref, messageId) {
+/// The photos of a message in the order they were sent (thumbnail data, still
+/// on this device unless the hub has stored them).
+final aiBlobsOfMessageProvider = StreamProvider.autoDispose
+    .family<List<AiBlob>, String>((ref, messageId) {
       final db = ref.watch(databaseProvider);
       return (db.select(db.aiBlobsTable)
             ..where((t) => t.messageId.equals(messageId))
-            ..orderBy([(t) => OrderingTerm.asc(t.createdAt)])
-            ..limit(1))
-          .watchSingleOrNull();
+            ..orderBy([
+              (t) => OrderingTerm.asc(t.createdAt),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+          .watch();
     });
 
 /// A batch row (to know whether it was undone).
@@ -69,14 +72,16 @@ final aiBatchRowProvider = StreamProvider.autoDispose.family<AiBatch?, String>((
 
 enum AiPhotoSource { camera, gallery, file }
 
-/// Asks for a picture and returns its original bytes (null = cancelled). A
-/// provider so tests replace the native dialogs. Phones: camera or gallery;
-/// desktop: a file dialog.
+/// Asks for pictures and returns their original bytes (empty = cancelled). A
+/// provider so tests replace the native dialogs. Phones: the camera (one
+/// photo per tap) or the gallery (several at once); desktop: a file dialog
+/// that takes several files.
 final aiPhotoPickerProvider =
-    Provider<Future<Uint8List?> Function(AiPhotoSource)>(
+    Provider<Future<List<Uint8List>> Function(AiPhotoSource)>(
       (ref) => (source) async {
+        final List<XFile> files;
         if (source == AiPhotoSource.file) {
-          final file = await openFile(
+          files = await openFiles(
             acceptedTypeGroups: const [
               XTypeGroup(
                 label: 'Image',
@@ -86,18 +91,16 @@ final aiPhotoPickerProvider =
               ),
             ],
           );
-          return file == null
-              ? null
-              : readBytesCapped(file, maxBytes: kMaxPhotoInputBytes);
+        } else if (source == AiPhotoSource.gallery) {
+          files = await ImagePicker().pickMultiImage();
+        } else {
+          final shot = await ImagePicker().pickImage(source: ImageSource.camera);
+          files = [?shot];
         }
-        final picked = await ImagePicker().pickImage(
-          source: source == AiPhotoSource.camera
-              ? ImageSource.camera
-              : ImageSource.gallery,
-        );
-        return picked == null
-            ? null
-            : readBytesCapped(picked, maxBytes: kMaxPhotoInputBytes);
+        return [
+          for (final f in files)
+            await readBytesCapped(f, maxBytes: kMaxPhotoInputBytes),
+        ];
       },
     );
 

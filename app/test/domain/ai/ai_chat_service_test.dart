@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Variable, Value;
+import 'package:drift/drift.dart' show OrderingTerm, Value, Variable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
 import 'package:livenow/core/time_codec.dart';
@@ -214,6 +214,49 @@ void main() {
         expect(await jobs(), hasLength(1));
       },
     );
+  });
+
+  group('sendPhotos', () {
+    ({Uint8List bytes, int? width, int? height}) photo(int marker) =>
+        (bytes: Uint8List.fromList(List.filled(30, marker)), width: 30, height: 10);
+
+    test('one message, one job and one blob per photo, in order', () async {
+      final r = await chat.sendPhotos(thread, [photo(1), photo(2)], caption: 'BIM, card 6141');
+      final m = (await messages()).single;
+      final blobs = await (db.select(db.aiBlobsTable)
+            ..orderBy([(t) => OrderingTerm(expression: t.id)]))
+          .get();
+      final j = (await jobs()).single;
+      expect(m.kind, AiMessageKind.photo);
+      expect(m.body, 'BIM, card 6141');
+      expect(blobs, hasLength(2));
+      expect(blobs.every((b) => b.messageId == m.id && b.data != null), isTrue);
+      expect(j.kind, AiJobKind.photos);
+      expect(j.state, AiJobState.queued);
+      final payload = JobPayload.decode(j.payloadJson);
+      expect(payload.blobIds.toSet(), blobs.map((b) => b.id).toSet());
+      expect(
+        [for (final id in payload.blobIds) base64Decode(blobs.firstWhere((b) => b.id == id).data!)[0]],
+        [1, 2],
+        reason: 'the photos keep the order they were added in',
+      );
+      expect(payload.text, 'BIM, card 6141');
+      expect(r.jobId, j.id);
+    });
+
+    test('nothing, an empty photo, or too many photos are refused and write nothing', () async {
+      await expectLater(chat.sendPhotos(thread, const []), throwsA(isA<AiChatException>()));
+      await expectLater(
+        chat.sendPhotos(thread, [(bytes: Uint8List(0), width: null, height: null)]),
+        throwsA(isA<AiChatException>()),
+      );
+      await expectLater(
+        chat.sendPhotos(thread, [for (var i = 0; i <= AiChatService.maxPhotosPerMessage; i++) photo(i)]),
+        throwsA(isA<AiChatException>()),
+      );
+      expect(await jobs(), isEmpty);
+      expect(await messages(), isEmpty);
+    });
   });
 
   group('confirm / reject', () {
