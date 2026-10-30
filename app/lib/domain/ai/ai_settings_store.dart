@@ -11,9 +11,10 @@ class AiSettingsStore {
 
   static const defaults = <String, String>{
     AiSettingKey.llmUrl: 'http://127.0.0.1:11434',
-    AiSettingKey.llmModel: '',
+    AiSettingKey.llmModel: 'qwen2.5:3b-instruct',
     AiSettingKey.llmToken: '',
-    AiSettingKey.ocrUrl: 'http://127.0.0.1:8765',
+    // The port of app/windows/hub/ai/ocr_service.py (kOcrServicePort).
+    AiSettingKey.ocrUrl: 'http://127.0.0.1:47655',
     AiSettingKey.visionModel: '',
     AiSettingKey.draftFirstCount: '5',
     AiSettingKey.confirmedCount: '0',

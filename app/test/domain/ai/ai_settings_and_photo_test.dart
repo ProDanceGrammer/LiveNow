@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:livenow/data/ai/ocr_client.dart' show kOcrServicePort;
 import 'package:image/image.dart' as img;
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
@@ -23,7 +24,8 @@ void main() {
     test('defaults are served when nothing is stored', () async {
       final s = await store.load();
       expect(s.llmUrl, 'http://127.0.0.1:11434');
-      expect(s.ocrUrl, 'http://127.0.0.1:8765');
+      expect(s.ocrUrl, 'http://127.0.0.1:$kOcrServicePort', reason: 'the port ocr_service.py listens on');
+      expect(s.llmModel, 'qwen2.5:3b-instruct', reason: 'never an empty model name');
       expect(s.draftFirstCount, 5);
       expect(s.photoRetentionDays, 90);
       expect(s.confirmedCount, 0);
@@ -35,7 +37,7 @@ void main() {
         await store.set(AiSettingKey.llmUrl, 'http://hub:1');
         await store.set(AiSettingKey.ocrUrl, ' ');
         expect(await store.get(AiSettingKey.llmUrl), 'http://hub:1');
-        expect(await store.get(AiSettingKey.ocrUrl), 'http://127.0.0.1:8765');
+        expect(await store.get(AiSettingKey.ocrUrl), 'http://127.0.0.1:$kOcrServicePort');
       },
     );
 

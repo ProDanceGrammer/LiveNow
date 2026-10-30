@@ -7,6 +7,7 @@ import 'package:livenow/data/sync/hub_admin_client.dart';
 import 'package:livenow/data/sync/sync_peers.dart';
 import 'package:livenow/data/sync/sync_server.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
+import 'package:livenow/domain/ai/ai_settings_store.dart';
 import 'package:livenow/domain/sync/sync_crypto.dart';
 import 'package:livenow/domain/sync/sync_protocol.dart';
 import 'package:livenow/hub/ai_admin_routes.dart';
@@ -154,7 +155,11 @@ void main() {
         reason: '$bad',
       );
     }
-    expect(await routes.settings.get(AiSettingKey.llmModel), '');
+    expect(
+      await routes.settings.get(AiSettingKey.llmModel),
+      AiSettingsStore.defaults[AiSettingKey.llmModel],
+      reason: 'the rejected "changed" was not saved: the default is still served',
+    );
   });
 
   test('over the wire an invalid URL fails as an error, not a crash', () async {
