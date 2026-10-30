@@ -39,6 +39,14 @@ const Map<String, String> syncTables = {
   'plan_collections': 'id',
   'forms': 'id',
   'calendar_zones': 'id',
+  'ai_threads': 'id',
+  'ai_messages': 'id',
+  'ai_jobs': 'id',
+  'ai_batches': 'id',
+  'ai_batch_items': 'id',
+  'ai_blobs': 'id',
+  'product_aliases': 'id',
+  'ai_rules_memory': 'id',
 };
 
 /// Derived caches: recomputed on every device, so they are neither tracked

@@ -692,6 +692,48 @@ void main() {
     expect(n.read<int>('n'), 1);
   });
 
+  test('an old database gets the v19 AI tables; all but ai_settings sync', () async {
+    final db = _oldDatabase(version: 1);
+    addTearDown(db.close);
+    await db.into(db.aiThreadsTable).insert(
+      AiThreadsTableCompanion.insert(id: 't1', createdAt: 't', updatedAt: 't'),
+    );
+    await db.into(db.aiMessagesTable).insert(
+      AiMessagesTableCompanion.insert(
+        id: 'm1',
+        threadId: 't1',
+        createdAt: 't',
+        updatedAt: 't',
+      ),
+    );
+    await db.into(db.aiJobsTable).insert(
+      AiJobsTableCompanion.insert(
+        id: 'j1',
+        threadId: 't1',
+        createdAt: 't',
+        updatedAt: 't',
+      ),
+    );
+    await db.into(db.aiSettingsTable).insert(
+      AiSettingsTableCompanion.insert(key: 'model', value: 'qwen'),
+    );
+    final j = (await db.select(db.aiJobsTable).get()).single;
+    expect((j.kind, j.state, j.stage, j.attempts), ('receipt', 'queued', '', 0));
+    final m = (await db.select(db.aiMessagesTable).get()).single;
+    expect((m.role, m.kind, m.contentJson), ('user', 'text', '{}'));
+    Future<int> versions(String tbl) async => (await db
+        .customSelect(
+          "SELECT COUNT(*) AS n FROM sync_versions WHERE tbl = '$tbl'",
+        )
+        .getSingle())
+        .read<int>('n');
+    expect(await versions('ai_threads'), 1);
+    expect(await versions('ai_messages'), 1);
+    expect(await versions('ai_jobs'), 1);
+    // The hub's own settings (token) are device-local: never tracked.
+    expect(await versions('ai_settings'), 0);
+  });
+
   test('an old database gets the v18 calendar zones table and its sync triggers', () async {
     final db = _oldDatabase(version: 1);
     addTearDown(db.close);

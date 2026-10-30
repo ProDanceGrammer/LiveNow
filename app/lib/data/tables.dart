@@ -584,3 +584,203 @@ class BudgetSettingsTable extends Table {
   @override
   Set<Column> get primaryKey => {key};
 }
+
+// ---- AI assistant (schema v19) -------------------------------------------
+//
+// The chat and its work queue. All of these are synced EXCEPT `ai_settings`:
+// the phone writes a message + a job (+ a photo) locally, sync carries them to
+// the hub, the hub's worker does the job and writes the replies / results back
+// as ordinary rows. No foreign keys: a merge must never be blocked or cascaded
+// by one, and every reference is checked in code.
+
+/// One conversation.
+@DataClassName('AiThread')
+class AiThreadsTable extends Table {
+  @override
+  String get tableName => 'ai_threads';
+
+  TextColumn get id => text()();
+  TextColumn get title => text().withDefault(const Constant(''))();
+  BoolColumn get archived => boolean().withDefault(const Constant(false))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// A chat message. `role`: user | assistant | system. `kind`: text | photo |
+/// status | draft | question | result | confirm | error. `content_json` holds the
+/// card (draft lines, question options, the answer to a question).
+@DataClassName('AiMessage')
+@TableIndex(name: 'idx_ai_messages_thread', columns: {#threadId, #createdAt})
+class AiMessagesTable extends Table {
+  @override
+  String get tableName => 'ai_messages';
+
+  TextColumn get id => text()();
+  TextColumn get threadId => text()();
+  TextColumn get role => text().withDefault(const Constant('user'))();
+  TextColumn get kind => text().withDefault(const Constant('text'))();
+  TextColumn get body => text().withDefault(const Constant(''))();
+  TextColumn get contentJson => text().withDefault(const Constant('{}'))();
+  TextColumn get jobId => text().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// A unit of work for the hub. `state`: queued | running | needs_input |
+/// draft_ready | committing | done | failed. `stage` is the live status line
+/// ('reading receipt', 'matching categories', ...). Ids of everything a job
+/// creates are derived from this id (`deriveId`), so a re-run is idempotent.
+@DataClassName('AiJob')
+@TableIndex(name: 'idx_ai_jobs_state', columns: {#state})
+class AiJobsTable extends Table {
+  @override
+  String get tableName => 'ai_jobs';
+
+  TextColumn get id => text()();
+  TextColumn get threadId => text()();
+  TextColumn get kind => text().withDefault(const Constant('receipt'))();
+  TextColumn get state => text().withDefault(const Constant('queued'))();
+  TextColumn get stage => text().withDefault(const Constant(''))();
+  TextColumn get payloadJson => text().withDefault(const Constant('{}'))();
+  TextColumn get error => text().nullable()();
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Everything one job wrote to the budget, so it can be undone as one.
+@DataClassName('AiBatch')
+@TableIndex(name: 'idx_ai_batches_job', columns: {#jobId})
+class AiBatchesTable extends Table {
+  @override
+  String get tableName => 'ai_batches';
+
+  TextColumn get id => text()();
+  TextColumn get jobId => text()();
+  TextColumn get threadId => text()();
+  TextColumn get messageId => text().nullable()();
+  TextColumn get summary => text().withDefault(const Constant(''))();
+  TextColumn get undoneAt => text().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// One row a batch inserted / updated / reparented. `entity_type`:
+/// transaction | category | action. `op`: insert | update | reparent.
+@DataClassName('AiBatchItem')
+@TableIndex(name: 'idx_ai_batch_items_batch', columns: {#batchId})
+@TableIndex(name: 'idx_ai_batch_items_entity', columns: {#entityType, #entityId})
+class AiBatchItemsTable extends Table {
+  @override
+  String get tableName => 'ai_batch_items';
+
+  TextColumn get id => text()();
+  TextColumn get batchId => text()();
+  TextColumn get entityType => text()();
+  TextColumn get entityId => text()();
+  TextColumn get op => text().withDefault(const Constant('insert'))();
+  TextColumn get beforeJson => text().nullable()();
+  TextColumn get afterJson => text().nullable()();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// An image that travels with a message. `data` is the (resized JPEG) bytes as
+/// BASE64 TEXT (the sync rows are JSON; account icons do the same). It is
+/// transient: once the hub has stored the original in its own folder it sets
+/// `stored_on_hub_at` and every device clears `data`; the original is fetched
+/// from the hub on demand.
+@DataClassName('AiBlob')
+@TableIndex(name: 'idx_ai_blobs_message', columns: {#messageId})
+class AiBlobsTable extends Table {
+  @override
+  String get tableName => 'ai_blobs';
+
+  TextColumn get id => text()();
+  TextColumn get messageId => text().nullable()();
+  TextColumn get jobId => text().nullable()();
+  TextColumn get kind => text().withDefault(const Constant('receipt'))();
+  TextColumn get mime => text().withDefault(const Constant('image/jpeg'))();
+  TextColumn get data => text().nullable()();
+  TextColumn get sha256 => text().withDefault(const Constant(''))();
+  IntColumn get width => integer().nullable()();
+  IntColumn get height => integer().nullable()();
+  TextColumn get storedOnHubAt => text().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// A learned receipt-text -> category mapping (and the unit / weight default for
+/// it): what the user taught the assistant, applied before the model is asked.
+@DataClassName('ProductAlias')
+@TableIndex(name: 'idx_product_aliases_pattern', columns: {#pattern})
+class ProductAliasesTable extends Table {
+  @override
+  String get tableName => 'product_aliases';
+
+  TextColumn get id => text()();
+  TextColumn get pattern => text()();
+  TextColumn get categoryId => text().nullable()();
+  TextColumn get unitOverride => text().nullable()();
+  RealColumn get weightGramsDefault => real().nullable()();
+  RealColumn get pieceDefault => real().nullable()();
+  TextColumn get source => text().withDefault(const Constant('ai'))();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Other things the user taught the assistant (a card's last 4 digits -> an
+/// account, 'candies always go to Snacks', ...). `key` names the rule.
+@DataClassName('AiRule')
+@TableIndex(name: 'idx_ai_rules_key', columns: {#key})
+class AiRulesMemoryTable extends Table {
+  @override
+  String get tableName => 'ai_rules_memory';
+
+  TextColumn get id => text()();
+  TextColumn get key => text()();
+  TextColumn get valueJson => text().withDefault(const Constant('{}'))();
+  TextColumn get sourceMessageId => text().nullable()();
+  TextColumn get createdAt => text()();
+  TextColumn get updatedAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// The hub's own AI settings (model server address, model names, token, how
+/// many receipts need a draft first, photo retention). DEVICE-LOCAL: not synced
+/// and not in backups, so a token never leaves the machine it was typed on.
+@DataClassName('AiSetting')
+class AiSettingsTable extends Table {
+  @override
+  String get tableName => 'ai_settings';
+
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}

@@ -32,6 +32,15 @@ part 'database.g.dart';
     PlanCollectionsTable,
     FormsTable,
     CalendarZonesTable,
+    AiThreadsTable,
+    AiMessagesTable,
+    AiJobsTable,
+    AiBatchesTable,
+    AiBatchItemsTable,
+    AiBlobsTable,
+    ProductAliasesTable,
+    AiRulesMemoryTable,
+    AiSettingsTable,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -48,7 +57,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 18;
+  int get schemaVersion => 19;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -181,6 +190,19 @@ class AppDatabase extends _$AppDatabase {
       if (from < 18) {
         // Extra calendar timezones (purely additive).
         await m.createTable(calendarZonesTable);
+      }
+      if (from < 19) {
+        // The AI assistant's chat, job queue and learned rules (purely
+        // additive; ai_settings is device-local).
+        await m.createTable(aiThreadsTable);
+        await m.createTable(aiMessagesTable);
+        await m.createTable(aiJobsTable);
+        await m.createTable(aiBatchesTable);
+        await m.createTable(aiBatchItemsTable);
+        await m.createTable(aiBlobsTable);
+        await m.createTable(productAliasesTable);
+        await m.createTable(aiRulesMemoryTable);
+        await m.createTable(aiSettingsTable);
       }
       if (from < 14) {
         // Planning: plan items, their per-day overrides, and the link from a

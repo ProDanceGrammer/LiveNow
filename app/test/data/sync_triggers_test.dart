@@ -173,7 +173,7 @@ void main() {
       expect(v.keys, contains('budget_settings|period_months'));
     });
 
-    test('all 19 tables are tracked', () async {
+    test('all 27 tables are tracked', () async {
       final b = BudgetService(db);
       final acc = await b.saveAccount(
         name: 'A',
@@ -223,6 +223,30 @@ void main() {
       );
       await exec(
         "INSERT INTO calendar_zones (id, tz, created_at, updated_at) VALUES ('cz1', 'Asia/Tokyo', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_threads (id, created_at, updated_at) VALUES ('at1', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_messages (id, thread_id, created_at, updated_at) VALUES ('am1', 'at1', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_jobs (id, thread_id, created_at, updated_at) VALUES ('aj1', 'at1', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_batches (id, job_id, thread_id, created_at, updated_at) VALUES ('ab1', 'aj1', 'at1', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_batch_items (id, batch_id, entity_type, entity_id, created_at, updated_at) VALUES ('ai1', 'ab1', 'transaction', 'x', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_blobs (id, created_at, updated_at) VALUES ('ao1', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO product_aliases (id, pattern, created_at, updated_at) VALUES ('pa1', 'sut', 't', 't')",
+      );
+      await exec(
+        "INSERT INTO ai_rules_memory (id, key, created_at, updated_at) VALUES ('ar1', 'card.6141', 't', 't')",
       );
       final tables = {
         for (final k in (await versions()).keys) k.split('|').first,
@@ -414,11 +438,11 @@ void main() {
       'ensureSyncTriggers is idempotent and restores a missing trigger',
       () async {
         await ensureSyncTriggers(db);
-        expect(await triggerCount(), 57);
+        expect(await triggerCount(), 81);
         await exec('DROP TRIGGER sync_actions_upd');
-        expect(await triggerCount(), 56);
+        expect(await triggerCount(), 80);
         await ensureSyncTriggers(db);
-        expect(await triggerCount(), 57);
+        expect(await triggerCount(), 81);
         final id = await actions.createAction(name: 'x');
         final before = (await versions())['actions|$id']!.seq;
         await exec('UPDATE actions SET name = ? WHERE id = ?', ['y', id]);
@@ -536,7 +560,7 @@ void main() {
               "WHERE type='trigger' AND name LIKE 'sync_%'",
             )
             .getSingle();
-        expect(triggers.read<int>('n'), 57);
+        expect(triggers.read<int>('n'), 81);
         final device = await second
             .customSelect(
               "SELECT value FROM sync_state WHERE key = 'device_id'",

@@ -35,6 +35,14 @@ const List<String> backupTableOrder = [
   'forms',
   'calendar_zones',
   'plan_overrides',
+  'ai_threads',
+  'ai_messages',
+  'ai_jobs',
+  'ai_batches',
+  'ai_batch_items',
+  'ai_blobs',
+  'product_aliases',
+  'ai_rules_memory',
 ];
 
 /// A batch of rows of one table. [columns] name the values of every row.
