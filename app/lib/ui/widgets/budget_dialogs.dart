@@ -9,6 +9,7 @@ import '../../core/text_rules.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../../domain/budget_rules.dart';
+import '../../domain/action_service.dart' show ActionDraft;
 import '../../domain/budget_service.dart';
 import '../../domain/name_sort.dart';
 import '../account_icon_codec.dart';
@@ -19,6 +20,7 @@ import '../open_entity.dart';
 import '../providers.dart';
 import '../undo.dart' show offerUndo, undoHistoryProvider;
 import 'account_icon.dart';
+import 'action_editor.dart' show ActionEditorDialog;
 import 'action_picker_dialog.dart';
 import 'app_toast.dart';
 import 'budget_format.dart';
@@ -1349,6 +1351,7 @@ class _BudgetTransactionDialogState
   }
 
   /// Fills price and quantity from the chosen category (new transactions only).
+  /// A field that already holds a number is left as it is.
   Future<void> _onCategoryChosen(String id) async {
     final db = ref.read(databaseProvider);
     final service = ref.read(budgetServiceProvider);
@@ -1359,13 +1362,25 @@ class _BudgetTransactionDialogState
     if (!mounted || cat == null) return;
     setState(() {
       _categoryId = id;
-      _price.text = cat.price == null ? '' : budgetNumber(cat.price!);
-      if (last != null) _quantity.text = budgetNumber(last);
+      if (_price.text.trim() == _autoPrice && cat.price != null) {
+        _autoPrice = budgetNumber(cat.price!);
+        _price.text = _autoPrice;
+      }
+      if (_quantity.text.trim() == _autoQuantity && last != null) {
+        _autoQuantity = budgetNumber(last);
+        _quantity.text = _autoQuantity;
+      }
     });
   }
 
+  /// What the price / quantity field held when this dialog last filled it (the
+  /// default at first): a field still showing it was not typed in, so a category
+  /// may fill it; a number the user typed is never replaced.
+  String _autoPrice = '';
+  String _autoQuantity = '1';
+
   Future<void> _pickCategory() async {
-    final id = await pickBudgetCategory(context);
+    final id = await pickBudgetCategory(context, allowCreate: true);
     if (id == null || !mounted) return;
     if (widget.existing == null) {
       await _onCategoryChosen(id);
@@ -1375,14 +1390,44 @@ class _BudgetTransactionDialogState
   }
 
   Future<void> _pickAction() async {
-    final picked = await ActionPickerDialog.show(context);
-    if (picked == null || !mounted) return;
-    setState(() {
-      _actionId = picked.id;
-      _actionName = picked.name;
-      _actionStart = picked.startAt;
-      _actionAllDay = picked.isAllDay;
-    });
+    final pick = await ActionPickerDialog.showWithCreate(context);
+    if (pick == null || !mounted) return;
+    if (pick is ActionPickExisting) {
+      final picked = pick.item;
+      setState(() {
+        _actionId = picked.id;
+        _actionName = picked.name;
+        _actionStart = picked.startAt;
+        _actionAllDay = picked.isAllDay;
+      });
+      return;
+    }
+    // 'New action...' / 'New from template...': the editor stacks over this
+    // dialog (its form stays as it is); the saved action is linked here.
+    ActionDraft? draft;
+    if (pick is ActionPickFromTemplate) {
+      final service = ref.read(actionServiceProvider);
+      final overlay = rootOverlayOf(context);
+      final templateId = await TemplatePickerDialog.show(context);
+      if (templateId == null || !mounted) return;
+      try {
+        draft = await service.templateDraft(
+          templateId,
+          duration: await service.templateDuration(templateId),
+        );
+      } on StateError catch (e) {
+        showInfoToast(overlay, e.message);
+        return;
+      }
+      if (!mounted) return;
+    }
+    final createdId = await ActionEditorDialog.show(
+      context,
+      initialDraft: draft,
+    );
+    if (createdId == null || !mounted) return;
+    setState(() => _actionId = createdId);
+    await _loadActionName(createdId);
   }
 
   /// Deletes this transaction (Undo is offered) and closes the dialog.
