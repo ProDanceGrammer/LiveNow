@@ -134,6 +134,38 @@ void main() {
     await teardown(tester);
   });
 
+  testWidgets('the expand toggle sits right of the What-is-done icon', (
+    tester,
+  ) async {
+    setup(tester);
+    final row = await seed(tester);
+    await open(tester, existing: row);
+    await expandNotes(tester);
+    final toggle = find.byKey(const ValueKey('notes-expand-toggle'));
+    final icon = find.byKey(const ValueKey('diary-transfer'));
+    expect(toggle, findsOneWidget);
+    expect(icon, findsOneWidget);
+    final t = tester.getCenter(toggle);
+    final i = tester.getCenter(icon);
+    expect(t.dx, greaterThan(i.dx));
+    expect((t.dy - i.dy).abs(), lessThan(8));
+    await teardown(tester);
+  });
+
+  testWidgets('a new action keeps the expand toggle in the toolbar', (
+    tester,
+  ) async {
+    setup(tester);
+    await open(tester);
+    await expandNotes(tester);
+    expect(
+      find.byKey(const ValueKey('notes-expand-toggle')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('diary-transfer')), findsNothing);
+    await teardown(tester);
+  });
+
   testWidgets('saving untouched keeps notes, even when only name changes', (
     tester,
   ) async {

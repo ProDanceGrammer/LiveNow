@@ -95,9 +95,6 @@ flutter:
       fonts:
         - asset: assets/fonts/TwemojiCountryFlags.ttf
 
-  assets:
-    - assets/icons/what_is_done.png
-
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

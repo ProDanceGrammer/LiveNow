@@ -112,8 +112,10 @@ class NotesEditor extends StatefulWidget {
   /// package would use the key to toggle a checkbox.
   final VoidCallback? onSave;
 
-  /// Extra controls in the toolbar row (the action editor's "What is done?").
-  final Widget? toolbarExtra;
+  /// Extra controls under the toolbar row (the action editor's "What is done?").
+  /// It receives the Expand/Collapse button (null without [onToggleExpand]) and
+  /// places it itself; the toolbar row then leaves the button out.
+  final Widget Function(Widget? expandToggle)? toolbarExtra;
 
   /// The scroll view the editor sits in (the dialog's). On a phone a drag that
   /// reaches the editor's own top or bottom edge is handed to it, so a long note
@@ -779,7 +781,8 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildToolbarRow(scheme),
-        if (widget.toolbarExtra != null) widget.toolbarExtra!,
+        if (widget.toolbarExtra != null)
+          widget.toolbarExtra!(_buildExpandToggle()),
         const SizedBox(height: 4),
         Container(
           height: widget.height,
@@ -906,20 +909,23 @@ class NotesEditorState extends State<NotesEditor> with WidgetsBindingObserver {
           ),
           const SizedBox(width: 6),
         ],
-        if (widget.onToggleExpand != null)
-          IconButton(
-            key: const ValueKey('notes-expand-toggle'),
-            padding: EdgeInsets.zero,
-            iconSize: 17,
-            tooltip: widget.expanded ? 'Collapse' : 'Expand',
-            icon: Icon(
-              widget.expanded ? Icons.fullscreen_exit : Icons.fullscreen,
-            ),
-            onPressed: widget.onToggleExpand,
-          ),
+        if (widget.toolbarExtra == null) ?_buildExpandToggle(),
       ],
     );
   }
+
+  Widget? _buildExpandToggle() => widget.onToggleExpand == null
+      ? null
+      : IconButton(
+          key: const ValueKey('notes-expand-toggle'),
+          padding: EdgeInsets.zero,
+          iconSize: 17,
+          tooltip: widget.expanded ? 'Collapse' : 'Expand',
+          icon: Icon(
+            widget.expanded ? Icons.fullscreen_exit : Icons.fullscreen,
+          ),
+          onPressed: widget.onToggleExpand,
+        );
 
   Map<String, BlockComponentBuilder> _buildBlocks(ColorScheme scheme) {
     BlockComponentConfiguration plain([String Function(Node)? placeholder]) =>

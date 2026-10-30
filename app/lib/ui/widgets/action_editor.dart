@@ -620,12 +620,13 @@ class _ActionEditorDialogState extends ConsumerState<ActionEditorDialog>
                           outerScroll: _contentScroll,
                           toolbarExtra: widget.existing == null
                               ? null
-                              : WhatIsDoneControl(
+                              : (expandToggle) => WhatIsDoneControl(
                                   key: _blocksKey,
                                   actionId: widget.existing!.id,
                                   notesKey: _notesKey,
                                   initialBlocks: (_seen ?? widget.existing!)
                                       .resultNote,
+                                  afterIcon: expandToggle,
                                 ),
                           height: notesHeight,
                           expanded: expanded,

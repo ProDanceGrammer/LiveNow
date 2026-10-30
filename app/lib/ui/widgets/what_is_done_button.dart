@@ -29,10 +29,14 @@ class WhatIsDoneControl extends ConsumerStatefulWidget {
     required this.actionId,
     required this.notesKey,
     this.initialBlocks,
+    this.afterIcon,
   });
 
   final String actionId;
   final GlobalKey<NotesEditorState> notesKey;
+
+  /// Shown right after the button (the Notes editor's expand toggle).
+  final Widget? afterIcon;
 
   /// The saved codes. When the parent passes a NEW value (the row was changed
   /// elsewhere, e.g. by another dialog of the same action) the field follows it,
@@ -223,17 +227,55 @@ class WhatIsDoneControlState extends ConsumerState<WhatIsDoneControl> {
             constraints: const BoxConstraints(minWidth: 32, minHeight: 28),
             tooltip: 'List what was done during previous working day',
             onPressed: _run,
-            icon: Image.asset(
-              'assets/icons/what_is_done.png',
-              width: 20,
-              height: 20,
-              // The glyph is black on transparent: tint it like any icon.
-              color: IconTheme.of(context).color,
-              semanticLabel: 'What is done?',
+            icon: Semantics(
+              label: 'What is done?',
+              child: CustomPaint(
+                size: const Size.square(20),
+                painter: _WhatIsDoneGlyph(
+                  IconTheme.of(context).color ?? Colors.black,
+                ),
+              ),
             ),
           ),
+          if (widget.afterIcon != null) widget.afterIcon!,
         ],
       ),
     );
   }
+}
+
+/// The "What is done?" icon: three text lines and a thin arrow with a small
+/// filled head pointing down, drawn on a 24-unit grid like the Material icons.
+class _WhatIsDoneGlyph extends CustomPainter {
+  const _WhatIsDoneGlyph(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 24);
+    final lines = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    for (final y in const [6.0, 12.0, 18.0]) {
+      canvas.drawLine(Offset(3, y), Offset(13, y), lines);
+    }
+    final shaft = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(19, 4), const Offset(19, 15), shaft);
+    final head = Path()
+      ..moveTo(15.5, 14.5)
+      ..lineTo(22.5, 14.5)
+      ..lineTo(19, 20)
+      ..close();
+    canvas.drawPath(head, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_WhatIsDoneGlyph old) => old.color != color;
 }
