@@ -5,8 +5,14 @@ import 'package:flutter/gestures.dart'
     show DragStartBehavior, PointerDeviceKind, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 
+import '../../domain/duration_rules.dart' show formatDuration;
 import '../../domain/plan_rules.dart';
+import '../../domain/sequence_naming.dart' show normalizeForMatch;
 import 'calendar_layout.dart' show snapToNeighbours;
+
+/// Tint of a plan block whose real average is shorter than planned (the red
+/// one is the theme's error colour).
+const kPlanFasterColor = Color(0xFF2E9E5B);
 
 /// Planning mode's translucent blocks (one per plan occurrence on the viewed
 /// days), drawn UNDER the real events. Self-contained: the calendar hands in the
@@ -45,7 +51,13 @@ class PlanGhostLayer extends StatefulWidget {
     required this.onEdit,
     required this.onChanged,
     this.templateNames = const {},
+    this.averages = const {},
   });
+
+  /// `normalizeForMatch(name)` -> mean real length in minutes of its finished
+  /// runs: a block is tinted red when that is longer than the block, green when
+  /// shorter, and shows it after the time.
+  final Map<String, int> averages;
 
   /// The first visible local date ([planDate]).
   final DateTime firstDay;
@@ -441,18 +453,23 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     );
   }
 
-  String _label(_Slot s, int absStart, int absEnd) {
+  String _nameOf(_Slot s) {
     final c = s.companion;
-    final String name;
-    if (c == null) {
-      name = s.occ.name;
-    } else {
-      name =
-          c.name ??
-          widget.templateNames[c.templateId] ??
-          '${s.occ.name} - ${s.kind == _Kind.prev ? 'before' : 'after'}';
-    }
-    return '$name\n${planTime(absStart)}-${planTime(absEnd)}';
+    if (c == null) return s.occ.name;
+    return c.name ??
+        widget.templateNames[c.templateId] ??
+        '${s.occ.name} - ${s.kind == _Kind.prev ? 'before' : 'after'}';
+  }
+
+  /// The mean real length (minutes) of this block's name, null without history.
+  int? _averageOf(_Slot s) => widget.averages[normalizeForMatch(_nameOf(s))];
+
+  String _label(_Slot s, int absStart, int absEnd, int? average) {
+    final time = '${planTime(absStart)}-${planTime(absEnd)}';
+    final avg = average == null
+        ? ''
+        : '  ⌀ ${formatDuration(Duration(minutes: average))}';
+    return '${_nameOf(s)}\n$time$avg';
   }
 
   Widget _ghost(BuildContext context, ColorScheme scheme, _Slot s) {
@@ -494,8 +511,13 @@ class _PlanGhostLayerState extends State<PlanGhostLayer> {
     final isLast = isMain && absEnd <= base + _kDay;
     final laneW = (widget.dayWidth - 2) / s.lanes;
     final height = math.max(14.0, (endMin - startMin) * _pxPerMin);
-    final color = isMain ? scheme.tertiary : scheme.secondary;
-    final label = _label(s, absStart, absEnd);
+    final average = _averageOf(s);
+    // Slower than planned: red; quicker: green; no history / equal: as before.
+    final planned = absEnd - absStart;
+    final color = average == null || average == planned
+        ? (isMain ? scheme.tertiary : scheme.secondary)
+        : (average > planned ? scheme.error : kPlanFasterColor);
+    final label = _label(s, absStart, absEnd, average);
 
     Widget body = DecoratedBox(
       decoration: BoxDecoration(

@@ -3337,6 +3337,7 @@ class _TimeGridState extends ConsumerState<_TimeGrid> {
                       const <ActionTemplate>[])
                 t.id: t.name,
             },
+            averages: ref.watch(planAveragesProvider).value ?? const {},
             onEdit: (o) =>
                 PlanItemEditorDialog.show(context, itemId: o.planItemId),
             onChanged: (o, start, dur) =>

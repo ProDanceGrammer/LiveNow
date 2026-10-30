@@ -1,8 +1,11 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:livenow/core/ids.dart';
+import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/plan_rules.dart';
@@ -13,6 +16,7 @@ import 'package:livenow/ui/dialog_stack.dart' show resetStackedDialogsForTest;
 import 'package:livenow/ui/plan_providers.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/views/calendar_view.dart';
+import 'package:livenow/ui/views/plan_ghost_layer.dart' show kPlanFasterColor;
 import 'package:livenow/ui/widgets/plan_dialogs.dart' show PlanItemEditorDialog;
 
 /// Planning mode on the calendar: the toggle shows one translucent block per
@@ -105,6 +109,73 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
     await settle(tester);
     expect(ghosts(), findsNothing);
+    await unmount(tester);
+  });
+
+  /// A finished run of [minutes] that ended yesterday (so it is in the 30-day
+  /// window); `db` exists once `mount` has started seeding.
+  Future<void> finishedRun(String name, int minutes) async {
+    final end = DateTime.now().toUtc().subtract(const Duration(days: 1));
+    final start = end.subtract(Duration(minutes: minutes));
+    await db.into(db.actionsTable).insert(
+      ActionsTableCompanion.insert(
+        id: newId(),
+        name: name,
+        createdAt: dateTimeToDb(start)!,
+        updatedAt: dateTimeToDb(end)!,
+        done: const Value(true),
+        startAt: Value(dateTimeToDb(start)),
+        endAt: Value(dateTimeToDb(end)),
+        completedAt: Value(dateTimeToDb(end)),
+      ),
+    );
+  }
+
+  Color ghostFill(WidgetTester tester) {
+    final box = tester.widget<DecoratedBox>(
+      find
+          .descendant(of: ghosts().first, matching: find.byType(DecoratedBox))
+          .first,
+    );
+    return (box.decoration as BoxDecoration).color!;
+  }
+
+  String ghostText(WidgetTester tester) => tester
+      .widget<Text>(
+        find.descendant(of: ghosts().first, matching: find.byType(Text)).first,
+      )
+      .data!;
+
+  testWidgets('a block whose average is longer is red and shows the average', (
+    tester,
+  ) async {
+    await mount(tester, seed: (_) => finishedRun('Run', 90));
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    await settle(tester);
+    final error = Theme.of(tester.element(ghosts().first)).colorScheme.error;
+    expect(ghostFill(tester), error.withValues(alpha: 0.16));
+    expect(ghostText(tester), contains('⌀ 1 hour 30 min'));
+    await unmount(tester);
+  });
+
+  testWidgets('a block whose average is shorter is green', (tester) async {
+    await mount(tester, seed: (_) => finishedRun('Run', 30));
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    await settle(tester);
+    expect(ghostFill(tester), kPlanFasterColor.withValues(alpha: 0.16));
+    expect(ghostText(tester), contains('⌀ 30 min'));
+    await unmount(tester);
+  });
+
+  testWidgets('no history: the old tint and no average text', (tester) async {
+    await mount(tester);
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    final tertiary = Theme.of(tester.element(ghosts().first)).colorScheme.tertiary;
+    expect(ghostFill(tester), tertiary.withValues(alpha: 0.16));
+    expect(ghostText(tester), isNot(contains('⌀')));
     await unmount(tester);
   });
 

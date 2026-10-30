@@ -55,3 +55,28 @@ final planOccurrencesProvider =
       );
       return plans.occurrences(from, to, itemIds: visible);
     });
+
+/// Mean real length in minutes of the finished runs (last 30 days, by name) of
+/// the plan blocks on the viewed range; key = `normalizeForMatch(name)`, a name
+/// without history is absent. One read for the whole range.
+final planAveragesProvider = FutureProvider.autoDispose<Map<String, int>>((
+  ref,
+) async {
+  final occurrences = await ref.watch(planOccurrencesProvider.future);
+  if (occurrences.isEmpty) return const {};
+  final templates = {
+    for (final t in ref.watch(templatesProvider).value ?? const []) t.id: t.name,
+  };
+  final names = <String>{};
+  for (final o in occurrences) {
+    names.add(o.name);
+    for (final c in [...o.extras.prev, ...o.extras.next]) {
+      final n = c.name ?? templates[c.templateId];
+      if (n != null) names.add(n);
+    }
+  }
+  final averages = await ref
+      .read(actionServiceProvider)
+      .averagesByName(names);
+  return {for (final e in averages.entries) e.key: e.value.inMinutes};
+});

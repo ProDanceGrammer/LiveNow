@@ -78,6 +78,21 @@ void main() {
     expect(await service.templateAverage('Nothing'), isNull);
   });
 
+  test('averagesByName: many names in one call, keyed by normalized name',
+      () async {
+    final activityId = await service.createCountableActivity('Study');
+    await run('Read', 20);
+    await run('[#2] Read', 40);
+    await run('Chapter', 50, activityId: activityId);
+    await run('Run', 90, daysAgo: 45); // too old
+    final m = await service.averagesByName(['Read', 'Study', 'Run', 'None']);
+    expect(m['read'], const Duration(minutes: 30));
+    expect(m['study'], const Duration(minutes: 50));
+    expect(m.containsKey('run'), isFalse);
+    expect(m.containsKey('none'), isFalse);
+    expect(await service.averagesByName(const []), isEmpty);
+  });
+
   test('runs linked to the same-name Countable Activity count too', () async {
     final activityId = await service.createCountableActivity('Read');
     await run('Read', 20);

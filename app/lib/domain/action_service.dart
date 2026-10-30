@@ -1058,17 +1058,22 @@ class ActionService {
   /// (that covers "Continue" copies and actions added to the activity) plus any
   /// finished action with the same normalized name (what the template created).
   /// Null when there is none.
-  Future<Duration?> templateAverage(String name, {DateTime? nowUtc}) async {
+  Future<Duration?> templateAverage(String name, {DateTime? nowUtc}) async =>
+      (await averagesByName([name], nowUtc: nowUtc))[normalizeForMatch(name)];
+
+  /// [templateAverage] for many names with ONE read of the finished actions.
+  /// Keys are `normalizeForMatch(name)`; a name without finished runs is absent.
+  Future<Map<String, Duration>> averagesByName(
+    Iterable<String> names, {
+    DateTime? nowUtc,
+  }) async {
+    final wanted = {for (final n in names) normalizeForMatch(n): n};
+    if (wanted.isEmpty) return const {};
     final now = nowUtc ?? DateTime.now().toUtc();
-    final wanted = name.trim().toLowerCase();
-    String? activityId;
+    final activityByName = <String, String>{};
     for (final c in await db.select(db.countableActivitiesTable).get()) {
-      if (c.name.trim().toLowerCase() == wanted) {
-        activityId = c.id;
-        break;
-      }
+      activityByName.putIfAbsent(c.name.trim().toLowerCase(), () => c.id);
     }
-    final key = normalizeForMatch(name);
     final cutoff = dateTimeToDb(now.subtract(_countableAverageWindow))!;
     final rows =
         await (db.select(db.actionsTable)..where(
@@ -1079,16 +1084,29 @@ class ActionService {
                   t.endAt.isNotNull(),
             ))
             .get();
-    final durations = _actualDurations(
-      rows.where(
-        (r) =>
-            (activityId != null && r.countableActivityId == activityId) ||
-            normalizeForMatch(r.name) == key,
-      ),
-    );
-    if (durations.isEmpty) return null;
-    final totalMicros = durations.fold<int>(0, (s, d) => s + d.inMicroseconds);
-    return Duration(microseconds: totalMicros ~/ durations.length);
+    final byName = <String, List<ActionRow>>{};
+    final byActivity = <String, List<ActionRow>>{};
+    for (final r in rows) {
+      byName.putIfAbsent(normalizeForMatch(r.name), () => []).add(r);
+      final a = r.countableActivityId;
+      if (a != null) byActivity.putIfAbsent(a, () => []).add(r);
+    }
+    final result = <String, Duration>{};
+    for (final e in wanted.entries) {
+      final activityId = activityByName[e.value.trim().toLowerCase()];
+      final matched = <ActionRow>{
+        ...?byName[e.key],
+        if (activityId != null) ...?byActivity[activityId],
+      };
+      final durations = _actualDurations(matched);
+      if (durations.isEmpty) continue;
+      final totalMicros = durations.fold<int>(
+        0,
+        (s, d) => s + d.inMicroseconds,
+      );
+      result[e.key] = Duration(microseconds: totalMicros ~/ durations.length);
+    }
+    return result;
   }
 
   /// Actual durations of the finished runs, over the last
