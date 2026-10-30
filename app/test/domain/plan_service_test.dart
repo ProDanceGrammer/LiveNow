@@ -212,6 +212,17 @@ void main() {
       expect(await allActions(), hasLength(5));
     });
 
+    test('a later first day creates nothing before it', () async {
+      await daily(await template());
+      final r = await plans.confirm(from: day(21), to: day(23), nowUtc: now);
+      expect(r.createdIds, hasLength(3));
+      expect((await allActions()).map((a) => a.planKey).toSet(), {
+        '2026-10-21#0',
+        '2026-10-22#0',
+        '2026-10-23#0',
+      });
+    });
+
     test('occurrences in the past are never created', () async {
       await daily(await template(), startMin: 7 * 60); // 07:00 < 08:00 now
       final r = await plans.confirm(from: day(19), to: day(19), nowUtc: now);

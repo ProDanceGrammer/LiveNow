@@ -350,6 +350,45 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('confirm plan: a chosen first day moves the created actions', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.tap(find.byKey(const ValueKey('calendar-planning-toggle')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('plan-bar-confirm')));
+    await settle(tester);
+
+    // The first day: 20 days ahead (the picker's text field is not driven here;
+    // its Next-month arrows would be slow), picked through the calendar grid.
+    await tester.tap(find.byKey(const ValueKey('plan-first-day')));
+    await tester.pumpAndSettle();
+    final target = DateTime.now().add(const Duration(days: 20));
+    final today = DateTime.now();
+    final months =
+        (target.year - today.year) * 12 + target.month - today.month;
+    for (var i = 0; i < months; i++) {
+      await tester.tap(find.byTooltip('Next month'));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.text('${target.day}').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await settle(tester);
+
+    await tester.tap(find.byKey(const ValueKey('plan-confirm')));
+    await settle(tester);
+    final actions = (await tester.runAsync(
+      () => db.select(db.actionsTable).get(),
+    ))!;
+    expect(actions, isNotEmpty);
+    final first = actions
+        .map((a) => dateTimeFromDb(a.startAt)!.toLocal())
+        .reduce((a, b) => a.isBefore(b) ? a : b);
+    expect(first.isBefore(DateTime(target.year, target.month, target.day)), isFalse);
+    await unmount(tester);
+  });
+
   testWidgets('the editor saves a weekly item and a template for it', (
     tester,
   ) async {

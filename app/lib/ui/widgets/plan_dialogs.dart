@@ -1753,16 +1753,38 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
 
   DateTime get _today => planDateOf(DateTime.now());
 
+  /// The first day of the new actions the user chose (null = today).
+  DateTime? _first;
+
+  /// The first day: the horizons below count from it.
+  DateTime get _start => _first ?? _today;
+
   DateTime get _to => switch (_horizon) {
-    _Horizon.week => _today.add(const Duration(days: 6)),
-    _Horizon.twoWeeks => _today.add(const Duration(days: 13)),
-    _Horizon.month => _addMonths(_today, 1),
-    _Horizon.threeMonths => _addMonths(_today, 3),
-    _Horizon.year => _addMonths(_today, 12),
-    _Horizon.custom => _custom ?? _today.add(const Duration(days: 13)),
+    _Horizon.week => _start.add(const Duration(days: 6)),
+    _Horizon.twoWeeks => _start.add(const Duration(days: 13)),
+    _Horizon.month => _addMonths(_start, 1),
+    _Horizon.threeMonths => _addMonths(_start, 3),
+    _Horizon.year => _addMonths(_start, 12),
+    // An exact end date, never before the first day.
+    _Horizon.custom =>
+      _custom == null
+          ? _start.add(const Duration(days: 13))
+          : (_custom!.isBefore(_start) ? _start : _custom!),
     // The rolling window a "forever" item keeps filled.
-    _Horizon.forever => _today.add(const Duration(days: 8 * 7 - 1)),
+    _Horizon.forever => _start.add(const Duration(days: 8 * 7 - 1)),
   };
+
+  Future<void> _pickFirstDay() async {
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _start.isBefore(DateTime.now()) ? DateTime.now() : _start,
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2100),
+    );
+    if (d == null) return;
+    setState(() => _first = planDate(d.year, d.month, d.day));
+    _refresh();
+  }
 
   @override
   void initState() {
@@ -1774,7 +1796,7 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
     final seq = ++_seq;
     final p = await ref
         .read(planServiceProvider)
-        .preview(itemIds: _selected, from: _today, to: _to);
+        .preview(itemIds: _selected, from: _start, to: _to);
     if (!mounted || seq != _seq) return;
     var extra = 0, tx = 0;
     for (final o in p.toCreate) {
@@ -1808,7 +1830,7 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
       context,
       ref,
       itemIds: _selected,
-      from: _today,
+      from: _start,
       to: _to,
     );
     if (result.createdIds.isEmpty) {
@@ -1925,7 +1947,26 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Create real actions from now until:'),
+              Row(
+                children: [
+                  const Text('First day:'),
+                  TextButton(
+                    key: const ValueKey('plan-first-day'),
+                    onPressed: _pickFirstDay,
+                    child: Text(_dateLabel(_start)),
+                  ),
+                  if (_first != null)
+                    TextButton(
+                      key: const ValueKey('plan-first-day-today'),
+                      onPressed: () {
+                        setState(() => _first = null);
+                        _refresh();
+                      },
+                      child: const Text('Today'),
+                    ),
+                ],
+              ),
+              const Text('Create real actions until:'),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
@@ -1944,8 +1985,10 @@ class _PlanConfirmDialogState extends ConsumerState<PlanConfirmDialog> {
                         if (h == _Horizon.custom) {
                           final d = await showDatePicker(
                             context: context,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime.now(),
+                            initialDate: _to.isBefore(_start) ? _start : _to,
+                            firstDate: _start.isBefore(DateTime.now())
+                                ? DateTime.now()
+                                : _start,
                             lastDate: DateTime(2100),
                           );
                           if (d == null) return;
