@@ -388,6 +388,44 @@ void main() {
     expect(find.byKey(const ValueKey('ai-draft-confirm')), findsNothing);
   });
 
+  uiTest('a translated, suggested line shows the Ukrainian name, the printed one and badges', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        final job = await insertJob(AiJobState.draftReady, AiStage.waiting);
+        await insertMessage(
+          kind: AiMessageKind.draft,
+          json: {
+            ...draftJson,
+            'lines': [
+              {
+                'i': 0,
+                'name': 'BANVIT PILIC BONFILE',
+                'ua_name': 'Курка (філе)',
+                'category_name': 'Курка (грудка)',
+                'quantity': 0.5,
+                'unit_price': 330,
+                'amount': 165,
+                'confidence': 0.87,
+                'flags': ['suggested', 'weight_guess'],
+              },
+            ],
+            'sum': {'lines_sum': 165, 'expected': 165, 'difference': 0, 'ok': true},
+          },
+          jobId: job,
+        );
+      },
+    );
+    expect(find.text('Курка (філе)  ->  Курка (грудка)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-line-printed-0')), findsOneWidget);
+    expect(find.text('BANVIT PILIC BONFILE'), findsOneWidget);
+    expect(find.text('suggested 87%'), findsOneWidget);
+    expect(find.text('weight estimated'), findsOneWidget);
+  });
+
   uiTest('Reject writes a reject decision', (tester) async {
     await mount(
       tester,

@@ -1,4 +1,5 @@
 import 'extracted_receipt.dart';
+import 'receipt_row_builder.dart' show parseReceiptNumber;
 import 'unit_normalizer.dart';
 
 // Line parser (spec U6, U8 plus the unit rules): turns extracted receipt lines
@@ -68,12 +69,12 @@ class LineParseResult {
 }
 
 double _round2(double v) => (v * 100).round() / 100;
-double _d(String s) => double.parse(s.replaceAll(',', '.'));
+double _d(String s) => parseReceiptNumber(s) ?? double.parse(s.replaceAll(',', '.'));
 
 final _qtyText = RegExp(
   r'^(\d+(?:[.,]\d+)?)\s*(ad|adet|kg|gr|g)\.?\s*[x*×]\s*(\d+(?:[.,]\d+)?)$',
 );
-final _priceAtEnd = RegExp(r'^(.*?)\s*\*?\s*(-?\d+[.,]\d{2})\s*$');
+final _priceAtEnd = RegExp(r'^(.*?)\s*\*?\s*(-?\d[\d.,]*[.,]\d{2})\s*$');
 
 QtyLine? _qtyFromText(String raw) {
   final m = _qtyText.firstMatch(foldText(raw).trim());

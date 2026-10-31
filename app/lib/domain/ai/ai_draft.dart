@@ -6,6 +6,12 @@
 /// Plain JSON, tolerant parsing (an older app reads what it knows).
 library;
 
+/// Line flag: the category is the model's suggestion (the user has not seen it).
+const kFlagSuggested = 'suggested';
+
+/// Line flag: the pack weight is the model's estimate, not read or answered.
+const kFlagWeightGuess = 'weight_guess';
+
 double? _d(Object? v) =>
     v is num ? v.toDouble() : (v is String ? double.tryParse(v) : null);
 String? _s(Object? v) => v?.toString();
@@ -46,6 +52,8 @@ class DraftLine {
     this.rateInteract,
     this.snacks = false,
     this.oneOffGroupId,
+    this.uaName,
+    this.confidence,
     this.committed = false,
     this.skipped = false,
     this.transactionId,
@@ -82,11 +90,24 @@ class DraftLine {
 
   /// C7: the group a one-off item gets its own leaf under.
   String? oneOffGroupId;
+
+  /// The product in the user's language, when the assistant translated it (also
+  /// the name of a new category).
+  String? uaName;
+
+  /// 0..1 of the model's category suggestion; null when the program decided.
+  double? confidence;
   bool committed;
   bool skipped;
   String? transactionId;
 
   bool get needsAnswer => questionIds.isNotEmpty;
+
+  /// What to call the product: the translation, else the printed name.
+  String get displayName => uaName ?? name;
+
+  /// The category came from the model's suggestion, not from a rule or the user.
+  bool get suggested => flags.contains(kFlagSuggested);
 
   Map<String, dynamic> toJson() => {
     'i': index,
@@ -109,6 +130,8 @@ class DraftLine {
     'rate_interact': rateInteract,
     'snacks': snacks,
     'one_off_group_id': oneOffGroupId,
+    'ua_name': uaName,
+    'confidence': confidence,
     'committed': committed,
     'skipped': skipped,
     'transaction_id': transactionId,
@@ -138,6 +161,8 @@ class DraftLine {
     rateInteract: _d(j['rate_interact']),
     snacks: j['snacks'] == true,
     oneOffGroupId: _s(j['one_off_group_id']),
+    uaName: _s(j['ua_name']),
+    confidence: _d(j['confidence']),
     committed: j['committed'] == true,
     skipped: j['skipped'] == true,
     transactionId: _s(j['transaction_id']),

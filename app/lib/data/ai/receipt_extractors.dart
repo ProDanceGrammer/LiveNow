@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import '../../domain/ai/extracted_receipt.dart';
 import '../../domain/ai/receipt_extractor.dart';
+import '../../domain/ai/receipt_row_builder.dart';
 import 'llm_client.dart';
 import 'ocr_client.dart';
 import 'receipt_checks.dart';
@@ -34,14 +35,22 @@ class OcrLlmExtractor implements ReceiptExtractor {
     if (read.isEmpty) {
       throw const ReceiptExtractionException('OCR found no text in the picture');
     }
+    // The program reads the printed rows itself (tilt-corrected, summed against
+    // the printed total). A reading that adds up needs no model, so it cannot
+    // invent a total; otherwise the model gets the rebuilt rows, not the glued ones.
+    final rebuilt = rebuildReceipt(read.words);
+    if (rebuilt != null && rebuilt.consistent) {
+      return (receipt: rebuilt.receipt, ocrText: rebuilt.text);
+    }
+    final text = rebuilt?.text ?? read.text;
     final messages = [
       LlmMessage.system(receiptExtractionSystemPrompt),
-      LlmMessage.user(receiptExtractionUserPrompt(read.text)),
+      LlmMessage.user(receiptExtractionUserPrompt(text)),
     ];
     var receipt = await _ask(llm, messages, cancel);
     receipt = repairArithmetic(receipt);
     if (sumMismatch(receipt)) receipt = await _retryOnce(llm, messages, receipt, cancel);
-    return (receipt: receipt, ocrText: read.text);
+    return (receipt: receipt, ocrText: text);
   }
 }
 

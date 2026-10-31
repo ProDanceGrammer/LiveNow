@@ -14,6 +14,7 @@ import '../budget_service.dart';
 import 'action_matcher.dart';
 import 'ai_alias_db_source.dart';
 import 'ai_draft.dart';
+import 'ai_item_suggester.dart';
 import 'ai_protocol.dart';
 import 'alias_source.dart';
 import 'bazaar_parser.dart';
@@ -58,6 +59,7 @@ const _snackWords = [
   // Turkish (folded: ç->c ş->s ı->i ö->o ü->u ğ->g)
   'cikolata', 'cips', 'bisk', 'gofret', 'sakiz', 'lokum', 'kraker',
   'berliner', 'hashasli', 'jelibon', 'draje',
+  'cikol', 'doritos', 'halley', 'ulker',
 ];
 
 const _pieceOnlyWords = [
@@ -77,6 +79,11 @@ bool isPieceOnlyName(String name) {
 }
 
 String _stripStars(String s) => s.replaceFirst(RegExp(r'^[\s*]+'), '').trim();
+
+/// The quick reply that makes a NEW category named [name] under the existing
+/// group [group]; [kCreateOption] reads it back from the answer.
+String createOptionLabel(String name, String group) => 'Створити «$name» у «$group»';
+final kCreateOption = RegExp(r'^Створити «(.+)» у «(.+)»$');
 
 /// The transaction name of a line: shop + product.
 String txNameFor(String? merchant, String product) =>
@@ -123,9 +130,14 @@ class _Ctx {
   final questions = <Question>[];
   final blockers = <String>[];
   final notes = <String>[];
+  final suggestions = <int, LineSuggestion>{};
   BudgetAccount? useAccount;
   BudgetAccount? defaultCount;
   String? snacksId;
+
+  /// A typed message that says income / spending: a category of the other kind
+  /// is held for Confirm instead of being written. Null for photos.
+  bool? wantIncome;
   final _fx = <String, ReceiptFx>{};
 
   BudgetAccount? account(String? id) {
@@ -145,6 +157,30 @@ class _Ctx {
     final m = overrides['llm'];
     if (m is Map) return Map<String, dynamic>.from(m);
     return {};
+  }
+
+  /// What the user typed for line [i] that matched no category (see the runner).
+  String? catMiss(int i) {
+    final m = overrides['cat_miss'];
+    final v = m is Map ? m['$i']?.toString() : null;
+    return v == null || v.trim().isEmpty ? null : v.trim();
+  }
+
+  /// The group a new category goes under when nothing better is known: the one
+  /// with the most categories in it (a real group, not a price-variant wrapper).
+  BudgetCategory? get defaultGroup {
+    BudgetCategory? best;
+    var bestKids = 0;
+    for (final c in cats) {
+      if (!parents.contains(c.id) || isWrapper(c)) continue;
+      if (wantIncome != null && c.isIncome != wantIncome) continue;
+      final kids = cats.where((k) => k.parentId == c.id).length;
+      if (kids > bestKids) {
+        best = c;
+        bestKids = kids;
+      }
+    }
+    return best;
   }
 
   void rememberChoice(int i, String id) {
@@ -184,6 +220,18 @@ class _Ctx {
   );
 }
 
+/// The outcome of [DraftBuilder._lookup].
+class _Lookup {
+  const _Lookup(this.pick, this.usable, {required this.decided});
+  final BudgetCategory? pick;
+
+  /// Fuzzy candidates that are real products (no groups).
+  final List<CategoryCandidate> usable;
+
+  /// A rule picked the category; false means the model or the user must.
+  final bool decided;
+}
+
 class DraftBuilder {
   DraftBuilder({
     required this.db,
@@ -206,6 +254,9 @@ class DraftBuilder {
 
   /// Model replies below this confidence become a question.
   static const double minModelConfidence = 0.6;
+
+  /// A batched suggestion below this is not pre-filled: the line is asked.
+  static const double minSuggestConfidence = 0.4;
 
   /// Rebuilds the draft of [job]. [previous] keeps lines that are already
   /// committed exactly as they were written.
@@ -240,11 +291,17 @@ class DraftBuilder {
     List<BudgetCategory> cats,
     String base,
   ) async {
-    final ex = ExtractedReceipt.fromJson(
-      source['receipt'] is Map
-          ? Map<String, dynamic>.from(source['receipt'] as Map)
-          : const {},
-    );
+    final receiptJson = source['receipt'] is Map
+        ? Map<String, dynamic>.from(source['receipt'] as Map)
+        : <String, dynamic>{};
+    // A purchase told in words: the payer and the currency come from the text, the
+    // remembered cash account, or a question (asked once).
+    final typed = source['typed'] is Map
+        ? Map<String, dynamic>.from(source['typed'] as Map)
+        : null;
+    final pay = typed == null ? null : await _typedPay(typed, overrides, accounts);
+    if (pay != null) receiptJson['currency'] = pay.currency;
+    final ex = ExtractedReceipt.fromJson(receiptJson);
     final ctx = _Ctx(
       accounts: accounts,
       cats: cats,
@@ -254,6 +311,18 @@ class DraftBuilder {
       overrides: overrides,
     );
     ctx.snacksId = await planner.findSnacksCategory();
+    if (typed != null) {
+      ctx.wantIncome = typed['income'] == true;
+      if (typed['unparsed'] is List) {
+        for (final u in typed['unparsed'] as List) {
+          ctx.notes.add('Не вдалося прочитати суму: «$u».');
+        }
+      }
+    }
+    if (pay?.question != null) {
+      ctx.blockers.add(pay!.question!.id);
+      ctx.questions.add(pay.question!);
+    }
 
     // When.
     DateTime? at;
@@ -272,7 +341,7 @@ class DraftBuilder {
     }
     if (at == null) {
       at = messageTime.toUtc();
-      ctx.notes.add('Час чека не прочитано: взято час повідомлення.');
+      if (typed == null) ctx.notes.add('Час чека не прочитано: взято час повідомлення.');
     }
 
     // Lines.
@@ -350,7 +419,17 @@ class DraftBuilder {
     }
 
     // Accounts.
-    await _receiptAccounts(ctx, ex, mine, cardRules);
+    if (pay != null) {
+      ctx.useAccount = pay.account;
+      ctx.defaultCount =
+          accounts
+              .where((a) => a.currency.toUpperCase() == ex.currency.toUpperCase())
+              .firstOrNull ??
+          pay.account ??
+          accounts.first;
+    } else {
+      await _receiptAccounts(ctx, ex, mine, cardRules);
+    }
     String txNameOf(String n) => txNameFor(ex.merchant, n);
 
     // Lines.
@@ -359,6 +438,24 @@ class DraftBuilder {
         if (l.committed) l.index: l,
     };
     final lines = <DraftLine>[];
+
+    // Lines no rule can place get a Ukrainian name and a suggestion, in one go.
+    final wanted = <({int index, String printed})>[];
+    for (final i in mineIdx) {
+      final p = parsed.lines[i];
+      final ov = ctx.lineOv(i);
+      if (prevCommitted.containsKey(i) ||
+          ov['skip'] == true ||
+          ov['category_id'] != null ||
+          p.net <= 0) {
+        continue;
+      }
+      if (!(await _lookup(ctx, p.name)).decided) {
+        wanted.add((index: i, printed: _stripStars(p.name)));
+      }
+    }
+    if (wanted.isNotEmpty) await _suggestLines(ctx, wanted);
+
     for (final i in mineIdx) {
       final p = parsed.lines[i];
       final old = prevCommitted[i];
@@ -476,6 +573,58 @@ class DraftBuilder {
       discount: l.discount,
       vatPct: l.vatPct,
       flags: l.flags,
+    );
+  }
+
+  /// Who paid and in what currency for a purchase told in words. The account is,
+  /// in order: the user's answer, the one the text names, the remembered cash
+  /// account (for "готівкою"), else a question - which is asked once, because the
+  /// cash answer is remembered. The currency is the text's, else the account's.
+  Future<({BudgetAccount? account, String currency, Question? question})> _typedPay(
+    Map<String, dynamic> typed,
+    Map<String, dynamic> overrides,
+    List<BudgetAccount> accounts,
+  ) async {
+    BudgetAccount? byId(Object? id) {
+      final s = id?.toString();
+      return s == null ? null : accounts.where((a) => a.id == s).firstOrNull;
+    }
+
+    final hint = typed['currency']?.toString().toUpperCase();
+    final cash = typed['cash'] == true;
+    var account = byId(overrides['use_account']) ?? byId(typed['account_id']);
+    if (account == null && cash) {
+      for (final key in hint != null ? ['cash.$hint', 'cash.default'] : ['cash.default', 'cash.TRY']) {
+        final a = byId((await rules.get(key))?['account_id']);
+        if (a != null && (hint == null || key == 'cash.$hint' || a.currency.toUpperCase() == hint)) {
+          account = a;
+          break;
+        }
+      }
+    }
+    final currency = hint ?? account?.currency.toUpperCase() ?? 'TRY';
+    if (account != null) return (account: account, currency: currency, question: null);
+    var pool = cash && hint != null
+        ? accounts.where((a) => a.currency.toUpperCase() == hint).toList()
+        : accounts;
+    if (pool.isEmpty) pool = accounts;
+    // Only one account can be meant (the one TRY account for "готівкою ... лір"):
+    // nothing to ask.
+    if (pool.length == 1) {
+      return (account: pool.first, currency: hint ?? pool.first.currency.toUpperCase(), question: null);
+    }
+    final likely = hint == null
+        ? -1
+        : pool.indexWhere((a) => a.currency.toUpperCase() == hint);
+    return (
+      account: null,
+      currency: currency,
+      question: Question(
+        id: cash ? 'cash_account' : 'pay_account',
+        text: cash ? 'З якого рахунку ви платили готівкою?' : 'З якого рахунку оплачено?',
+        options: [for (final a in pool) a.name],
+        recommended: likely < 0 ? null : likely,
+      ),
     );
   }
 
@@ -743,7 +892,7 @@ class DraftBuilder {
       line.unitPrice = line.amount / pieces;
       line.oneOffGroupId = chosen.id;
       final plan = await planner.planOneOff(
-        name: line.name,
+        name: line.displayName,
         groupId: chosen.id,
         cost: line.unitPrice!,
         accountCountId: count.id,
@@ -752,6 +901,32 @@ class DraftBuilder {
       _applyPlanFlags(line, plan);
       line.categoryName = plan.newLeaf?.name ?? line.categoryName;
       return;
+    }
+    if (line.quantity == null || line.unitPrice == null) {
+      // The model's estimate of a pack's weight beats a question: it is shown in
+      // the draft as an estimate (and never written without a Confirm).
+      final grams = ctx.suggestions[line.index]?.grams;
+      if (grams != null && unit == BudgetUnit.kilogram && line.amount > 0) {
+        line.quantity = grams / 1000;
+        line.unitPrice = line.amount / line.quantity!;
+        line.flags = [...line.flags, kFlagWeightGuess, if (!line.suggested) kFlagSuggested];
+        line.confidence ??= 0.5;
+        unknownWeight = false;
+      }
+      // Told in words ("хліб 40"): nobody knows the pack weight, so take the
+      // category's usual price. The amount is exact either way; the quantity is
+      // flagged as an estimate.
+      final usual = chosen.price ?? 0;
+      if (line.quantity == null &&
+          ctx.wantIncome != null &&
+          unit == BudgetUnit.kilogram &&
+          usual > 0 &&
+          line.amount > 0) {
+        line.quantity = line.amount / usual;
+        line.unitPrice = usual;
+        line.flags = [...line.flags, kFlagWeightGuess];
+        unknownWeight = false;
+      }
     }
     if (line.quantity == null || line.unitPrice == null) {
       if (unknownWeight || line.quantity == null) {
@@ -799,43 +974,156 @@ class DraftBuilder {
     DraftLine line,
     Map<String, dynamic> ov,
   ) async {
+    final pick = await _chooseCategoryRaw(ctx, line, ov);
+    final want = ctx.wantIncome;
+    if (pick == null || want == null || ov['category_id'] != null) return pick;
+    if (pick.isIncome != want) {
+      // The wording says one thing, the category is the other: show it as a weak
+      // guess so Confirm (never auto mode) decides.
+      line.flags = [
+        for (final f in line.flags)
+          if (f != kFlagSuggested) f,
+        kFlagSuggested,
+      ];
+      line.confidence = 0.3;
+      ctx.notes.add(
+        want
+            ? 'Це схоже на дохід, але «${pick.name}» не категорія доходу: перевірте.'
+            : '«${pick.name}» - категорія доходу, а повідомлення про витрату: перевірте.',
+      );
+    }
+    return pick;
+  }
+
+  Future<BudgetCategory?> _chooseCategoryRaw(
+    _Ctx ctx,
+    DraftLine line,
+    Map<String, dynamic> ov,
+  ) async {
     final forcedId = ov['category_id']?.toString();
     final forced = forcedId == null ? null : ctx.byId[forcedId];
-    if (forced != null) return forced;
+    if (forced != null) {
+      // "Create «X» under this group": X names the new category.
+      final named = ov['new_name']?.toString();
+      if (named != null && named.isNotEmpty && ctx.parents.contains(forced.id)) {
+        line.uaName = named;
+      }
+      return forced;
+    }
 
-    final res = await resolver.resolve(line.name);
-    if (res.alias != null && res.best != null) return ctx.byId[res.best!.id];
-    if (isSnackName(line.name) && ctx.snacksId != null) {
-      return ctx.byId[ctx.snacksId];
+    final look = await _lookup(ctx, line.name);
+    if (look.decided) return look.pick;
+    final usable = look.usable;
+
+    // The model's suggestion (translated, chosen among the real categories).
+    final sug = ctx.suggestions[line.index];
+    if (sug != null) {
+      if (sug.uaName.isNotEmpty) line.uaName = sug.uaName;
+      final target = ctx.byId[sug.categoryId ?? sug.groupId];
+      if (target != null && sug.confidence >= minSuggestConfidence) {
+        line.confidence = sug.confidence;
+        line.flags = [...line.flags, kFlagSuggested];
+        return target;
+      }
+    }
+
+    BudgetCategory? pick;
+    if (sug == null && usable.isNotEmpty) pick = await _askModel(ctx, line, usable);
+    if (pick != null) return pick;
+
+    // Still open: offer the nearest real categories and, when a group is known, a
+    // one-tap "create it". What the user typed last time that matched nothing
+    // drives the nearest ones, so a miss gets a different, useful card.
+    final miss = ctx.catMiss(line.index);
+    var choices = usable;
+    if (miss != null) {
+      final r = await resolver.resolve(miss, limit: 6);
+      choices = [
+        for (final c in r.candidates)
+          if (!(c.isAggregate && !ctx.isWrapper(ctx.byId[c.id]!))) c,
+      ];
+    }
+    line.candidates = [
+      for (final c in choices.take(3)) DraftChoice(c.id, c.name),
+    ];
+    final group = ctx.byId[sug?.groupId] ?? ctx.defaultGroup;
+    final newName = miss ?? line.displayName;
+    final create = group == null ? null : createOptionLabel(newName, group.name);
+    line.questionIds = [...line.questionIds, 'cat:${line.index}'];
+    ctx.questions.add(
+      Question(
+        id: 'cat:${line.index}',
+        text: miss == null
+            ? 'Яка категорія для «${line.displayName}» (${fmtMoney(line.amount)} ${ctx.currency})?'
+            : 'Не знайшов категорію «$miss». Оберіть найближчу, створіть нову або '
+                  'напишіть іншу назву.',
+        options: [for (final c in line.candidates) c.name, ?create],
+        recommended: line.candidates.isNotEmpty ? 0 : (create == null ? null : 0),
+      ),
+    );
+    return null;
+  }
+
+  /// What rules alone decide about a printed name: a learned alias, the snacks
+  /// category, or ONE clearly best fuzzy match. [_Lookup.decided] is false when
+  /// the line still needs the model (or the user).
+  Future<_Lookup> _lookup(_Ctx ctx, String name) async {
+    final res = await resolver.resolve(name);
+    if (res.alias != null && res.best != null) {
+      return _Lookup(ctx.byId[res.best!.id], const [], decided: true);
+    }
+    if (isSnackName(name) && ctx.snacksId != null) {
+      return _Lookup(ctx.byId[ctx.snacksId], const [], decided: true);
     }
     // A group (aggregate that is not a same-name wrapper) is never a product.
     final usable = [
       for (final c in res.candidates)
         if (!(c.isAggregate && !ctx.isWrapper(ctx.byId[c.id]!))) c,
     ];
-    BudgetCategory? pick;
     if (usable.isNotEmpty && !res.ambiguous && usable.first.id == res.best?.id) {
-      pick = ctx.byId[usable.first.id];
-    } else if (usable.isNotEmpty) {
-      pick = await _askModel(ctx, line, usable);
+      return _Lookup(ctx.byId[usable.first.id], usable, decided: true);
     }
-    if (pick != null) return pick;
+    return _Lookup(null, usable, decided: false);
+  }
 
-    line.candidates = [
-      for (final c in usable.take(4)) DraftChoice(c.id, c.name),
+  /// One batched model call per receipt: Ukrainian names and category
+  /// suggestions for the lines no rule can place. Cached in `overrides['suggest']`
+  /// (a rebuild after an answer or an edit never asks again); a model that cannot
+  /// be reached is remembered too (`suggest_failed`), so the lines fall back to
+  /// questions without waiting for it on every rebuild.
+  Future<void> _suggestLines(
+    _Ctx ctx,
+    List<({int index, String printed})> wanted,
+  ) async {
+    final cached = ctx.overrides['suggest'];
+    if (cached is Map) {
+      cached.forEach((k, v) {
+        final i = int.tryParse('$k');
+        if (i != null && v is Map) {
+          ctx.suggestions[i] = LineSuggestion.fromJson(Map<String, dynamic>.from(v));
+        }
+      });
+    }
+    final client = llm;
+    if (client == null || ctx.overrides['suggest_failed'] == true) return;
+    final todo = [
+      for (final w in wanted)
+        if (!ctx.suggestions.containsKey(w.index)) w,
     ];
-    line.questionIds = [...line.questionIds, 'cat:${line.index}'];
-    ctx.questions.add(
-      Question(
-        id: 'cat:${line.index}',
-        text:
-            'Яка категорія для «${line.name}» (${fmtMoney(line.amount)} ${ctx.currency})?'
-            '${line.candidates.isEmpty ? ' Напишіть назву категорії.' : ''}',
-        options: [for (final c in line.candidates) c.name],
-        recommended: line.candidates.isEmpty ? null : 0,
-      ),
-    );
-    return null;
+    if (todo.isEmpty) return;
+    try {
+      final got = await ItemSuggester(llm: client, resolver: resolver).suggest(
+        items: todo,
+        cats: ctx.cats,
+        merchant: ctx.merchant,
+      );
+      ctx.suggestions.addAll(got);
+      ctx.overrides['suggest'] = {
+        for (final e in ctx.suggestions.entries) '${e.key}': e.value.toJson(),
+      };
+    } on Object {
+      ctx.overrides['suggest_failed'] = true;
+    }
   }
 
   /// The model picks one of [candidates] (or none). Cached per line in the

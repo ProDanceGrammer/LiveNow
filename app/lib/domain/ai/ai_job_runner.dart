@@ -48,6 +48,7 @@ import 'price_planner.dart';
 import 'receipt_extractor.dart';
 import 'receipt_fx_rules.dart';
 import 'transfer_builder.dart';
+import 'typed_expense.dart';
 
 /// A job is given up after this many failed or interrupted attempts.
 const kMaxJobAttempts = 3;
@@ -347,7 +348,12 @@ class AiJobRunner {
       await _wait(job, open);
       return;
     }
-    final auto = !await settings.draftFirstActive();
+    // Auto mode writes what is certain. A line whose category is only the
+    // model's guess (below 0.8) waits for the user's Confirm like a first receipt.
+    final guessed = d.pendingLines.any(
+      (l) => l.suggested && (l.confidence ?? 0) < autoSuggestConfidence,
+    );
+    final auto = !await settings.draftFirstActive() && !guessed;
     if (open) {
       // Auto mode: write the obvious lines now and ask about the rest.
       if (auto && d.blockers.isEmpty) {
@@ -363,6 +369,9 @@ class AiJobRunner {
       await _wait(job, false);
     }
   }
+
+  /// A suggested category at or above this is written in auto mode without asking.
+  static const double autoSuggestConfidence = 0.8;
 
   Future<void> _wait(AiJob job, bool needsInput) async {
     final stage = AiStage.waiting;
@@ -391,16 +400,14 @@ class AiJobRunner {
         if (!waiting.contains(q.id)) q,
     ];
     if (toAsk.isEmpty) return;
-    final text = StringBuffer('Потрібні ваші відповіді:');
-    for (var i = 0; i < toAsk.length; i++) {
-      text.write('\n${i + 1}. ${toAsk[i].text}');
-    }
+    // The questions themselves are in the card (the widget lists them): a body
+    // that repeated them showed every question twice.
     await _putMessage(
       deriveId(job.id, 'question', msgs.length),
       job,
       role: AiRole.assistant,
       kind: AiMessageKind.question,
-      body: text.toString(),
+      body: toAsk.length == 1 ? 'Потрібна ваша відповідь:' : 'Потрібні ваші відповіді:',
       contentJson: jsonEncode(QuestionCard(toAsk).toJson()),
     );
   }
@@ -547,9 +554,32 @@ class AiJobRunner {
     } else if (id.startsWith('cat:')) {
       final line = _lineOf(d, int.tryParse(id.substring(4)));
       if (line == null) return true;
+      // "Створити «Чорнослив» у «Їжа»": a NEW category under an existing group.
+      final create = kCreateOption.firstMatch(a);
+      if (create != null) {
+        final group = await _groupByName(create.group(2)!);
+        if (group != null) {
+          final ov = _lineOv(d, line.index);
+          ov['category_id'] = group.id;
+          ov['new_name'] = create.group(1)!.trim();
+          return true;
+        }
+      }
       final categoryId = await _categoryFromAnswer(line, a);
-      if (categoryId == null) return true; // asked again
-      await _aliases.remember(line.name, categoryId: categoryId);
+      if (categoryId == null) {
+        // Nothing matches what was typed: say so and offer the nearest ones (the
+        // next card has new text, so it is not the same question again).
+        final miss = d.overrides['cat_miss'] is Map
+            ? Map<String, dynamic>.from(d.overrides['cat_miss'] as Map)
+            : <String, dynamic>{};
+        miss['${line.index}'] = a;
+        d.overrides['cat_miss'] = miss;
+        return true;
+      }
+      // A group is not a product: only a real category is learned.
+      if (!await _isGroup(categoryId)) {
+        await _aliases.remember(line.name, categoryId: categoryId);
+      }
       _lineOv(d, line.index)['category_id'] = categoryId;
     } else if (id == 'dup') {
       if (!_yes(a) && !RegExp('додати|add', caseSensitive: false).hasMatch(a)) {
@@ -569,7 +599,15 @@ class AiJobRunner {
       }
     } else if (id == 'cash_account') {
       final acc = await _accountFromAnswer(a);
-      if (acc != null) await _rules.set('cash.TRY', {'account_id': acc.id});
+      if (acc != null) {
+        // Remembered per currency, and as the default for "готівкою" with no
+        // currency, so the next message asks nothing.
+        await _rules.set('cash.${acc.currency.toUpperCase()}', {'account_id': acc.id});
+        await _rules.set('cash.default', {'account_id': acc.id});
+      }
+    } else if (id == 'pay_account') {
+      final acc = await _accountFromAnswer(a);
+      if (acc != null) d.overrides['use_account'] = acc.id;
     }
     return true;
   }
@@ -597,6 +635,31 @@ class AiJobRunner {
     final best = res.best;
     if (best != null && best.score >= 0.7) return best.id;
     return null;
+  }
+
+  /// An existing group (a category with children) by its exact name.
+  Future<BudgetCategory?> _groupByName(String name) async {
+    final key = normalizeReceiptText(name);
+    final all = await db.select(db.budgetCategoriesTable).get();
+    final parents = {for (final c in all) ?c.parentId};
+    for (final c in all) {
+      if (parents.contains(c.id) && normalizeReceiptText(c.name) == key) return c;
+    }
+    return null;
+  }
+
+  /// A group: has children and none of them is a same-name price variant (those
+  /// are wrappers, which are real products).
+  Future<bool> _isGroup(String categoryId) async {
+    final cat = await (db.select(db.budgetCategoriesTable)
+          ..where((t) => t.id.equals(categoryId)))
+        .getSingleOrNull();
+    final kids = await (db.select(db.budgetCategoriesTable)
+          ..where((t) => t.parentId.equals(categoryId)))
+        .get();
+    if (cat == null || kids.isEmpty) return false;
+    final key = normalizeReceiptText(cat.name);
+    return !kids.any((k) => normalizeReceiptText(k.name) == key);
   }
 
   Future<BudgetAccount?> _accountFromAnswer(String answer) async {
@@ -664,7 +727,7 @@ class AiJobRunner {
         }
         planned.add(
           PlannedTransaction(
-            name: txNameFor(d.merchant, l.name),
+            name: txNameFor(d.merchant, l.displayName),
             categoryId: target,
             quantity: l.quantity ?? 0,
             amount: l.amount,
@@ -739,7 +802,7 @@ class AiJobRunner {
         final txId = await _budget.createTransaction(
           id: deriveId(job.id, 'tx', l.index),
           categoryId: leafId,
-          name: txNameFor(d.merchant, l.name),
+          name: txNameFor(d.merchant, l.displayName),
           actionId: actionId,
           date: d.at,
           quantity: l.quantity,
@@ -761,6 +824,9 @@ class AiJobRunner {
         l.categoryName = leaf?.name ?? l.categoryName;
         l.transactionId = txId;
         l.committed = true;
+        // The user saw and confirmed this line: the next receipt with the same
+        // printed name needs no model.
+        if (d.userConfirmed && l.suggested) await _aliases.remember(l.name, categoryId: leafId);
       }
       if (d.userConfirmed && !d.counted) {
         await settings.incrementConfirmed();
@@ -805,7 +871,7 @@ class AiJobRunner {
     if (price == null || !(price > 0)) return null;
     if (l.oneOffGroupId != null) {
       return _planner.planOneOff(
-        name: l.name,
+        name: l.displayName,
         groupId: l.oneOffGroupId!,
         cost: price,
         accountCountId: l.countAccountId,
@@ -1514,7 +1580,23 @@ class AiJobRunner {
       await _transfer(job, transfer);
       return;
     }
+    final accounts = await db.select(db.budgetAccountsTable).get();
+    final typed = parseTypedExpense(
+      text,
+      now: (await _messageTime(job, payload)).toLocal(),
+      accountNames: [
+        for (final a in accounts)
+          a.name.replaceFirst(RegExp(r'^\s*\([^)]*\)\s*'), '').trim().toLowerCase(),
+      ],
+    );
     final target = await _pendingDraftJob(job);
+    // While a draft waits, "рядок 2 ..." is a correction of it; a message that
+    // reads like a purchase (a verb, cash, a currency, a day, an account, several
+    // items) is a new one.
+    if (typed != null && (target == null || typed.explicit)) {
+      await _startTyped(job, typed, accounts);
+      return;
+    }
     if (target != null) {
       await _correct(job, text, target.job, target.draft);
       return;
@@ -1522,8 +1604,46 @@ class AiJobRunner {
     await _replyAndFinish(
       job,
       'Не зрозумів. Надішліть фото чека, нотатку з базару або напишіть, '
-      'наприклад: «перевів 100 з ФОП на Monobank».',
+      'наприклад: «купив каву 150 готівкою» чи «перевів 100 з ФОП на Monobank».',
     );
+  }
+
+  /// A purchase told in words: the same draft, questions and Confirm as a photo.
+  Future<void> _startTyped(
+    AiJob job,
+    TypedExpense typed,
+    List<BudgetAccount> accounts,
+  ) async {
+    final existing = await _draftOf(job);
+    if (existing != null) {
+      await _status(job, AiStage.matching);
+      await _evaluate(job, await _rebuild(job, existing));
+      return;
+    }
+    final payload = JobPayload.decode(job.payloadJson);
+    final account = typed.accountIndex == null ? null : accounts[typed.accountIndex!];
+    await _status(job, AiStage.matching);
+    final b = await _builder.build(
+      job: job,
+      kind: AiJobKind.receipt,
+      source: {
+        'receipt': typed.toReceipt(typed.currency ?? 'TRY').toJson(),
+        'typed': {
+          'cash': typed.cash,
+          'currency': typed.currency,
+          'income': typed.income,
+          'account_id': account?.id,
+          'unparsed': typed.unparsed,
+        },
+      },
+      overrides: {},
+      messageTime: await _messageTime(job, payload),
+    );
+    // The typed message itself is the request, not an answer to handle later.
+    final origin = payload.messageId;
+    if (origin != null) b.card.handled = [...b.card.handled, origin];
+    await _saveDraft(job, b.card);
+    await _evaluate(job, b);
   }
 
   Future<void> _replyAndFinish(AiJob job, String text) async {

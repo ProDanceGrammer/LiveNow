@@ -82,9 +82,10 @@ abstract final class AiJobKind {
   /// A free-text request ('moved 12,582.50 from FOP to Monobank').
   static const text = 'text';
 
-  /// Jobs that make a draft / record a batch of transactions.
+  /// Jobs that make a draft / record a batch of transactions. A text job counts
+  /// too: a purchase told in words makes a draft (transfers finish at once).
   static bool recordsBatch(String kind) =>
-      kind == receipt || kind == bazaar || kind == photos;
+      kind == receipt || kind == bazaar || kind == photos || kind == text;
 }
 
 /// Stage strings the worker writes to `ai_jobs.stage` and the status message.

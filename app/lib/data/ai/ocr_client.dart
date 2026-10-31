@@ -7,6 +7,7 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../domain/ai/receipt_row_builder.dart' show ReceiptWord;
 import 'ai_http.dart';
 
 /// Default port of the OCR service (the sync hub uses 47653).
@@ -45,9 +46,19 @@ class OcrLine {
 }
 
 class OcrResult {
-  const OcrResult({required this.lines, this.engine = '', this.width, this.height});
+  const OcrResult({
+    required this.lines,
+    this.words = const [],
+    this.engine = '',
+    this.width,
+    this.height,
+  });
 
   final List<OcrLine> lines;
+
+  /// The raw word boxes (empty from an older OCR service): a tilted receipt photo
+  /// is re-read row by row from these, see `receipt_row_builder.dart`.
+  final List<ReceiptWord> words;
 
   /// `rapidocr` or `tesseract` (whatever the service used).
   final String engine;
@@ -58,6 +69,18 @@ class OcrResult {
   String get text => lines.map((l) => l.text).where((t) => t.trim().isNotEmpty).join('\n');
 
   bool get isEmpty => text.trim().isEmpty;
+}
+
+/// One `items` entry (`{text, quad: [[x, y] x 4]}`); null when malformed.
+ReceiptWord? _wordOf(Object? it) {
+  if (it is! Map || it['quad'] is! List) return null;
+  final quad = <List<double>>[];
+  for (final p in it['quad'] as List) {
+    if (p is! List || p.length < 2 || p[0] is! num || p[1] is! num) return null;
+    quad.add([(p[0] as num).toDouble(), (p[1] as num).toDouble()]);
+  }
+  if (quad.length != 4) return null;
+  return ReceiptWord.fromQuad((it['text'] ?? '').toString(), quad);
 }
 
 class OcrClient {
@@ -118,6 +141,11 @@ class OcrClient {
         lines: [
           for (final l in j['lines'] as List)
             if (l is Map) OcrLine.fromJson(Map<String, dynamic>.from(l)),
+        ],
+        words: [
+          if (j['items'] is List)
+            for (final it in j['items'] as List)
+              ?_wordOf(it),
         ],
       );
     } on FormatException catch (e) {

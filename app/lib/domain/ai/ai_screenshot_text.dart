@@ -58,11 +58,17 @@ final _count = RegExp(
   caseSensitive: false,
   unicode: true,
 );
+// OCR without a Cyrillic model reads "курс" as the Latin look-alike "kypc" and
+// "₴" as a stray symbol, but keeps the digits: accept both spellings.
 final _rate = RegExp(
-  r'(?:курс|kurs|rate)\D{0,12}?(\d+(?:[.,]\d+)?)',
+  r'(?:курс|kurs|kypc|rate)\D{0,12}?(\d+(?:[.,]\d+)?)',
   caseSensitive: false,
   unicode: true,
 );
+
+/// A charged amount shown with a leading minus (`-3 043.80`), whatever symbol
+/// follows. Only trusted together with a rate (see [parseBankScreenshot]).
+final _charged = RegExp(r'(?:^|[\s(])[-−–]\s*(\d[\d\s  .,]*[.,]\d{2})(?!\d)');
 
 /// Reads the OCR text of a bank screenshot. Tolerant: whatever is not found is
 /// null. The amount in hryvnia is the one with a `₴`/`грн` marker, the lira one
@@ -83,6 +89,14 @@ ScreenshotReading parseBankScreenshot(String text) {
   if (r != null) {
     final v = double.tryParse(r.group(1)!.replaceAll(',', '.'));
     if (v != null && v > 0) rate = v;
+  }
+  // No readable currency sign: the leading-minus amount is what was charged, but
+  // only on a page that also states a rate (a receipt's discount line is not).
+  if (useAmount == null && rate != null) {
+    for (final m in _charged.allMatches(text)) {
+      final v = parseAmountText(m.group(1)!);
+      if (v != null && (useAmount == null || v > useAmount)) useAmount = v;
+    }
   }
   return ScreenshotReading(useAmount: useAmount, countAmount: countAmount, rate: rate);
 }

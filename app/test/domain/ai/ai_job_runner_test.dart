@@ -474,8 +474,13 @@ void main() {
         CategoryInputLike.leaf('Сир Едам', 450, env.groupFood, env.tryAcc, env.monoAcc),
       );
 
-      // 1. the model chooses c1 with confidence
-      llmServer.enqueueJson({'choice': 'c1', 'confidence': 0.9});
+      // 1. the name is already Ukrainian (no translation call); the model chooses
+      // c1 with confidence
+      llmServer.enqueueJson({
+        'items': [
+          {'n': 1, 'pick': 'c1', 'group': 'none', 'name': '', 'confidence': 0.9},
+        ],
+      });
       final a = await env.sendReceipt(receiptOf([rl('Сир 200 г', 100.00, name: 'Сир 200 г')], at: '2026-10-08T19:40:00'));
       await env.drain();
       expect((await env.job(a)).state, AiJobState.done);

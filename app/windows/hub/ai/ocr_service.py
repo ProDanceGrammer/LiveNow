@@ -3,9 +3,11 @@
   GET  /health  -> {"ok": true, "engine": "rapidocr" | "tesseract"}
   POST /ocr     -> body = the raw image bytes (JPEG/PNG/...)
                    reply = {"engine", "width", "height",
-                            "lines": [{"text", "box": [x0, y0, x1, y1], "confidence"}]}
-                   one entry per printed ROW: words on the same baseline are joined left to
-                   right, rows are ordered top to bottom (reading order).
+                            "lines": [{"text", "box": [x0, y0, x1, y1], "confidence"}],
+                            "items": [{"text", "quad": [[x, y] x 4], "confidence"}]}
+                   "lines": one entry per printed ROW: words on the same baseline are joined
+                   left to right, rows are ordered top to bottom (reading order).
+                   "items": the raw word boxes (a skewed photo needs its own row builder).
 
 Engine: RapidOCR (rapidocr_onnxruntime) when installed, else Tesseract (pytesseract, languages
 tur+eng). Force one with LIVENOW_OCR_ENGINE=rapidocr|tesseract. RapidOCR's stock models know
@@ -53,7 +55,8 @@ def _load_engine():
                 for box, text, conf in result or []:
                     xs = [p[0] for p in box]
                     ys = [p[1] for p in box]
-                    out.append((min(xs), min(ys), max(xs), max(ys), str(text), float(conf)))
+                    quad = [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in box]
+                    out.append((min(xs), min(ys), max(xs), max(ys), str(text), float(conf), quad))
                 return out
 
             return "rapidocr", run
@@ -82,7 +85,8 @@ def _load_engine():
             if conf < 0:
                 continue
             x, y, w, h = d["left"][i], d["top"][i], d["width"][i], d["height"][i]
-            out.append((x, y, x + w, y + h, text, conf))
+            quad = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
+            out.append((x, y, x + w, y + h, text, conf, quad))
         return out
 
     return "tesseract", run
@@ -170,8 +174,12 @@ def run_ocr(data):
     img = preprocess(data)
     with _lock:
         items = run(img)
+    # "lines" joins boxes by a fixed y band (fine for flat screenshots); "items" are the raw
+    # word boxes with their quads, so the app can rebuild rows of a skewed receipt photo itself.
     return {"engine": name, "width": img.width, "height": img.height,
-            "lines": group_rows(items)}
+            "lines": group_rows(items),
+            "items": [{"text": it[4], "quad": it[6], "confidence": round(it[5], 3)}
+                      for it in items]}
 
 
 class Handler(BaseHTTPRequestHandler):

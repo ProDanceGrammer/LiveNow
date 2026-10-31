@@ -39,6 +39,12 @@ void main() {
       expect(matchAccountName('моно', names, (n) => n), isEmpty);
       expect(matchAccountName('Monobank card', names, (n) => n), ['Monobank']);
     });
+
+    test('a currency tag does not make the plain name ambiguous', () {
+      final names = ['(€) Monobank ФОП', '(₴) Monobank', 'Turkish Lira'];
+      expect(matchAccountName('Monobank', names, (n) => n), ['(₴) Monobank']);
+      expect(matchAccountName('monobank фоп', names, (n) => n), ['(€) Monobank ФОП']);
+    });
   });
 
   group('A4 bank screenshot text', () {
@@ -48,6 +54,21 @@ void main() {
       expect(r.countAmount, 1051.95);
       expect(r.rate, 0.9142);
       expect(r.hasAnything, isTrue);
+    });
+
+    test('OCR without Cyrillic: "kypc", a stray symbol for the currency sign', () {
+      final r = parseBankScreenshot(
+        '5MALANYAKIPA.AVM-5530\n-1 043.80∞\nyBaJoTi1102.06TL,Kypc0.9217',
+      );
+      expect(r.hasAnything, isTrue);
+      expect(r.rate, 0.9217);
+      expect(r.countAmount, 1102.06);
+      expect(r.useAmount, 1043.8);
+    });
+
+    test('a receipt with a discount line and a TL amount is not a screenshot', () {
+      final r = parseBankScreenshot('INDIRIM -5,00\nMONEY ILE BU FISINIZDE 86,95TL\nTOPLAM *1.102,06');
+      expect(r.hasAnything, isFalse);
     });
 
     test('nothing readable', () {

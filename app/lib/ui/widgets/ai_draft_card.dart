@@ -224,10 +224,26 @@ class _LineRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${line.name}  ->  $cat'),
+                  Text('${line.displayName}  ->  $cat'),
+                  if (line.uaName != null && line.uaName != line.name)
+                    Text(
+                      line.name,
+                      key: ValueKey<String>('ai-line-printed-${line.index}'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   Wrap(
                     spacing: 4,
                     children: [
+                      if (line.suggested)
+                        _Badge(
+                          line.confidence == null
+                              ? 'suggested'
+                              : 'suggested ${(line.confidence! * 100).round()}%',
+                        ),
+                      if (line.flags.contains(kFlagWeightGuess))
+                        const _Badge('weight estimated'),
                       if (line.newCategory) const _Badge('new category'),
                       if (line.priceChange) const _Badge('price change'),
                       if (line.needsAnswer) const _Badge('needs answer'),

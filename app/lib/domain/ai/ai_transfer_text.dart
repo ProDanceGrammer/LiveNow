@@ -96,6 +96,12 @@ List<T> matchAccountName<T>(
       if (normalizeReceiptText(nameOf(a)) == key) a,
   ];
   if (exact.isNotEmpty) return exact;
+  // "Monobank" is the account "(₴) Monobank", not "(€) Monobank ФОП".
+  final untagged = [
+    for (final a in accounts)
+      if (normalizeReceiptText(nameOf(a).replaceFirst(RegExp(r'^\s*\([^)]*\)\s*'), '')) == key) a,
+  ];
+  if (untagged.isNotEmpty) return untagged;
   return [
     for (final a in accounts)
       if (_partial(normalizeReceiptText(nameOf(a)), key)) a,
