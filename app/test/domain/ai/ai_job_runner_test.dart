@@ -500,7 +500,11 @@ void main() {
       final q = (await env.message(b, AiMessageKind.question))!;
       final card = QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>);
       expect(card.questions.single.id, 'cat:0');
-      expect(card.questions.single.options, containsAll(['Сир Гауда', 'Сир Едам']));
+      // Options carry their group, so same-named categories can be told apart.
+      expect(
+        card.questions.single.options,
+        containsAll(['Їжа › Сир Гауда', 'Їжа › Сир Едам']),
+      );
       expect(await env.count('budget_transactions'), 1, reason: 'nothing guessed');
 
       // The user picks one; it becomes an alias and the job completes.
@@ -509,6 +513,41 @@ void main() {
       expect((await env.job(b)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 2);
       expect((await env.aliases.row('Сир 300 г'))!.categoryId, isNotNull);
+    });
+
+    test('a tapped option is answered by its id, whatever its text says', () async {
+      await env.init(autoMode: true, llm: llmClient());
+      await bazaarAction();
+      await env.budget.saveCategory(
+        CategoryInputLike.leaf('Сир Гауда', 500, env.groupFood, env.tryAcc, env.monoAcc),
+      );
+      final edam = await env.budget.saveCategory(
+        CategoryInputLike.leaf('Сир Едам', 450, env.groupFood, env.tryAcc, env.monoAcc),
+      );
+      final b = await env.sendReceipt(
+        receiptOf([rl('Сир 300 г', 150.00, name: 'Сир 300 г')], at: '2026-10-09T10:00:00'),
+      );
+      await env.drain();
+      final q = (await env.message(b, AiMessageKind.question))!;
+      final question =
+          QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>).questions.single;
+      expect(question.optionIds.length, question.options.length);
+      expect(question.optionIds, contains(edam));
+
+      // The text matches no category at all: only the id says which one was tapped.
+      await env.chat.answerQuestion(q.id, 'cat:0', 'щось зовсім інше', optionId: edam);
+      await env.drain();
+      expect((await env.job(b)).state, AiJobState.done);
+      // 500/kg is not Edam's 450: the commit records a price-change variant of Edam.
+      final tx = (await env.transactions()).single;
+      expect(
+        await env.count(
+          'budget_categories',
+          "id = '${tx.categoryId}' AND name LIKE '%Едам%'",
+        ),
+        1,
+        reason: 'the tapped option, not Gouda',
+      );
     });
 
     test('a job fails after 3 attempts with an error row', () async {

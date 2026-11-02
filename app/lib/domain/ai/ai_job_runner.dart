@@ -555,9 +555,14 @@ class AiJobRunner {
       final line = _lineOf(d, int.tryParse(id.substring(4)));
       if (line == null) return true;
       // "Створити «Чорнослив» у «Їжа»": a NEW category under an existing group.
+      // A tapped option names its group by id (`create:<id>`): two groups can
+      // share a name; typed text still finds it by name.
       final create = kCreateOption.firstMatch(a);
       if (create != null) {
-        final group = await _groupByName(create.group(2)!);
+        final aid = q.answerId;
+        final group = aid != null && aid.startsWith('create:')
+            ? await _categoryById(aid.substring(7))
+            : await _groupByName(create.group(2)!);
         if (group != null) {
           final ov = _lineOv(d, line.index);
           ov['category_id'] = group.id;
@@ -565,7 +570,11 @@ class AiJobRunner {
           return true;
         }
       }
-      final categoryId = await _categoryFromAnswer(line, a);
+      // A tapped option is its id; only typed text is matched by name.
+      final aid = q.answerId;
+      final categoryId = aid != null && line.candidates.any((c) => c.id == aid)
+          ? aid
+          : await _categoryFromAnswer(line, a);
       if (categoryId == null) {
         // Nothing matches what was typed: say so and offer the nearest ones (the
         // next card has new text, so it is not the same question again).
@@ -628,7 +637,10 @@ class AiJobRunner {
   Future<String?> _categoryFromAnswer(DraftLine line, String answer) async {
     final key = normalizeReceiptText(answer);
     for (final c in line.candidates) {
-      if (normalizeReceiptText(c.name) == key) return c.id;
+      // The option as shown (`Група › Назва`) or the bare name.
+      if (normalizeReceiptText(c.label) == key || normalizeReceiptText(c.name) == key) {
+        return c.id;
+      }
     }
     // Free text: an existing category by name.
     final res = await CategoryResolver(db).resolve(answer, limit: 3);
@@ -636,6 +648,10 @@ class AiJobRunner {
     if (best != null && best.score >= 0.7) return best.id;
     return null;
   }
+
+  Future<BudgetCategory?> _categoryById(String id) => (db.select(
+    db.budgetCategoriesTable,
+  )..where((c) => c.id.equals(id))).getSingleOrNull();
 
   /// An existing group (a category with children) by its exact name.
   Future<BudgetCategory?> _groupByName(String name) async {

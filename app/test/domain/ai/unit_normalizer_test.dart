@@ -20,6 +20,13 @@ void main() {
     kg('SALAM HİNDİ FIST.50G', 0.05, 'U1');
   });
 
+  test('U1 a letter O inside the size is a zero (OCR): 5O0G is 500 g', () {
+    kg('TAMBUGDAYEKMK5O0G', 0.5, 'U1');
+    kg('YOGURT 1O00G', 1, 'U1');
+    // A zero size is never a weight: it falls through to the next rule.
+    expect(normalizeUnit('KOLA 0G').kind, UnitKind.unknown);
+  });
+
   test('U1 a trailing printed price is not read as a weight', () {
     expect(normalizeUnit('BERLINER 57.90').kind, UnitKind.unknown);
     kg('HAŞHAŞLI ÇÖREK 150 G 48.00', 0.15, 'U1');

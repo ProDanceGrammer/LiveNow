@@ -135,7 +135,9 @@ const turkishGlossary =
     'nohut=нут, findik=фундук, ceviz=горіхи, bal=мед, recel=джем, zeytin=оливки, '
     'cay=чай, kahve=кава, meyve suyu=сік, sabun=мило, deterjan=пральний порошок, '
     'pecete=серветки, isirgan=кропива, toz=порошок/мелений, iri=великий, '
-    'yapragi=листя, kurusu=сушений, salata=салат, krema=крем, yogurt=йогурт.';
+    'yapragi=листя, kurusu=сушений, salata=салат, krema=крем, yogurt=йогурт, '
+    'badem=мигдаль, ici/icecegi=напій, tam bugday=цільнозерновий (NOT гречка), '
+    'hindi fume=індичка копчена, bonfile=філе, saka su=вода Saka.';
 
 /// Item names as printed (Turkish, capitals, OCR slips) -> short Ukrainian product
 /// names. One call for the whole receipt; [items] are (number, printed name).
@@ -194,9 +196,30 @@ Map<int, String> parseTranslatedItems(Map<String, dynamic> json) {
     if (e is! Map) continue;
     final n = e['n'] is num ? (e['n'] as num).round() : int.tryParse('${e['n']}');
     final ua = _tidyName(e['ua']);
-    if (n != null && ua != null && ua.length <= 80) out[n] = ua;
+    if (n != null && ua != null && ua.length <= 80 && isCleanTranslation(ua)) out[n] = ua;
   }
   return out;
+}
+
+final _allowedChar = RegExp(
+  "[\\u0400-\\u04FF A-Za-z\\u00C0-\\u024F0-9.,'’‘«»:;!?%&+*/()\\-–×°#№]",
+);
+
+/// A translated name is Cyrillic (a brand may stay Latin), digits and plain
+/// punctuation. A letter of another script (the Greek kappa that leaked into
+/// "саκа сο") or a word that mixes Cyrillic and Latin letters is a garbled
+/// answer: it is dropped and the printed name is shown instead.
+bool isCleanTranslation(String s) {
+  for (final r in s.runes) {
+    final ch = String.fromCharCode(r);
+    if (!ch.contains(RegExp(r'\s')) && !_allowedChar.hasMatch(ch)) return false;
+  }
+  for (final w in s.split(RegExp(r'[\s\-–/()]+'))) {
+    final cyrillic = RegExp('[\\u0400-\\u04FF]').hasMatch(w);
+    final latin = RegExp('[A-Za-z\\u00C0-\\u024F]').hasMatch(w);
+    if (cyrillic && latin) return false;
+  }
+  return true;
 }
 
 /// A model-written name with tabs, control characters and runs of spaces

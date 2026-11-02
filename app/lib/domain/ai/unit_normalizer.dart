@@ -69,10 +69,13 @@ UnitResult normalizeUnit(
   bool pieceOnly = false,
 }) {
   if (pieceOnly) return const UnitResult.pieces(1, 'U2');
-  final s = foldText(text).replaceFirst(_trailingPrice, '');
+  // OCR reads a zero as a letter O between digits (`5O0G` is 500 g).
+  final s = foldText(text)
+      .replaceFirst(_trailingPrice, '')
+      .replaceAllMapped(RegExp(r'(?<=\d)o(?=[\dg])'), (_) => '0');
 
   var m = _multi.firstMatch(s);
-  if (m != null) {
+  if (m != null && _d(m[2]!) > 0) {
     final kg = int.parse(m[1]!) * _toKg(_d(m[2]!), m[3]!);
     return UnitResult.kilograms(kg, 'U5');
   }
@@ -84,7 +87,10 @@ UnitResult normalizeUnit(
     return UnitResult.kilograms(a > b ? a : b, 'U4');
   }
   m = _single.firstMatch(s);
-  if (m != null) return UnitResult.kilograms(_toKg(_d(m[1]!), m[2]!), 'U1');
+  // A zero size (`0g`) is a misread, never a weight: let the next rule try.
+  if (m != null && _d(m[1]!) > 0) {
+    return UnitResult.kilograms(_toKg(_d(m[1]!), m[2]!), 'U1');
+  }
   m = _packCount.firstMatch(s);
   if (m != null) return UnitResult.pieces(_d(m[1]!), 'U5');
   m = _hundreds.firstMatch(s);

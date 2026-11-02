@@ -67,6 +67,16 @@ class OcrLlmExtractor implements ReceiptExtractor {
       receipt = await _retryOnce(llm, messages, receipt, cancel, ocrText: text);
     }
     receipt = cleanReceiptNames(receipt);
+    // Deterministic first: the model never makes a reading worse. When the
+    // program's own rows are at least as close to the printed total, keep them.
+    if (rebuilt != null) {
+      final total = rebuilt.receipt.total ?? receipt.total;
+      double gap(ExtractedReceipt r) =>
+          total == null ? double.infinity : ((linesSum(r) ?? 0) - total).abs();
+      if (gap(rebuilt.receipt) <= gap(receipt)) {
+        receipt = copyReceipt(rebuilt.receipt, total: total);
+      }
+    }
     if (sumMismatch(receipt)) await onUnbalanced?.call(read.words, text, receipt);
     return (receipt: receipt, ocrText: text);
   }
@@ -163,12 +173,14 @@ Future<ExtractedReceipt> _ask(
   LlmClient llm,
   List<LlmMessage> messages,
   AiCancelToken? cancel,
-) async => ExtractedReceipt.fromJson(
-  await llm.chatJson(
-    messages,
-    schema: receiptJsonSchema,
-    schemaName: 'extracted_receipt',
-    cancel: cancel,
+) async => sanitizeFlags(
+  ExtractedReceipt.fromJson(
+    await llm.chatJson(
+      messages,
+      schema: receiptJsonSchema,
+      schemaName: 'extracted_receipt',
+      cancel: cancel,
+    ),
   ),
 );
 

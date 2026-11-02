@@ -11,6 +11,7 @@ import '../../data/ai/llm_client.dart';
 import '../../data/database.dart';
 import 'category_resolver.dart';
 import 'model_prompts.dart';
+import 'tr_glossary.dart';
 
 /// What the assistant proposes for one receipt line.
 class LineSuggestion {
@@ -82,10 +83,21 @@ class ItemSuggester {
         if (!_cyrillic.hasMatch(items[i].printed)) i,
     ];
     final ua = <int, String>{};
-    if (foreign.isNotEmpty) {
+    // What the code-side glossary knows is never asked of the model: a 3B model
+    // turned potatoes into bread and put Greek letters into water.
+    final unknown = <int>[];
+    for (final i in foreign) {
+      final known = translateKnown(items[i].printed);
+      if (known != null) {
+        ua[i + 1] = known;
+      } else {
+        unknown.add(i);
+      }
+    }
+    if (unknown.isNotEmpty) {
       final reply = await llm.runPrompt(
         translateItemsPrompt(
-          items: [for (final i in foreign) (n: i + 1, name: items[i].printed)],
+          items: [for (final i in unknown) (n: i + 1, name: items[i].printed)],
           merchant: merchant,
         ),
       );

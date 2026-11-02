@@ -176,6 +176,168 @@ void main() {
     });
   });
 
+  group('the BIM receipt of 2 Nov (OCR garbles)', () {
+    // The tokens exactly as the OCR service returned them for the photo.
+    List<ReceiptWord> bim() => rowsOf([
+      [('BIM BIRLESIK MAGAZALAR A-S.', 120, 250)],
+      [('02.11.202618:01', 120, 150), ('SiraNo:126', 420, 100)],
+      [('3.015kgX29.50', 120, 150)],
+      [('PATATES', 120, 80), ('%1.', 370, 25), ('*88.94', 450, 80)],
+      [('0.534kgX339.00', 120, 150)],
+      [('PiLIC BONFILE', 120, 120), ('%1.', 370, 25), ('*181.03', 450, 80)],
+      [('0.975 kg X 49.00', 120, 160)],
+      [('SALATALIK', 120, 90), ('%1.', 370, 25), ('*47.78', 450, 80)],
+      [('TAMBUGDAYEKMK5O0G', 120, 200), ('%12', 370, 25), ('*65.00', 450, 80)],
+      [('0.785kgX39.00', 120, 150)],
+      [('LiMON', 120, 60), ('%1.', 370, 25), ('*30.62', 450, 80)],
+      [('GUNLUK SUT 1L DOST', 120, 200), ('%1.', 370, 25), ('*59.00', 450, 80)],
+      [('1.3kgX79.00', 120, 120)],
+      [('DOMATES', 120, 80), ('%1.', 370, 25), ('本102.70', 450, 80)],
+      [('HiNDi FUME 60G', 120, 150), ('%1,', 370, 25), ('*37.50', 450, 80)],
+      [('PiLiC SALAM 150G', 120, 160), ('%1', 370, 25), ('*52.50', 450, 80)],
+      [('BAR NUGA 240G MiNiKI %1', 120, 250), ('*65.00', 450, 80)],
+      [('TOPLAMKDY', 120, 100), ('*7.23', 450, 80)],
+      [('Odenecek KDV Dahil Tutar', 120, 250), (r'$730.07', 450, 80)],
+      [('Banka Kredi Karti (1)', 120, 220), ('*730.07', 450, 80)],
+      [('l:771804 T:01744855444111***车*6141', 120, 330)],
+    ]);
+
+    test('all ten items, the total, the time and the card are read', () {
+      final r = rebuildReceipt(bim())!;
+      expect(r.consistent, isTrue, reason: r.text);
+      expect(r.receipt.total, 730.07);
+      expect(r.receipt.merchant, 'BİM');
+      expect(r.receipt.terminalDatetimeLocal, '2026-11-02T18:01:00');
+      expect(r.receipt.tenders.single.amount, 730.07);
+      final named = [for (final l in r.receipt.lines) if (l.name != null) l];
+      expect([for (final l in named) l.name], [
+        'PATATES',
+        'PiLIC BONFILE',
+        'SALATALIK',
+        'TAMBUGDAYEKMK5O0G',
+        'LiMON',
+        'GUNLUK SUT 1L DOST',
+        'DOMATES',
+        'HiNDi FUME 60G',
+        'PiLiC SALAM 150G',
+        'BAR NUGA 240G MiNiKI',
+      ]);
+      expect(named[3].vatPct, 1, reason: '%12 is a %1. with a stray digit');
+    });
+
+    test('weighed items carry their weight, the pack in the name its size', () {
+      final r = rebuildReceipt(bim())!;
+      final parsed = parseReceiptLines(r.receipt.lines);
+      final byName = {for (final l in parsed.lines) l.name: l};
+      expect(byName['LiMON']!.quantity, closeTo(0.785, 1e-9));
+      expect(byName['LiMON']!.net, 30.62);
+      expect(byName['DOMATES']!.quantity, closeTo(1.3, 1e-9));
+      expect(byName['PATATES']!.quantity, closeTo(3.015, 1e-9));
+      expect(byName['TAMBUGDAYEKMK5O0G']!.quantity, closeTo(0.5, 1e-9));
+      expect(parsed.netSum, 730.07);
+    });
+
+    test('a qty row split as `0.785kg` + `X39.00` is not a 39.00 item', () {
+      final r = rebuildReceipt(
+        rowsOf([
+          [('0.785kg', 120, 80), ('X39.00', 300, 70)],
+          [('LiMON', 120, 60), ('%1.', 370, 25), ('*30.62', 450, 80)],
+          [('TOPLAM', 120, 100), ('*30.62', 430, 90)],
+        ]),
+      )!;
+      expect(r.consistent, isTrue, reason: r.text);
+      final parsed = parseReceiptLines(r.receipt.lines);
+      expect(parsed.lines.single.name, 'LiMON');
+      expect(parsed.lines.single.quantity, closeTo(0.785, 1e-9));
+      expect(parsed.lines.single.net, 30.62);
+    });
+
+    test('a lost marker: the rightmost unmarked decimal is the amount', () {
+      final r = rebuildReceipt(
+        rowsOf([
+          [('LiMON', 120, 60), ('%1.', 370, 25), ('30.62', 450, 80)],
+          [('GUNLUK SUT', 120, 120), ('%1.', 370, 25), ('*59.00', 450, 80)],
+          [('TOPLAM', 120, 100), ('*89.62', 430, 90)],
+        ]),
+      )!;
+      expect(r.consistent, isTrue, reason: r.text);
+      expect([for (final l in r.receipt.lines) l.name], ['LiMON', 'GUNLUK SUT']);
+    });
+
+    test('garbled VAT marks (1%O1, 1\'O%01) stay out of the names', () {
+      final r = rebuildReceipt(
+        rowsOf([
+          [('HARIBO CHAMMALLOHE 1%O1', 120, 260), ('*65,00', 450, 80)],
+          [("AMICO BADEM ICI 1'O%01", 120, 260), ('*134,00', 450, 80)],
+          [('SAKA SU JO LIF', 120, 160), ('*95,50', 450, 80)],
+          [('TOPKDV', 120, 100), ('*2,92', 450, 80)],
+          [('TOPLAM TUHo UaOX*294,50', 120, 300)],
+          [('KREDi', 120, 80), ('*294,50', 450, 80)],
+        ]),
+      )!;
+      expect(r.consistent, isTrue, reason: r.text);
+      expect([for (final l in r.receipt.lines) l.name], [
+        'HARIBO CHAMMALLOHE',
+        'AMICO BADEM ICI',
+        'SAKA SU JO LIF',
+      ]);
+    });
+
+    // The real photo's OCR boxes are a private receipt: git-ignored fixture.
+    final fixture = File('../claude_dev/ai/fixtures/bim_ocr.json');
+    test(
+      'the real BIM photo adds up to 730.07 without any model',
+      () {
+        final j = jsonDecode(fixture.readAsStringSync()) as Map<String, dynamic>;
+        final words = [
+          for (final it in j['items'] as List)
+            ReceiptWord.fromQuad(
+              (it as Map)['text'] as String,
+              [
+                for (final p in it['quad'] as List)
+                  [((p as List)[0] as num).toDouble(), (p[1] as num).toDouble()],
+              ],
+            ),
+        ];
+        final r = rebuildReceipt(words)!;
+        expect(r.receipt.total, 730.07, reason: r.text);
+        expect(r.consistent, isTrue, reason: r.text);
+        final parsed = parseReceiptLines(r.receipt.lines);
+        expect(parsed.lines.length, 10, reason: r.text);
+        expect(r.receipt.terminalDatetimeLocal, '2026-11-02T18:01:00');
+      },
+      skip: fixture.existsSync() ? false : 'private OCR fixture not present',
+    );
+
+    final haribo = File('../claude_dev/ai/fixtures/haribo_ocr.json');
+    test(
+      'the real HARIBO photo (garbled VAT marks and total row) adds up to 294.50',
+      () {
+        final j = jsonDecode(haribo.readAsStringSync()) as Map<String, dynamic>;
+        final words = [
+          for (final it in j['items'] as List)
+            ReceiptWord.fromQuad(
+              (it as Map)['text'] as String,
+              [
+                for (final p in it['quad'] as List)
+                  [((p as List)[0] as num).toDouble(), (p[1] as num).toDouble()],
+              ],
+            ),
+        ];
+        final r = rebuildReceipt(words)!;
+        final lines = [for (final l in r.receipt.lines) '${l.name}=${l.lineTotal}'];
+        expect(r.receipt.total, 294.5, reason: r.text);
+        expect(r.consistent, isTrue, reason: '$lines\n${r.text}');
+        expect([for (final l in r.receipt.lines) l.name], [
+          'HARIBO CHAMMALLOHE',
+          'AMICO BADEM ICI',
+          'SAKA SU JO LIF',
+        ], reason: r.text);
+      },
+      skip: haribo.existsSync() ? false : 'private OCR fixture not present',
+    );
+  });
+
   group('receipt numbers', () {
     test('thousands and decimals', () {
       expect(parseReceiptNumber('3.302,06'), 3302.06);

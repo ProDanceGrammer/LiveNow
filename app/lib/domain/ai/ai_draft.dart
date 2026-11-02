@@ -22,13 +22,34 @@ List<String> _strs(Object? v) => [
 
 /// A category option offered for a line (a question's quick reply).
 class DraftChoice {
-  const DraftChoice(this.id, this.name);
+  const DraftChoice(this.id, this.name, {this.parentName, this.price, this.unit});
   final String id;
   final String name;
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name};
-  factory DraftChoice.fromJson(Map<String, dynamic> j) =>
-      DraftChoice((j['id'] ?? '').toString(), (j['name'] ?? '').toString());
+  /// The group the category sits under (two categories can share a name), the
+  /// category's usual price and unit: what the user needs to tell options apart.
+  final String? parentName;
+  final double? price;
+  final String? unit;
+
+  /// `Group › Name`, or just the name when it has no group.
+  String get label =>
+      parentName == null || parentName!.isEmpty ? name : '$parentName › $name';
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    if (parentName != null) 'parent': parentName,
+    if (price != null) 'price': price,
+    if (unit != null) 'unit': unit,
+  };
+  factory DraftChoice.fromJson(Map<String, dynamic> j) => DraftChoice(
+    (j['id'] ?? '').toString(),
+    (j['name'] ?? '').toString(),
+    parentName: _s(j['parent']),
+    price: _d(j['price']),
+    unit: _s(j['unit']),
+  );
 }
 
 class DraftLine {

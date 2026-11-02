@@ -210,12 +210,15 @@ class AiChatService {
   }
 
   /// Answers one question of a card by a tapped option (a quick-reply chip).
-  /// Same effect as typing, but addressed to a known question.
+  /// Same effect as typing, but addressed to a known question. [optionId] is the
+  /// id of the tapped option (see `Question.optionIds`): the hub resolves a
+  /// category by it, so options that read alike are told apart.
   Future<void> answerQuestion(
     String questionMessageId,
     String questionId,
-    String answer,
-  ) {
+    String answer, {
+    String? optionId,
+  }) {
     final clean = _cleanText(answer);
     if (clean.isEmpty) return Future.value();
     return db.transaction(() async {
@@ -227,7 +230,11 @@ class AiChatService {
       final qs = _decodeCard(card);
       final i = qs.indexWhere((x) => x.id == questionId);
       if (i < 0) return;
-      qs[i] = _withAnswer(qs[i], clean);
+      qs[i] = _withAnswer(
+        qs[i],
+        clean,
+        answerId: optionId == null || optionId.isEmpty ? null : optionId,
+      );
       await _saveCard(card, qs, now);
       await _insertUserMessage(
         newId(),
@@ -670,11 +677,13 @@ class AiChatService {
     await _saveCard(card, qs, now);
   }
 
-  Question _withAnswer(Question q, String a) => Question(
+  Question _withAnswer(Question q, String a, {String? answerId}) => Question(
     id: q.id,
     text: q.text,
     options: q.options,
+    optionIds: q.optionIds,
     recommended: q.recommended,
     answer: a,
+    answerId: answerId,
   );
 }

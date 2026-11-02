@@ -1043,9 +1043,21 @@ class DraftBuilder {
           if (!(c.isAggregate && !ctx.isWrapper(ctx.byId[c.id]!))) c,
       ];
     }
+    // The nearest categories, told apart: no id or label twice (a same-named
+    // price variant adds nothing), each with its group (`Їжа › Сир`), usual price
+    // and unit, so the user can check what a choice is before tapping it.
+    final seen = <String>{};
     line.candidates = [
-      for (final c in choices.take(3)) DraftChoice(c.id, c.name),
-    ];
+      for (final c in choices)
+        if (seen.add(c.id))
+          DraftChoice(
+            c.id,
+            c.name,
+            parentName: c.parentName,
+            price: c.price,
+            unit: c.unit.name,
+          ),
+    ].where((c) => seen.add('label:${c.label}')).take(3).toList();
     final group = ctx.byId[sug?.groupId] ?? ctx.defaultGroup;
     final newName = miss ?? line.displayName;
     final create = group == null ? null : createOptionLabel(newName, group.name);
@@ -1057,7 +1069,12 @@ class DraftBuilder {
             ? 'Яка категорія для «${line.displayName}» (${fmtMoney(line.amount)} ${ctx.currency})?'
             : 'Не знайшов категорію «$miss». Оберіть найближчу, створіть нову або '
                   'напишіть іншу назву.',
-        options: [for (final c in line.candidates) c.name, ?create],
+        options: [for (final c in line.candidates) c.label, ?create],
+        // A tapped option is answered by its id, never by its text.
+        optionIds: [
+          for (final c in line.candidates) c.id,
+          if (create != null) 'create:${group!.id}',
+        ],
         recommended: line.candidates.isNotEmpty ? 0 : (create == null ? null : 0),
       ),
     );

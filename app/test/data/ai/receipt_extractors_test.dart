@@ -96,6 +96,48 @@ void main() {
     expect(schema['required'], contains('lines'));
   });
 
+  test('the program\'s rows beat a model reading that is further from the total', () async {
+    // Two priced rows read (97.50) against a printed 100.00: not consistent, so the
+    // model runs, but its lines (682.50) are worse: the program's reading is kept.
+    Map<String, Object> word(String text, double x, double y, double w) => {
+      'text': text,
+      'quad': [
+        [x, y],
+        [x + w, y],
+        [x + w, y + 10],
+        [x, y + 10],
+      ],
+    };
+    ocrServer.reply = {
+      ...ocrReply(['KURU KAYISI 250 G  32,50', 'SALAM  65,00', 'TOPLAM 100,00']),
+      'items': [
+        word('KURU KAYISI 250 G', 100, 100, 150),
+        word('*32,50', 400, 100, 60),
+        word('SALAM', 100, 130, 60),
+        word('*65,00', 400, 130, 60),
+        word('TOPLAM', 100, 160, 60),
+        word('*100,00', 400, 160, 70),
+      ],
+    };
+    llmServer.enqueueJson(_receipt(total: 100, secondTotal: 650, secondUnit: 325));
+    llmServer.enqueueJson(_receipt(total: 100, secondTotal: 650, secondUnit: 325));
+    final r = await ocrLlm().extract(image);
+    expect(r.lines.map((l) => l.name), ['KURU KAYISI 250 G', 'SALAM']);
+    expect(linesSum(r), 97.5);
+    expect(r.total, 100.0);
+  });
+
+  test('junk flags from the model are dropped (DISCOUNT on every line)', () async {
+    final j = _receipt();
+    for (final l in j['lines'] as List) {
+      (l as Map)['flags'] = ['DISCOUNT', '**'];
+    }
+    llmServer.enqueueJson(j);
+    final r = await ocrLlm().extract(image);
+    expect(r.lines[0].flags, ['**']);
+    expect(r.lines[1].flags, ['**']);
+  });
+
   test('arithmetic beats the model: wrong line_total is repaired and flagged', () async {
     // 2 x 32.50 = 65.00, the model said 56.00 -> total 88.50 mismatch.
     llmServer.enqueueJson(_receipt(secondTotal: 56.0, total: 97.5));

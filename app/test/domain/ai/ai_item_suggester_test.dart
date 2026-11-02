@@ -62,8 +62,8 @@ void main() {
     );
     final jobId = await env.sendReceipt(
       receiptOf([
-        rl('BANVIT PILIC BONFILE', 278.85, qty: 0.845, unit: 'kg', unitPrice: 330),
-        rl('TADIM KURU ERIK', 105.00, grams: 400),
+        rl('BANVIT FILETO', 278.85, qty: 0.845, unit: 'kg', unitPrice: 330),
+        rl('TADIM ERIK KURUSU', 105.00, grams: 400),
       ]),
     );
     await env.drain();
@@ -94,7 +94,7 @@ void main() {
     final tx = await env.transactions();
     expect(tx.length, 2);
     expect(tx.any((t) => t.name.contains('Чорнослив')), isTrue);
-    expect((await env.aliases.row('BANVIT PILIC BONFILE'))!.categoryId, chickenId);
+    expect((await env.aliases.row('BANVIT FILETO'))!.categoryId, chickenId);
   });
 
   test('a low-confidence or invented pick is asked, with the translation in the question', () async {
@@ -109,7 +109,7 @@ void main() {
     );
     final jobId = await env.sendReceipt(
       receiptOf([
-        rl('BANVIT PILIC BONFILE', 278.81, qty: 0.845, unit: 'kg', unitPrice: 329.95),
+        rl('BANVIT FILETO', 278.81, qty: 0.845, unit: 'kg', unitPrice: 329.95),
         rl('XYZ UNKNOWN THING', 50.00, grams: 100),
       ]),
     );
@@ -137,6 +137,37 @@ void main() {
     expect(l['new_category'], isTrue);
   });
 
+  test('a name the glossary knows is not sent for translation', () async {
+    await env.init(llm: llmClient());
+    llmServer.enqueueJson({
+      'items': [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': '', 'confidence': 0.8},
+      ],
+    });
+    final jobId = await env.sendReceipt(
+      receiptOf([rl('PATATES', 88.94, qty: 3.015, unit: 'kg', unitPrice: 29.5)]),
+    );
+    await env.drain();
+    final l = (await env.draft(jobId)).lines.single;
+    expect(llmServer.chatRequests.length, 1, reason: 'only the decision, no translation');
+    expect((l['ua_name'] as String).toLowerCase(), 'картопля');
+  });
+
+  test('a garbled translation (Greek letters) is dropped: the printed name stays', () async {
+    await env.init(llm: llmClient());
+    translateAndPick(
+      [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': '', 'confidence': 0.8},
+      ],
+      ['саκа сο'],
+    );
+    final jobId = await env.sendReceipt(receiptOf([rl('HARIBO CHAMMALLOHE', 65.0, grams: 100)]));
+    await env.drain();
+    final l = (await env.draft(jobId)).lines.single;
+    expect(l['ua_name'] as String, isNot(contains('κ')));
+    expect((l['ua_name'] as String).toLowerCase(), contains('haribo'));
+  });
+
   test('tabs and doubled spaces in a model-written name are squeezed', () async {
     await env.init(llm: llmClient());
     await chicken();
@@ -158,7 +189,7 @@ void main() {
     await env.init(llm: llmClient());
     await chicken();
     final jobId = await env.sendReceipt(
-      receiptOf([rl('BANVIT PILIC BONFILE', 278.81, qty: 0.845, unit: 'kg', unitPrice: 329.95)]),
+      receiptOf([rl('BANVIT FILETO', 278.81, qty: 0.845, unit: 'kg', unitPrice: 329.95)]),
     );
     await env.drain();
     final d = await env.draft(jobId);
@@ -180,12 +211,12 @@ void main() {
   test('an unmatched typed answer gets a visible reply; "create" makes a new leaf', () async {
     await env.init(); // no model at all: the user decides
     final jobId = await env.sendReceipt(
-      receiptOf([rl('TADIM KURU ERIK', 105.00, grams: 400)]),
+      receiptOf([rl('TADIM ERIK KURUSU', 105.00, grams: 400)]),
     );
     await env.drain();
     var q = (await env.message(jobId, AiMessageKind.question))!;
     var card = QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>);
-    expect(card.questions.single.options, contains('Створити «TADIM KURU ERIK» у «Їжа»'));
+    expect(card.questions.single.options, contains('Створити «TADIM ERIK KURUSU» у «Їжа»'));
     expect(q.body, isNot(contains('TADIM')), reason: 'the card lists the question, the body does not');
 
     // Nothing is called "щось інше": not dropped, not the same card again.
@@ -220,7 +251,7 @@ void main() {
       ['Курка (філе)'],
     );
     final jobId = await env.sendReceipt(
-      receiptOf([rl('BANVIT PILIC BONFILE', 278.85, qty: 0.845, unit: 'kg', unitPrice: 330)]),
+      receiptOf([rl('BANVIT FILETO', 278.85, qty: 0.845, unit: 'kg', unitPrice: 330)]),
     );
     await env.drain();
     expect((await env.job(jobId)).state, AiJobState.draftReady);
@@ -241,7 +272,7 @@ void main() {
       ],
       ['Курка (філе)'],
     );
-    final jobId = await env.sendReceipt(receiptOf([rl('BANVIT PILIC BONFILE', 165.00)]));
+    final jobId = await env.sendReceipt(receiptOf([rl('BANVIT FILETO', 165.00)]));
     await env.drain();
     final d = await env.draft(jobId);
     final l = d.lines.single;

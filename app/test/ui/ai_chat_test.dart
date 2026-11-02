@@ -491,6 +491,100 @@ void main() {
     expect(find.text('Answer: 1 kg'), findsOneWidget);
   });
 
+  /// A draft with ONE open category question about line 1, whose two offered
+  /// categories are called the same and differ only by their group.
+  Future<String> seedCategoryQuestion() async {
+    final job = await insertJob(AiJobState.needsInput, AiStage.waiting);
+    await insertMessage(
+      kind: AiMessageKind.draft,
+      jobId: job,
+      json: {
+        ...draftJson,
+        'lines': [
+          {
+            'i': 1,
+            'raw': 'LiMON %1.',
+            'name': 'LiMON',
+            'ua_name': 'лимон',
+            'quantity': 0.785,
+            'unit': 'kilogram',
+            'unit_price': 39,
+            'amount': 30.62,
+            'needs_answer': true,
+            'questions': ['cat:1'],
+            'candidates': [
+              {'id': 'c-a', 'name': 'Лимон', 'parent': 'Їжа', 'price': 80, 'unit': 'kilogram'},
+              {'id': 'c-b', 'name': 'Лимон', 'parent': 'Побут', 'price': 120, 'unit': 'piece'},
+            ],
+          },
+        ],
+        'sum': {'lines_sum': 30.62, 'expected': 30.62, 'difference': 0, 'ok': true},
+      },
+    );
+    return insertMessage(
+      kind: AiMessageKind.question,
+      jobId: job,
+      json: const QuestionCard([
+        Question(
+          id: 'cat:1',
+          text: 'Яка категорія для «лимон» (30.62 TRY)?',
+          options: ['Їжа › Лимон', 'Побут › Лимон'],
+          optionIds: ['c-a', 'c-b'],
+          recommended: 0,
+        ),
+      ]).toJson(),
+    );
+  }
+
+  Future<Question> answeredQuestion(WidgetTester tester, String qId) async {
+    final card = (await tester.runAsync(
+      () => (db.select(db.aiMessagesTable)..where((t) => t.id.equals(qId))).getSingle(),
+    ))!;
+    return QuestionCard.fromJson(
+      jsonDecode(card.contentJson) as Map<String, dynamic>,
+    ).questions.single;
+  }
+
+  uiTest('two options that read alike are answered by their own ids', (tester) async {
+    late String qId;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async => qId = await seedCategoryQuestion(),
+    );
+    expect(find.text('Їжа › Лимон'), findsOneWidget);
+    expect(find.text('Побут › Лимон'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('ai-question-chip-0-1')));
+    await settle(tester);
+    final q = await answeredQuestion(tester, qId);
+    expect(q.answer, 'Побут › Лимон');
+    expect(q.answerId, 'c-b', reason: 'the second option, not the first one of that name');
+  });
+
+  uiTest('a question shows its line and opens the details to check and choose', (
+    tester,
+  ) async {
+    late String qId;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async => qId = await seedCategoryQuestion(),
+    );
+    final line = tester.widget<Text>(find.byKey(const ValueKey('ai-question-line-0')));
+    expect(line.data, contains('LiMON'));
+    expect(line.data, contains('0.785 kg × 39.00 = 30.62 TRY'));
+
+    await tester.tap(find.byKey(const ValueKey('ai-question-open-0')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ai-line-details')), findsOneWidget);
+    expect(find.textContaining('120.00'), findsOneWidget, reason: 'the usual price of option 2');
+    await tester.tap(find.byKey(const ValueKey('ai-detail-choice-1')));
+    await settle(tester);
+    final q = await answeredQuestion(tester, qId);
+    expect(q.answerId, 'c-b');
+    expect(q.answer, 'Побут › Лимон');
+  });
+
   uiTest('result card Undo batch removes the transaction', (tester) async {
     late String batchId;
     await mount(

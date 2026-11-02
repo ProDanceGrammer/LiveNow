@@ -172,26 +172,72 @@ List<String> _splitGlued(String text) {
   final tl = RegExp(r'^(.*\d)\s*(?:tl|₺)$', caseSensitive: false).firstMatch(t);
   if (tl != null) t = tl.group(1)!;
   final m =
-      RegExp(r'^(.*?)([*×�]-?\d[\d.,]*)$').firstMatch(t) ??
+      RegExp('^(.*?)([*×$_glyphs]-?\\d[\\d.,]*)\$').firstMatch(t) ??
       RegExp(r'^(.*[^A-Za-zÀ-ɏЀ-ӿ])([xX]-?\d[\d.,]*)$').firstMatch(t);
   if (m == null) return [t];
   final prefix = m.group(1)!;
-  if (prefix.isEmpty || RegExp(r'^[*×�]+$').hasMatch(prefix)) return [t];
+  if (prefix.isEmpty || RegExp('^[*×$_glyphs]+\$').hasMatch(prefix)) return [t];
+  // A masked card number (`#444111***车*6141`) is no amount.
+  if (RegExp('[*×$_glyphs]{2,}|\\d{5,}').hasMatch(prefix)) return [t];
   if (_money(m.group(2)!.substring(1), marked: true) == null) return [t];
   return [prefix, m.group(2)!];
 }
 
-final _marker = r'[*xX×�]';
+/// The words of one OCR word: glued amounts split (`_splitGlued`), and a VAT mark
+/// at the end of a name word set apart (`MiNiKI %1` -> `MiNiKI`, `%1`).
+List<String> _tokens(String text) {
+  final out = <String>[];
+  for (final p in _splitGlued(text)) {
+    final m = _vatTail.firstMatch(p);
+    if (m != null && m.start > 0) {
+      out
+        ..add(p.substring(0, m.start))
+        ..add(m.group(1)!);
+    } else {
+      out.add(p);
+    }
+  }
+  return out;
+}
+
+/// What can stand before an amount: the printed `*`, or what OCR made of it
+/// (`x`, `$`, `#`, `+`, a CJK/fullwidth glyph like `本`).
+const _glyphs = r'$#+¥€~^°�一-鿿＄＃＊＋￥';
+final _marker = '[*×xX$_glyphs]';
 final _itemAmount = RegExp('^$_marker\\s*(-?\\d[\\d.,]*)\$');
 final _anyAmount = RegExp('^(?:$_marker\\s*)?(-?\\d[\\d.,]*)\$');
-final _vat1 = RegExp(r'^%\s*(\d{1,2})$');
-final _vat2 = RegExp(r'^(\d{1,2})\s*%$');
+/// The VAT column: `%1`, `1%`, and the printed `%1.` / `%1,` with its dot.
+final _vat1 = RegExp(r'^%\s*(\d{1,2})[.,]?$');
+final _vat2 = RegExp(r'^(\d{1,2})\s*%[.,]?$');
+
+/// A VAT mark OCR garbled beyond reading (`1%O1`, `1'O%01`): noise, not a name.
+final _vatGarble = RegExp(r"^[\d'’OolI]{0,3}%[\dOolI'’.,]*$");
+
+/// A VAT mark at the END of a name word (`BAR NUGA 240G MiNiKI %1`).
+final _vatTail = RegExp(r"\s+(%\s*\d{1,2}[.,]?|[\d'’OolI]{0,3}%[\dOolI'’]*)$");
+
+/// The VAT rates Turkish receipts print; `%12` is a `%1.` read with a stray digit.
+double? _vatRate(String digits) {
+  const rates = {0, 1, 8, 10, 18, 20};
+  final v = int.tryParse(digits);
+  if (v == null) return null;
+  if (rates.contains(v)) return v.toDouble();
+  final first = int.tryParse(digits.substring(0, 1));
+  return first != null && rates.contains(first) ? first.toDouble() : null;
+}
+
+/// `0.785kg` alone: the head of a qty row whose `X39.00` came as a separate word.
+final _qtyHead = RegExp(r'^(\d+(?:[.,]\d+)?)(kg|gr|g|adet|ad)$');
 final _qtyRow = RegExp(
   r'^(\d+(?:[.,]\d+)?)(kg|gr|g|adet|ad)[x×*](\d+(?:[.,]\d+)?)(?:tl(?:/(?:kg|ad|adet))?)?$',
 );
-final _last4 = RegExp(r'[*�]{3,}\s*(\d{4})');
+// The masked card number: `******6141`, with a glyph OCR put between the stars.
+final _last4 = RegExp('[*•·$_glyphs]{2,}[*•·$_glyphs\\s]*(\\d{4})');
 final _date = RegExp(r'(\d{2})[/.\-](\d{2})[/.\-](20\d{2})');
 final _time = RegExp(r'saat\W*(\d{1,2}):(\d{2})');
+
+/// BIM and others print no `SAAT`: the time follows the date (`02.11.202618:01`).
+final _dateTime = RegExp(r'(\d{2})[/.\-](\d{2})[/.\-](20\d{2})\D{0,3}(\d{1,2}):(\d{2})');
 
 /// Chains whose name appears somewhere on the receipt (folded) -> display name.
 const _chains = <String, String>{
@@ -213,7 +259,14 @@ class _Row {
   final amounts = <double>[];
   final looseAmounts = <double>[];
   String text = '';
+
+  /// An amount printed as `X39.00`: the unit price of a qty row whose `0.785kg`
+  /// came as a separate word.
+  bool xAmount = false;
 }
+
+/// A letter O between digits (`5O0G`, `1O.50`) is a zero; [s] is folded (lower case).
+String _fixO(String s) => s.replaceAllMapped(RegExp(r'(?<=\d)o(?=[\dkg.,])'), (_) => '0');
 
 /// Reads [words] as one receipt; null when it holds no priced rows at all.
 RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
@@ -262,25 +315,48 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
     g.sort((a, b) => a.x0.compareTo(b.x0));
     final r = _Row(g);
     final names = <String>[];
-    for (final t in [for (final w in g) ..._splitGlued(w.text.trim())]) {
+    var lastWasLoose = false; // the row ends with an unmarked `30.62`
+    var lastLoose = 0.0;
+    for (final t in [for (final w in g) ..._tokens(w.text.trim())]) {
       final vat = _vat1.firstMatch(t) ?? _vat2.firstMatch(t);
       final item = _itemAmount.firstMatch(t);
       final any = _anyAmount.firstMatch(t);
       final marked = item == null ? null : _money(item.group(1)!, marked: true);
+      lastWasLoose = false;
       if (vat != null) {
-        r.vat = double.parse(vat.group(1)!);
+        r.vat = _vatRate(vat.group(1)!) ?? r.vat;
+      } else if (t.contains('%') && _vatGarble.hasMatch(t)) {
+        // `1%O1`: a VAT mark OCR made unreadable; not part of the name.
       } else if (marked != null) {
         r.amounts.add(marked);
         r.looseAmounts.add(marked);
+        if (RegExp(r'^[xX]').hasMatch(t)) r.xAmount = true;
       } else if (item != null && !RegExp(r'^[xX]').hasMatch(t)) {
         // A `*`-marked number that is no amount (`*7`): receipt noise, not a name
         // (an `x` one, like `X6` in "COLA X6", may belong to the name).
         continue;
       } else if (any != null && _money(any.group(1)!) != null) {
-        r.looseAmounts.add(_money(any.group(1)!)!);
+        lastLoose = _money(any.group(1)!)!;
+        r.looseAmounts.add(lastLoose);
         names.add(t);
+        lastWasLoose = RegExp(r'^\d+[.,]\d{2}$').hasMatch(t);
       } else {
         names.add(t);
+      }
+    }
+    // An amount whose marker OCR lost (`LiMON  %1.  30.62`): the row's rightmost
+    // unmarked decimal is its amount when the rest still reads as a product name
+    // (a qty row `0.785 kg X 39.00` and the footer keep theirs).
+    if (r.amounts.isEmpty && lastWasLoose) {
+      final all = _fixO(foldText(names.join(' ')).replaceAll(RegExp(r'\s'), ''));
+      final rest = names.sublist(0, names.length - 1).join(' ');
+      final f = foldText(rest);
+      if (_qtyRow.firstMatch(all) == null &&
+          RegExp(r'[A-Za-zÀ-ɏЀ-ӿ]{3}').hasMatch(rest) &&
+          !f.contains('toplam') &&
+          !f.contains('kdv')) {
+        r.amounts.add(lastLoose);
+        names.removeLast();
       }
     }
     r.name = names.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -319,7 +395,23 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
   final lines = <ReceiptLine>[];
   for (final r in rows.take(footer)) {
     if (isFooter(r)) continue;
-    final spaceless = foldText(r.name).replaceAll(RegExp(r'\s'), '');
+    final spaceless = _fixO(foldText(r.name).replaceAll(RegExp(r'\s'), ''));
+    final head = _qtyHead.firstMatch(spaceless);
+    if (head != null && r.amounts.length == 1 && r.xAmount) {
+      // `0.785kg` + `X39.00` as two words: a qty row, not a 39.00 item.
+      final unit = head.group(2)!;
+      lines.add(
+        ReceiptLine(
+          raw: r.name,
+          qtyLine: QtyLine(
+            qty: parseReceiptNumber(head.group(1)!),
+            unit: unit == 'adet' ? 'ad' : unit,
+            unitPrice: r.amounts.single,
+          ),
+        ),
+      );
+      continue;
+    }
     final q = _qtyRow.firstMatch(spaceless);
     if (q != null && r.amounts.isEmpty) {
       final unit = q.group(2)!;
@@ -393,8 +485,10 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
   final d = _date.firstMatch(allText);
   if (d != null) {
     final t = _time.firstMatch(foldText(allText));
-    final hh = (t?.group(1) ?? '12').padLeft(2, '0');
-    final mm = t?.group(2) ?? '00';
+    // No `SAAT` word: the time printed right after the date.
+    final dt = t == null ? _dateTime.firstMatch(allText) : null;
+    final hh = (t?.group(1) ?? dt?.group(4) ?? '12').padLeft(2, '0');
+    final mm = t?.group(2) ?? dt?.group(5) ?? '00';
     when = '${d.group(3)}-${d.group(2)}-${d.group(1)}T$hh:$mm:00';
   }
 

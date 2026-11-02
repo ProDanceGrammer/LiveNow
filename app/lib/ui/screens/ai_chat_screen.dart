@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
 import '../../domain/ai/ai_chat_service.dart';
+import '../../domain/ai/ai_draft.dart';
 import '../../domain/ai/ai_protocol.dart';
 import '../../domain/ai/photo_prep.dart';
 import '../ai_history_loader.dart';
@@ -245,6 +246,19 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
             break;
           }
         }
+        // The newest draft of the job a question belongs to: its lines are what
+        // the question is about (price, quantity, offered categories).
+        DraftCard? draftOf(AiMessage q) {
+          final job = q.jobId;
+          if (job == null) return null;
+          for (var j = items.length - 1; j >= 0; j--) {
+            if (items[j].kind == AiMessageKind.draft && items[j].jobId == job) {
+              return DraftCard.fromJson(aiContent(items[j]));
+            }
+          }
+          return null;
+        }
+
         final lastQuestion = lastOf(AiMessageKind.question);
         final lastResult = lastOf(AiMessageKind.result);
         final hasOlderButton = !_noMoreOlder;
@@ -287,6 +301,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                     AiMessageKind.question => AiQuestionCard(
                       message: m,
                       latest: m.id == lastQuestion,
+                      draft: draftOf(m),
                     ),
                     AiMessageKind.result => AiResultCard(
                       message: m,

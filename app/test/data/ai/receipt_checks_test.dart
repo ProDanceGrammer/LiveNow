@@ -72,11 +72,26 @@ void main() {
     });
   });
 
+  test('sanitizeFlags keeps only the flags a line may carry', () {
+    final r = sanitizeFlags(
+      receiptOf([
+        const ReceiptLine(raw: 'A', name: 'A', lineTotal: 1, flags: ['DISCOUNT', '**', 'U6']),
+      ]),
+    );
+    expect(r.lines.single.flags, ['**']);
+  });
+
   group('cleanItemName', () {
     test('strips the amount and the VAT mark printed after the name', () {
       expect(cleanItemName('BAGDAT DEFNE YAPRAGI %1 *32,95'), 'BAGDAT DEFNE YAPRAGI');
       expect(cleanItemName('× DORITOS NACHO MEG %1 *75.5'), 'DORITOS NACHO MEG');
       expect(cleanItemName('MELIS KORNISON TURSU %1 *109.95 ×109.9'), 'MELIS KORNISON TURSU');
+    });
+
+    test('garbled VAT marks go, a plain %3 in a name stays', () {
+      expect(cleanItemName('HARIBO CHAMMALLOHE 1%O1'), 'HARIBO CHAMMALLOHE');
+      expect(cleanItemName("AMICO BADEM ICI 1'O%01"), 'AMICO BADEM ICI');
+      expect(cleanItemName('BAR NUGA 240G MiNiKI %1. *65.00'), 'BAR NUGA 240G MiNiKI');
     });
 
     test('leaves honest names alone', () {

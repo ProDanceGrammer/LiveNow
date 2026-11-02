@@ -126,7 +126,9 @@ String cleanItemName(String name) {
     if (cut != n) leaked = true;
     n = cut;
     // The VAT mark is only noise when an amount was printed after it.
-    if (leaked) n = n.replaceFirst(RegExp(r'\s*%\s*\d{1,2}$'), '');
+    if (leaked) n = n.replaceFirst(RegExp(r'\s*%\s*\d{1,2}[.,]?$'), '');
+    // A garbled one (`1%O1`, `1'O%01`: it holds an O / l / I / quote) always is.
+    n = n.replaceFirst(RegExp(r"\s+(?=[^\s]*[OolI'’])[\d'’OolI]{0,3}%[\dOolI'’.,]*$"), '');
     n = n.replaceFirst(RegExp(r'^[×*]+\s*'), '').trim();
     if (n == before) break;
   }
@@ -138,20 +140,34 @@ ExtractedReceipt cleanReceiptNames(ExtractedReceipt r) => copyReceipt(
   r,
   lines: [
     for (final l in r.lines)
-      l.name == null
-          ? l
-          : ReceiptLine(
-              raw: l.raw,
-              name: cleanItemName(l.name!),
-              lineTotal: l.lineTotal,
-              qtyLine: l.qtyLine,
-              pack: l.pack,
-              discount: l.discount,
-              vatPct: l.vatPct,
-              flags: l.flags,
-            ),
+      l.name == null ? l : _withNameAndFlags(l, name: cleanItemName(l.name!)),
   ],
 );
+
+/// The flags a line may carry from a model: `**` (a discount follows) and
+/// `low_confidence`. A small model fills the free-text field with junk
+/// (`DISCOUNT` on every line), so everything else is dropped.
+const _knownFlags = {'**', 'low_confidence'};
+
+ExtractedReceipt sanitizeFlags(ExtractedReceipt r) => copyReceipt(
+  r,
+  lines: [
+    for (final l in r.lines)
+      _withNameAndFlags(l, flags: [for (final f in l.flags) if (_knownFlags.contains(f)) f]),
+  ],
+);
+
+ReceiptLine _withNameAndFlags(ReceiptLine l, {String? name, List<String>? flags}) =>
+    ReceiptLine(
+      raw: l.raw,
+      name: name ?? l.name,
+      lineTotal: l.lineTotal,
+      qtyLine: l.qtyLine,
+      pack: l.pack,
+      discount: l.discount,
+      vatPct: l.vatPct,
+      flags: flags ?? l.flags,
+    );
 
 /// All numbers in [text] as whole hundredths (`1.234,50` -> 123450), so two
 /// readings of the same amount compare equal whatever the separators.

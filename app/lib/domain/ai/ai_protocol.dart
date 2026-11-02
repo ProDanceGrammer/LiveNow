@@ -122,8 +122,10 @@ class Question {
     required this.id,
     required this.text,
     this.options = const [],
+    this.optionIds = const [],
     this.recommended,
     this.answer,
+    this.answerId,
   });
 
   /// Stable within the job (e.g. `weight:3`), so an answer maps back to a line.
@@ -131,18 +133,29 @@ class Question {
   final String text;
   final List<String> options;
 
+  /// What each option stands for, parallel to [options] (a category id, or
+  /// `create:<group id>`; empty string = nothing but its text). Two options can
+  /// read alike, so a tapped option is answered by this id, never by its name.
+  /// Empty for questions whose options are plain words.
+  final List<String> optionIds;
+
   /// Index into [options] the assistant recommends (a quick-reply chip).
   final int? recommended;
 
   /// Set when the user answered (the worker reads it).
   final String? answer;
 
+  /// The [optionIds] entry of the tapped option; null for a typed answer.
+  final String? answerId;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'text': text,
     'options': options,
+    if (optionIds.isNotEmpty) 'option_ids': optionIds,
     'recommended': recommended,
     'answer': answer,
+    if (answerId != null) 'answer_id': answerId,
   };
 
   factory Question.fromJson(Map<String, dynamic> j) => Question(
@@ -152,8 +165,13 @@ class Question {
       if (j['options'] is List)
         for (final o in j['options'] as List) o.toString(),
     ],
+    optionIds: [
+      if (j['option_ids'] is List)
+        for (final o in j['option_ids'] as List) o?.toString() ?? '',
+    ],
     recommended: j['recommended'] is int ? j['recommended'] as int : null,
     answer: j['answer']?.toString(),
+    answerId: j['answer_id']?.toString(),
   );
 }
 
