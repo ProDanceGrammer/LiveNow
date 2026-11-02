@@ -125,7 +125,8 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
                 sum.ok
                     ? 'Lines add up to ${_fmt(sum.linesSum)} ${draft.currency}'
                     : 'Sum mismatch: lines ${_fmt(sum.linesSum)}, '
-                          'receipt ${_fmt(sum.expected)}',
+                          'receipt ${_fmt(sum.expected)}'
+                          '${decided ? '' : '. Tap a line to fix its price or quantity.'}',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: sum.ok ? null : theme.colorScheme.error,
                 ),

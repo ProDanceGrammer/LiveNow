@@ -58,9 +58,16 @@ ReceiptLine copyLine(ReceiptLine l, {double? lineTotal, List<String>? flags}) =>
 /// `qty * unit_price == line_total` per line. A missing line total is filled in;
 /// a wrong one is replaced (arithmetic wins) and the line is flagged. The
 /// tolerance covers a weight printed with three decimals.
-ExtractedReceipt repairArithmetic(ExtractedReceipt r) {
+///
+/// A quantity line is only believed when it is plausible: a piece count above 50
+/// is a PRICE misread as a quantity (`*109.95 x109.9` read as 109.95 x 109.9
+/// = 12078.01). Then the printed total stays and the bad quantity line is dropped.
+/// With [ocrText], a printed total that the OCR really contains (while the product
+/// does not appear) also wins over the product.
+ExtractedReceipt repairArithmetic(ExtractedReceipt r, {String? ocrText}) {
   final lines = <ReceiptLine>[];
   final low = [...r.lowConfidenceFields];
+  final seen = ocrText == null ? null : numberTokens(ocrText);
   for (var i = 0; i < r.lines.length; i++) {
     final l = r.lines[i];
     final q = l.qtyLine;
@@ -71,6 +78,28 @@ ExtractedReceipt repairArithmetic(ExtractedReceipt r) {
     final expected = _round2(q!.qty! * q.unitPrice!);
     final tol = 0.02 + q.unitPrice! * 0.0005;
     if (l.lineTotal == null || (l.lineTotal! - expected).abs() > tol) {
+      final weight = const {'g', 'gr'}.contains(q.unit?.toLowerCase());
+      final implausible = !weight && q.qty!.abs() > 50;
+      final printedSeen =
+          seen != null &&
+          l.lineTotal != null &&
+          seen.contains(cents(l.lineTotal!)) &&
+          !seen.contains(cents(expected));
+      if (l.lineTotal != null && (implausible || printedSeen)) {
+        lines.add(
+          ReceiptLine(
+            raw: l.raw,
+            name: l.name,
+            lineTotal: l.lineTotal,
+            pack: l.pack,
+            discount: l.discount,
+            vatPct: l.vatPct,
+            flags: [...l.flags, 'dropped_qty_line'],
+          ),
+        );
+        low.add('lines[$i].qty_line');
+        continue;
+      }
       lines.add(copyLine(l, lineTotal: expected, flags: [...l.flags, 'repaired_line_total']));
       low.add('lines[$i].line_total');
     } else {
@@ -79,6 +108,50 @@ ExtractedReceipt repairArithmetic(ExtractedReceipt r) {
   }
   return copyReceipt(r, lines: lines, lowConfidenceFields: low);
 }
+
+/// A product name without what the receipt prints around it: the `*32,95` /
+/// `x75.5` amount, the `%1` VAT mark and a leading `x` / `*`.
+String cleanItemName(String name) {
+  var n = name.trim();
+  // A trailing `*109.95`, `×109.9` or ` x75,50` (an `x` only before a decimal number,
+  // so "MAX 2" stays), optionally followed by TL.
+  final amount = RegExp(
+    r'(?:\s*[*×]\s*\d[\d.,]*|\s+[xX]\d+[.,]\d+)+(?:\s*(?:tl|₺))?$',
+    caseSensitive: false,
+  );
+  var leaked = false;
+  for (var i = 0; i < 4; i++) {
+    final before = n;
+    final cut = n.replaceFirst(amount, '');
+    if (cut != n) leaked = true;
+    n = cut;
+    // The VAT mark is only noise when an amount was printed after it.
+    if (leaked) n = n.replaceFirst(RegExp(r'\s*%\s*\d{1,2}$'), '');
+    n = n.replaceFirst(RegExp(r'^[×*]+\s*'), '').trim();
+    if (n == before) break;
+  }
+  return n.isEmpty ? name.trim() : n;
+}
+
+/// [cleanItemName] on every line (the printed text stays in `raw`).
+ExtractedReceipt cleanReceiptNames(ExtractedReceipt r) => copyReceipt(
+  r,
+  lines: [
+    for (final l in r.lines)
+      l.name == null
+          ? l
+          : ReceiptLine(
+              raw: l.raw,
+              name: cleanItemName(l.name!),
+              lineTotal: l.lineTotal,
+              qtyLine: l.qtyLine,
+              pack: l.pack,
+              discount: l.discount,
+              vatPct: l.vatPct,
+              flags: l.flags,
+            ),
+  ],
+);
 
 /// All numbers in [text] as whole hundredths (`1.234,50` -> 123450), so two
 /// readings of the same amount compare equal whatever the separators.

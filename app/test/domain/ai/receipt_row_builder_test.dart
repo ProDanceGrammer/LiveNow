@@ -109,6 +109,73 @@ void main() {
     });
   });
 
+  /// Rows given as `(cells)`; each cell is (text, x, width). Same geometry as [receipt].
+  List<ReceiptWord> rowsOf(List<List<(String, double, double)>> rows) {
+    final out = <ReceiptWord>[];
+    for (var i = 0; i < rows.length; i++) {
+      final y = 250.0 + 21 * i;
+      for (final (t, x, w) in rows[i]) {
+        out.add(word(t, x, y, w));
+      }
+    }
+    return out;
+  }
+
+  group('receipts the OCR garbles (bug reports of 31 Oct)', () {
+    test('one-decimal and glued amounts, header and stray KDV rows', () {
+      final r = rebuildReceipt(
+        rowsOf([
+          [('MIGROS', 200, 80)],
+          [('KDV DAHIL FIYATLAR', 120, 260)],
+          [('BAGDAT DEFNE', 120, 200), ('%1*32,95', 370, 100)],
+          [('DORITOS NACHO', 120, 190), ('%1', 370, 25), ('*75.5', 450, 80)],
+          [('GRECKA', 120, 100), ('*244,95TL', 430, 100)],
+          [('TOPKDV', 120, 100), ('x5.00', 445, 80)],
+          [('SNACK', 120, 100), ('%1', 370, 25), ('*10,00', 450, 80)],
+          [('ARA TOPLAM', 255, 110), ('363,40', 430, 90)],
+          [('TOPLAM', 120, 100), ('*363.40', 430, 90)],
+          [('ORTAK POS', 300, 100), ('*363.40', 430, 90)],
+        ]),
+      )!;
+      expect(r.consistent, isTrue, reason: r.text);
+      expect([for (final l in r.receipt.lines) l.name], [
+        'BAGDAT DEFNE',
+        'DORITOS NACHO',
+        'GRECKA',
+        'SNACK',
+      ]);
+      expect([for (final l in r.receipt.lines) l.lineTotal], [32.95, 75.5, 244.95, 10.0]);
+    });
+
+    test('a long receipt keeps every row', () {
+      final rows = <List<(String, double, double)>>[
+        [('KDV DAHIL', 120, 120)],
+        for (var i = 0; i < 20; i++)
+          [
+            ('ITEM $i', 120, 100),
+            ('%1', 370, 25),
+            ('*${(10 + i).toString()},00', 450, 80),
+          ],
+        [('TOPLAM', 120, 100), ('*${(20 * 10 + 190).toString()},00', 430, 90)],
+      ];
+      final r = rebuildReceipt(rowsOf(rows))!;
+      expect(r.receipt.lines.length, 20, reason: r.text);
+      expect(r.consistent, isTrue, reason: r.text);
+    });
+
+    test('a name keeps an x-word (COLA X6) and a letter-x before digits', () {
+      final r = rebuildReceipt(
+        rowsOf([
+          [('COLA X6', 120, 100), ('%1', 370, 25), ('*50,00', 450, 80)],
+          [('MAX200', 120, 100), ('*10,00', 450, 80)],
+          [('TOPLAM', 120, 100), ('*60,00', 430, 90)],
+        ]),
+      )!;
+      expect([for (final l in r.receipt.lines) l.name], ['COLA X6', 'MAX200']);
+      expect(r.consistent, isTrue, reason: r.text);
+    });
+  });
+
   group('receipt numbers', () {
     test('thousands and decimals', () {
       expect(parseReceiptNumber('3.302,06'), 3302.06);

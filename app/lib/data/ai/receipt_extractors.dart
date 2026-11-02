@@ -15,11 +15,25 @@ import 'receipt_checks.dart';
 
 /// OCR text -> text model with the receipt schema -> arithmetic repair.
 class OcrLlmExtractor implements ReceiptExtractor {
-  OcrLlmExtractor({required this.ocr, required this.llm, this.cancel});
+  OcrLlmExtractor({
+    required this.ocr,
+    required this.llm,
+    this.cancel,
+    this.onUnbalanced,
+  });
 
   final OcrClient ocr;
   final LlmClient llm;
   final AiCancelToken? cancel;
+
+  /// Called with the OCR boxes and the final reading when the lines still do not
+  /// add up to the printed total (the hub saves them for replay, see `OcrDump`).
+  final Future<void> Function(
+    List<ReceiptWord> words,
+    String ocrText,
+    ExtractedReceipt receipt,
+  )?
+  onUnbalanced;
 
   @override
   Future<ExtractedReceipt> extract(Uint8List image, {String? mime}) async =>
@@ -48,8 +62,12 @@ class OcrLlmExtractor implements ReceiptExtractor {
       LlmMessage.user(receiptExtractionUserPrompt(text)),
     ];
     var receipt = await _ask(llm, messages, cancel);
-    receipt = repairArithmetic(receipt);
-    if (sumMismatch(receipt)) receipt = await _retryOnce(llm, messages, receipt, cancel);
+    receipt = repairArithmetic(receipt, ocrText: text);
+    if (sumMismatch(receipt)) {
+      receipt = await _retryOnce(llm, messages, receipt, cancel, ocrText: text);
+    }
+    receipt = cleanReceiptNames(receipt);
+    if (sumMismatch(receipt)) await onUnbalanced?.call(read.words, text, receipt);
     return (receipt: receipt, ocrText: text);
   }
 }
@@ -73,7 +91,7 @@ class VlmExtractor implements ReceiptExtractor {
     ];
     var receipt = repairArithmetic(await _ask(llm, messages, cancel));
     if (sumMismatch(receipt)) receipt = await _retryOnce(llm, messages, receipt, cancel);
-    return receipt;
+    return cleanReceiptNames(receipt);
   }
 }
 
@@ -160,8 +178,9 @@ Future<ExtractedReceipt> _retryOnce(
   LlmClient llm,
   List<LlmMessage> messages,
   ExtractedReceipt first,
-  AiCancelToken? cancel,
-) async {
+  AiCancelToken? cancel, {
+  String? ocrText,
+}) async {
   double gap(ExtractedReceipt r) => ((linesSum(r) ?? 0) - (r.total ?? 0)).abs();
   ExtractedReceipt? second;
   try {
@@ -176,6 +195,7 @@ Future<ExtractedReceipt> _retryOnce(
           ),
         ),
       ], cancel),
+      ocrText: ocrText,
     );
   } on AiBadResponseException {
     second = null; // a bad retry must not lose the first reading

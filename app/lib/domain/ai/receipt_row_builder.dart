@@ -54,6 +54,27 @@ class ReceiptWord {
     );
   }
 
+  /// For the OCR dump of a receipt that did not add up (replayable in a test).
+  factory ReceiptWord.fromJson(Map<String, dynamic> j) => ReceiptWord(
+    text: '${j['text'] ?? ''}',
+    x0: (j['x0'] as num).toDouble(),
+    y0: (j['y0'] as num).toDouble(),
+    x1: (j['x1'] as num).toDouble(),
+    y1: (j['y1'] as num).toDouble(),
+    slope: (j['slope'] as num?)?.toDouble(),
+    boxHeight: (j['box_height'] as num?)?.toDouble(),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'text': text,
+    'x0': x0,
+    'y0': y0,
+    'x1': x1,
+    'y1': y1,
+    'slope': slope,
+    'box_height': boxHeight,
+  };
+
   final String text;
   final double x0, y0, x1, y1;
 
@@ -119,7 +140,10 @@ double? parseReceiptNumber(String s) {
 
 /// A printed money amount: two decimals, or (a lost decimal point, `*7550`)
 /// three or more bare digits whose last two are the kurus.
-double? _money(String token) {
+///
+/// [marked]: the token followed a `*` / `x` amount marker, so it IS an amount and
+/// a lost digit is tolerated: one decimal (`*75.5` -> 75.50).
+double? _money(String token, {bool marked = false}) {
   var t = token.replaceAll(RegExp(r'\s'), '');
   var negative = false;
   if (t.startsWith('-')) {
@@ -133,10 +157,28 @@ double? _money(String token) {
     if (t.length < 3) return null;
     v = double.tryParse('${t.substring(0, t.length - 2)}.${t.substring(t.length - 2)}');
   } else {
-    if (t.length - last - 1 != 2) return null;
+    final decimals = t.length - last - 1;
+    if (decimals != 2 && !(marked && decimals == 1)) return null;
     v = parseReceiptNumber(t);
   }
   return v == null ? null : (negative ? -v : v);
+}
+
+/// Splits what OCR glued into one word: `%1*32,95` -> `%1`, `*32,95`;
+/// `GRECKA*244,95TL` -> `GRECKA`, `*244,95`. A `*` / `×` may follow anything; an
+/// `x` only a non-letter (so a name like `MAX200` is left alone).
+List<String> _splitGlued(String text) {
+  var t = text;
+  final tl = RegExp(r'^(.*\d)\s*(?:tl|₺)$', caseSensitive: false).firstMatch(t);
+  if (tl != null) t = tl.group(1)!;
+  final m =
+      RegExp(r'^(.*?)([*×�]-?\d[\d.,]*)$').firstMatch(t) ??
+      RegExp(r'^(.*[^A-Za-zÀ-ɏЀ-ӿ])([xX]-?\d[\d.,]*)$').firstMatch(t);
+  if (m == null) return [t];
+  final prefix = m.group(1)!;
+  if (prefix.isEmpty || RegExp(r'^[*×�]+$').hasMatch(prefix)) return [t];
+  if (_money(m.group(2)!.substring(1), marked: true) == null) return [t];
+  return [prefix, m.group(2)!];
 }
 
 final _marker = r'[*xX×�]';
@@ -220,16 +262,20 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
     g.sort((a, b) => a.x0.compareTo(b.x0));
     final r = _Row(g);
     final names = <String>[];
-    for (final w in g) {
-      final t = w.text.trim();
+    for (final t in [for (final w in g) ..._splitGlued(w.text.trim())]) {
       final vat = _vat1.firstMatch(t) ?? _vat2.firstMatch(t);
       final item = _itemAmount.firstMatch(t);
       final any = _anyAmount.firstMatch(t);
+      final marked = item == null ? null : _money(item.group(1)!, marked: true);
       if (vat != null) {
         r.vat = double.parse(vat.group(1)!);
-      } else if (item != null && _money(item.group(1)!) != null) {
-        r.amounts.add(_money(item.group(1)!)!);
-        r.looseAmounts.add(_money(item.group(1)!)!);
+      } else if (marked != null) {
+        r.amounts.add(marked);
+        r.looseAmounts.add(marked);
+      } else if (item != null && !RegExp(r'^[xX]').hasMatch(t)) {
+        // A `*`-marked number that is no amount (`*7`): receipt noise, not a name
+        // (an `x` one, like `X6` in "COLA X6", may belong to the name).
+        continue;
       } else if (any != null && _money(any.group(1)!) != null) {
         r.looseAmounts.add(_money(any.group(1)!)!);
         names.add(t);
@@ -252,11 +298,27 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
     return f.contains('toplam') || f.contains('kdv');
   }
 
-  var footer = rows.indexWhere(isFooter);
-  if (footer < 0) footer = rows.length;
+  // A priced TOPLAM / ARA TOPLAM row starts the footer. A header or promo row
+  // ("KDV DAHIL") above the items, or a stray `kdv` row between them, must not
+  // cut the list short: such rows are skipped below instead. Without a priced
+  // total row the first footer-looking row after the first item is the cut.
+  bool isTotalRow(_Row r) {
+    final f = foldText(r.name).replaceAll(RegExp(r'\s'), '');
+    return r.looseAmounts.isNotEmpty &&
+        (f == 'toplam' || f == 'geneltoplam' || f == 'aratoplam');
+  }
+
+  final firstPriced = rows.indexWhere((r) => r.amounts.isNotEmpty && !isFooter(r));
+  var footer = rows.length;
+  if (firstPriced >= 0) {
+    footer = rows.indexWhere(isTotalRow, firstPriced);
+    if (footer < 0) footer = rows.indexWhere(isFooter, firstPriced);
+    if (footer < 0) footer = rows.length;
+  }
 
   final lines = <ReceiptLine>[];
   for (final r in rows.take(footer)) {
+    if (isFooter(r)) continue;
     final spaceless = foldText(r.name).replaceAll(RegExp(r'\s'), '');
     final q = _qtyRow.firstMatch(spaceless);
     if (q != null && r.amounts.isEmpty) {

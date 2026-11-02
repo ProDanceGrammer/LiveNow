@@ -7,6 +7,7 @@ import '../core/stream_utils.dart';
 import '../core/time_codec.dart';
 import '../data/ai/llm_client.dart';
 import '../data/ai/ocr_client.dart';
+import '../data/ai/ocr_dump.dart';
 import '../data/ai/receipt_extractors.dart';
 import '../data/database.dart';
 import '../domain/ai/ai_job_runner.dart';
@@ -237,7 +238,7 @@ class AiWorker {
     return AiJobRunner(
       db: db,
       extractor: HybridExtractor(
-        primary: OcrLlmExtractor(ocr: ocr, llm: llm),
+        primary: OcrLlmExtractor(ocr: ocr, llm: llm, onUnbalanced: OcrDump.write),
         vlm: vlm,
       ),
       llm: llm,
