@@ -67,13 +67,33 @@ class ItemSuggester {
   /// Items per decision call: small enough for a 7B model on a CPU.
   final int chunk;
 
-  /// [items] are (line index, printed name). Throws when the model cannot be
-  /// reached, so the caller can fall back to asking and not retry on every rebuild.
+  /// Why a model call of the last [suggest] gave nothing (a bad reply: no JSON, an
+  /// HTTP error), or null. The names and picks of the other calls are kept.
+  String? lastError;
+
+  /// The server itself is not answering (unreachable, an HTTP error): the other
+  /// calls would fail the same way, so the whole stage is given up. A reply that
+  /// arrives but holds no usable JSON only costs its own call.
+  static bool _serverDown(Object e) =>
+      e is AiUnreachableException ||
+      e is AiCancelledException ||
+      (e is AiBadResponseException && e.status != null);
+
+  void _failed(Object e) {
+    final text = '${e.runtimeType}: $e';
+    lastError = text.length <= 200 ? text : '${text.substring(0, 200)}...';
+  }
+
+  /// [items] are (line index, printed name). Throws only when the model cannot be
+  /// reached at all (the caller then asks instead and does not retry on every
+  /// rebuild). A model that answers badly costs its own call, never the names the
+  /// code-side glossary already gave, nor the other calls.
   Future<Map<int, LineSuggestion>> suggest({
     required List<({int index, String printed})> items,
     required List<BudgetCategory> cats,
     String? merchant,
   }) async {
+    lastError = null;
     if (items.isEmpty) return const {};
 
     // 1. One call: printed names -> Ukrainian names. A name already written in
@@ -95,19 +115,24 @@ class ItemSuggester {
       }
     }
     if (unknown.isNotEmpty) {
-      final reply = await llm.runPrompt(
-        translateItemsPrompt(
-          items: [for (final i in unknown) (n: i + 1, name: items[i].printed)],
-          merchant: merchant,
-        ),
-      );
-      // Only the names that were asked. Given ONE name, a 3B model answered with a
-      // list of ten (its own glossary, in order) and the numbers overwrote the
-      // glossary translations of the other lines: a reply with a number nobody
-      // asked about is not a translation at all, so none of it is used.
-      final asked = {for (final i in unknown) i + 1};
-      final got = parseTranslatedItems(reply);
-      if (got.keys.every(asked.contains)) ua.addAll(got);
+      try {
+        final reply = await llm.runPrompt(
+          translateItemsPrompt(
+            items: [for (final i in unknown) (n: i + 1, name: items[i].printed)],
+            merchant: merchant,
+          ),
+        );
+        // Only the names that were asked. Given ONE name, a 3B model answered with a
+        // list of ten (its own glossary, in order) and the numbers overwrote the
+        // glossary translations of the other lines: a reply with a number nobody
+        // asked about is not a translation at all, so none of it is used.
+        final asked = {for (final i in unknown) i + 1};
+        final got = parseTranslatedItems(reply);
+        if (got.keys.every(asked.contains)) ua.addAll(got);
+      } on Object catch (e) {
+        if (_serverDown(e)) rethrow;
+        _failed(e); // the printed names stay; the glossary's names are kept
+      }
     }
 
     // 2. The existing categories that may fit each translation.
@@ -141,8 +166,10 @@ class ItemSuggester {
       final name = ua[i + 1] ?? items[i].printed;
       final seen = <String>{};
       final options = <CandidateCategory>[];
+      final gloss = glossaryQuery(items[i].printed);
       for (final r in [
         await resolver.resolve(name, limit: 6),
+        if (gloss != null && gloss != name) await resolver.resolve(gloss, limit: 4),
         await resolver.resolve(items[i].printed, limit: 3),
       ]) {
         for (final c in r.candidates) {
@@ -166,10 +193,15 @@ class ItemSuggester {
     final picks = <int, CategorySuggestion>{};
     for (var s = 0; s < decide.length; s += chunk) {
       final part = decide.sublist(s, (s + chunk).clamp(0, decide.length));
-      final r = await llm.runPrompt(
-        suggestCategoriesPrompt(items: part, groups: groups, merchant: merchant),
-      );
-      picks.addAll(parseCategorySuggestions(r, part, groups));
+      try {
+        final r = await llm.runPrompt(
+          suggestCategoriesPrompt(items: part, groups: groups, merchant: merchant),
+        );
+        picks.addAll(parseCategorySuggestions(r, part, groups));
+      } on Object catch (e) {
+        if (_serverDown(e)) rethrow;
+        _failed(e); // no picks for this chunk: those lines are asked, with their names
+      }
     }
 
     final out = <int, LineSuggestion>{};

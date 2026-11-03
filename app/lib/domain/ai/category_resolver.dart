@@ -248,8 +248,11 @@ class CategoryResolver {
     while (common < shorter && a.codeUnitAt(common) == b.codeUnitAt(common)) {
       common++;
     }
-    // A shared stem: "яблука" ~ "яблуко", "sebze" ~ "sebzeler".
-    return common >= 4 && common >= shorter * 0.7;
+    // A shared stem: "яблука" ~ "яблуко", "sebze" ~ "sebzeler". Two words that only
+    // differ in an ending of up to two letters are one word too ("огірок" ~ "огірки"),
+    // but "молоко" is not "молочне".
+    return common >= 4 &&
+        (common >= shorter * 0.7 || (a.length - common <= 2 && b.length - common <= 2));
   }
 
   /// 0..1 similarity of the product tokens [query] and a category's [name]

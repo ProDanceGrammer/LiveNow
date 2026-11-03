@@ -27,6 +27,7 @@ import 'model_prompts.dart';
 import 'price_planner.dart';
 import 'receipt_fx_rules.dart';
 import 'sum_verifier.dart';
+import 'tr_glossary.dart';
 import 'unit_normalizer.dart';
 
 export 'ai_draft.dart';
@@ -468,6 +469,9 @@ class DraftBuilder {
         index: i,
         raw: p.raw,
         name: p.name,
+        // The glossary's Ukrainian name needs no model (a model suggestion, when
+        // there is one, replaces it later).
+        uaName: translateKnown(_stripStars(p.name)) ?? glossaryName(_stripStars(p.name)),
         amount: p.net,
         quantity: p.quantity,
         unit: switch (p.unit) {
@@ -501,12 +505,18 @@ class DraftBuilder {
       final dedupe = DedupeService(db);
       for (final l in lines) {
         if (l.skipped) continue;
-        final found = await dedupe.findDuplicates(
-          date: at,
-          amount: l.amount,
-          text: txNameOf(l.name),
-        );
-        if (found.any((d) => !own.contains(d.transactionId))) hits++;
+        // A transaction is saved under the line's displayed (translated) name; an
+        // older one may carry the printed name: look for both.
+        var other = false;
+        for (final n in {l.name, l.displayName}) {
+          final found = await dedupe.findDuplicates(
+            date: at,
+            amount: l.amount,
+            text: txNameOf(n),
+          );
+          if (found.any((d) => !own.contains(d.transactionId))) other = true;
+        }
+        if (other) hits++;
       }
       final n = lines.where((l) => !l.skipped).length;
       duplicate = n > 0 && (n <= 2 ? hits == n : hits * 2 > n);
@@ -1110,7 +1120,21 @@ class DraftBuilder {
   /// category, or ONE clearly best fuzzy match. [_Lookup.decided] is false when
   /// the line still needs the model (or the user).
   Future<_Lookup> _lookup(_Ctx ctx, String name) async {
-    final res = await resolver.resolve(name);
+    var res = await resolver.resolve(name);
+    var viaGlossary = false;
+    if (res.alias == null) {
+      // The categories are Ukrainian, the receipt is Turkish: look for the glossary's
+      // translation (no model), so `SALATALIK` finds `Огірки`. The learned alias stays
+      // keyed by the printed name (above).
+      final q = glossaryQuery(_stripStars(name));
+      if (q != null) {
+        final g = await resolver.resolve(q);
+        if (g.candidates.isNotEmpty) {
+          res = g;
+          viaGlossary = true;
+        }
+      }
+    }
     if (res.alias != null && res.best != null) {
       return _Lookup(ctx.byId[res.best!.id], const [], decided: true);
     }
@@ -1122,7 +1146,10 @@ class DraftBuilder {
       for (final c in res.candidates)
         if (!(c.isAggregate && !ctx.isWrapper(ctx.byId[c.id]!))) c,
     ];
-    if (usable.isNotEmpty && !res.ambiguous && usable.first.id == res.best?.id) {
+    // A translation is a weaker key than a printed name: a partial match
+    // (`курка філе` ~ `Курка`, score 0.7) is only offered, never picked unasked.
+    final strong = !viaGlossary || usable.isNotEmpty && usable.first.score >= 0.8;
+    if (usable.isNotEmpty && !res.ambiguous && usable.first.id == res.best?.id && strong) {
       return _Lookup(ctx.byId[usable.first.id], usable, decided: true);
     }
     return _Lookup(null, usable, decided: false);
@@ -1186,8 +1213,9 @@ class DraftBuilder {
         if (!ctx.suggestions.containsKey(w.index)) w,
     ];
     if (todo.isEmpty) return;
+    final suggester = ItemSuggester(llm: client, resolver: resolver);
     try {
-      final got = await ItemSuggester(llm: client, resolver: resolver).suggest(
+      final got = await suggester.suggest(
         items: todo,
         cats: ctx.cats,
         merchant: ctx.merchant,
@@ -1196,8 +1224,13 @@ class DraftBuilder {
       ctx.overrides['suggest'] = {
         for (final e in ctx.suggestions.entries) '${e.key}': e.value.toJson(),
       };
-    } on Object {
+      // A bad reply of the model costs its own call only; the reason stays in the
+      // card, so the next miss can be read from the data.
+      if (suggester.lastError != null) ctx.overrides['suggest_error'] = suggester.lastError;
+    } on Object catch (e) {
       ctx.overrides['suggest_failed'] = true;
+      final text = '${e.runtimeType}: $e';
+      ctx.overrides['suggest_error'] = text.length <= 200 ? text : '${text.substring(0, 200)}...';
     }
   }
 

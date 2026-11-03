@@ -3,6 +3,30 @@ import 'package:livenow/domain/ai/model_prompts.dart';
 import 'package:livenow/domain/ai/tr_glossary.dart';
 
 void main() {
+  group('glossaryQuery: what the category lookup searches for', () {
+    test('known words translated, brand words kept, pack dropped', () {
+      expect(glossaryQuery('SALATALIK'), 'огірки');
+      expect(glossaryQuery('GUNLUK SUT 1L DOST'), 'молоко Gunluk Dost');
+      expect(glossaryQuery('TAMBUGDAYEKMK5O0G'), 'цільнозерновий хліб');
+    });
+
+    test('the budget\'s own spelling is searched: куряче філе -> Курка', () {
+      expect(glossaryQuery('PiLIC BONFILE'), 'курка філе');
+      expect(glossaryName('PiLIC BONFILE'), 'куряче філе', reason: 'the shown name keeps the translation');
+      expect(glossaryName('GUNLUK SUT 1L DOST'), 'молоко Gunluk Dost');
+    });
+
+    test('answers where translateKnown gives the name to the model', () {
+      expect(translateKnown('GUNLUK SUT 1L DOST'), isNull);
+      expect(glossaryQuery('GUNLUK SUT 1L DOST'), isNotNull);
+    });
+
+    test('null when no word is known, and for Cyrillic', () {
+      expect(glossaryQuery('XYZ UNKNOWN THING'), isNull);
+      expect(glossaryQuery('Молоко Dost'), isNull);
+    });
+  });
+
   group('translateKnown: the BIM receipt names, no model', () {
     test('plain product words', () {
       expect(translateKnown('PATATES'), 'картопля');

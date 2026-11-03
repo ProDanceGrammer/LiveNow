@@ -135,6 +135,39 @@ String _title(String w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1
 /// null otherwise (the model translates those). Unknown words stay as a Latin
 /// brand after the product words; the pack size (`500G`, `1L`) closes the name.
 String? translateKnown(String printed) {
+  final r = _read(printed);
+  // Mostly unknown words (`MELIS KORNISON TURSU`: only `tursu` is known, and it is
+  // just a modifier): the glossary would invent a half translation, the model gets it.
+  if (r.product.isEmpty || r.brand.length > r.product.length) return null;
+  return [...r.product, ...r.brand, ?r.pack].join(' ');
+}
+
+/// What the category lookup should search for: the known product words in
+/// Ukrainian plus the words nobody knows (a brand: `Dost` finds `Молоко Dost`),
+/// without the pack size. Unlike [translateKnown] it also answers when brand words
+/// outnumber the known ones, because a lookup only ranks categories and the user
+/// still confirms; null when no word of the name is known.
+String? glossaryQuery(String printed) {
+  final words = glossaryName(printed);
+  if (words == null) return null;
+  // Budgets spell some words differently from the receipt's translation: the
+  // category is `Курка`, the translation `куряче філе`.
+  return [for (final w in words.split(' ')) _lookupForms[w] ?? w].join(' ');
+}
+
+/// A display name for a line the glossary only half knows (`GUNLUK SUT 1L DOST`
+/// -> `молоко Gunluk Dost`): the known words in Ukrainian, the others kept, no pack.
+/// Better than the printed Latin name when nothing translates it; null when no
+/// word is known.
+String? glossaryName(String printed) {
+  final r = _read(printed);
+  if (r.product.isEmpty) return null;
+  return [...r.product, ...r.brand].join(' ');
+}
+
+const _lookupForms = {'куряче': 'курка', 'куряча': 'курка', 'курячий': 'курка'};
+
+({List<String> product, List<String> brand, String? pack}) _read(String printed) {
   final tokens = [
     for (final m in _token.allMatches(_fixO(foldText(printed)))) m[0]!,
   ];
@@ -190,8 +223,5 @@ String? translateKnown(String printed) {
     }
     i++;
   }
-  // Mostly unknown words (`MELIS KORNISON TURSU`: only `tursu` is known, and it is
-  // just a modifier): the glossary would invent a half translation, the model gets it.
-  if (product.isEmpty || brand.length > product.length) return null;
-  return [...product, ...brand, ?pack].join(' ');
+  return (product: product, brand: brand, pack: pack);
 }

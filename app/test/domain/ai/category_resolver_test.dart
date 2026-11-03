@@ -18,6 +18,16 @@ void main() {
   });
   tearDown(() => db.close());
 
+  test('a singular finds its plural: огірок ~ Огірки, but молоко is not Молочне', () async {
+    final veg = await seed.group('🛒 Продукти');
+    await seed.leaf('🥒 Огірки', price: 39, parentId: veg);
+    await seed.group('🥛 Молочне', parentId: veg);
+    final r = await CategoryResolver(db).resolve('огірок');
+    expect(r.best?.name, '🥒 Огірки');
+    final milk = await CategoryResolver(db).resolve('молоко');
+    expect(milk.candidates, isEmpty, reason: 'only a short ending may differ');
+  });
+
   test('C2 exact name (icon and case ignored) wins, with price and parent', () async {
     final fruit = await seed.group('🍎 Фрукти');
     await seed.leaf('🍌 Банани', price: 70, parentId: fruit);

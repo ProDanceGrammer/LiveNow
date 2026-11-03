@@ -8,6 +8,7 @@ import 'package:livenow/domain/postpone_rules.dart';
 
 import '../../data/ai/mock_llm_server.dart';
 import 'ai_runner_support.dart';
+import 'ai_test_support.dart' show Seed;
 
 /// First chats: nothing is learned yet, and the printed names are Turkish while
 /// the categories are Ukrainian. The model translates and suggests; the program
@@ -393,6 +394,101 @@ void main() {
     final lines = (await env.draft(jobId)).lines;
     expect((lines[0]['ua_name'] as String).toLowerCase(), 'картопля');
     expect((lines[1]['ua_name'] as String).toLowerCase(), isNot('лаваш'));
+  });
+
+  /// The BIM receipt against a budget shaped like the real one: the receipt is
+  /// Turkish, the categories Ukrainian, the model useless. The names and the
+  /// existing categories must come from the code (glossary + resolver), and a model
+  /// that answers badly must not take them away.
+  Future<void> bimWithBadModel(
+    void Function() modelReplies, {
+    required bool down,
+    required bool failed,
+  }) async {
+    await env.init(llm: llmClient());
+    final seed = Seed(env.db);
+    Future<String> leaf(String n, double p, {String? parent}) => seed.leaf(
+      n,
+      price: p,
+      parentId: parent ?? env.groupFood,
+      count: env.tryAcc,
+      use: env.monoAcc,
+    );
+    final potato = await leaf('🥔 Картопля', 29.5);
+    final cucumbers = await seed.group('🥒 Огірки', parentId: env.groupFood);
+    await leaf('🥒 Огірки', 25, parent: cucumbers);
+    await leaf('🥒 Огірки', 39, parent: cucumbers);
+    await leaf('🍞 Хліб цільнозерновий', 130);
+    final dost = await seed.group('🥛 Молоко Dost', parentId: env.groupFood);
+    await leaf('🥛 Молоко Dost', 55, parent: dost);
+    final dost59 = await leaf('🥛 Молоко Dost', 59, parent: dost);
+    modelReplies();
+
+    final jobId = await env.sendReceipt(
+      receiptOf([
+        rl('PATATES', 88.94, qty: 3.015, unit: 'kg', unitPrice: 29.5),
+        rl('SALATALIK', 47.78, qty: 0.975, unit: 'kg', unitPrice: 49.0),
+        rl('TAMBUGDAYEKMK5O0G', 65.0, grams: 500),
+        rl('LiMON', 30.62, qty: 0.785, unit: 'kg', unitPrice: 39.0),
+        rl('GUNLUK SUT 1L DOST', 59.0, qty: 1, unit: 'kg', unitPrice: 59),
+      ]),
+    );
+    await env.drain();
+    final d = await env.draft(jobId);
+    final lines = d.lines;
+    String ua(int i) => (lines[i]['ua_name'] as String? ?? '').toLowerCase();
+    expect(ua(0), 'картопля');
+    expect(ua(1), 'огірки');
+    expect(ua(3), 'лимон');
+
+    expect(lines[0]['category_id'], potato, reason: 'Картопля costs 29.5: reused');
+    expect(lines[0]['needs_answer'], isFalse);
+    expect(lines[1]['category_name'], contains('Огірки'), reason: 'found, not asked');
+    expect(lines[1]['needs_answer'], isFalse);
+    expect(lines[2]['category_name'], contains('цільнозерновий'));
+    expect(lines[2]['needs_answer'], isFalse);
+    expect(lines[4]['category_id'], dost59, reason: 'Молоко Dost 59 from the brand word');
+    expect(lines[4]['needs_answer'], isFalse);
+    // No lemon category exists: the one question, with the create option.
+    expect(lines[3]['needs_answer'], isTrue);
+    final qs = await questionsOf(jobId);
+    final q = qs.singleWhere((q) => q['id'] == 'cat:3');
+    expect((q['options'] as List).last, startsWith('Створити'));
+
+    final ov = jsonDecode(jsonEncode(d.json['overrides'])) as Map<String, dynamic>;
+    expect(ov['suggest_failed'] == true, down, reason: 'only a dead server gives the stage up');
+    expect(ov['suggest_error'] != null, failed, reason: 'a failed call keeps its reason in the card');
+  }
+
+  test('BIM, model server answers HTTP 500: names and existing categories still come', () async {
+    await bimWithBadModel(
+      () => llmServer.enqueue(const MockReply.status(500)),
+      down: true,
+      failed: true,
+    );
+  });
+
+  test('BIM, model answers prose with no JSON: nothing is lost, the reason is kept', () async {
+    await bimWithBadModel(
+      () {
+        llmServer.enqueueContent('Sorry, I cannot help with that.');
+        llmServer.enqueueContent('Still no JSON, sorry.');
+      },
+      down: false,
+      failed: true,
+    );
+  });
+
+  test('BIM, model answers for lines nobody asked about: ignored', () async {
+    await bimWithBadModel(
+      () => llmServer.enqueueJson({
+        'items': [
+          {'n': 9, 'pick': 'new', 'group': 'g1', 'name': 'Лаваш', 'confidence': 0.99},
+        ],
+      }),
+      down: false,
+      failed: false,
+    );
   });
 
   test('lines a rule already places never reach the model', () async {
