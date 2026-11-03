@@ -101,7 +101,13 @@ class ItemSuggester {
           merchant: merchant,
         ),
       );
-      ua.addAll(parseTranslatedItems(reply));
+      // Only the names that were asked. Given ONE name, a 3B model answered with a
+      // list of ten (its own glossary, in order) and the numbers overwrote the
+      // glossary translations of the other lines: a reply with a number nobody
+      // asked about is not a translation at all, so none of it is used.
+      final asked = {for (final i in unknown) i + 1};
+      final got = parseTranslatedItems(reply);
+      if (got.keys.every(asked.contains)) ua.addAll(got);
     }
 
     // 2. The existing categories that may fit each translation.

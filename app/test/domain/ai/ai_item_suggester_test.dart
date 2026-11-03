@@ -284,6 +284,117 @@ void main() {
     expect(await env.message(jobId, AiMessageKind.question), isNull);
   });
 
+  Future<List<Map<String, dynamic>>> questionsOf(String jobId) async {
+    final m = await env.message(jobId, AiMessageKind.question);
+    if (m == null) return const [];
+    final j = jsonDecode(m.contentJson) as Map<String, dynamic>;
+    return [for (final q in j['questions'] as List) Map<String, dynamic>.from(q as Map)];
+  }
+
+  Future<({String dost, String mis})> milk() async => (
+    dost: await env.budget.saveCategory(
+      CategoryInputLike.leaf('Молоко Dost', 59, env.groupFood, env.tryAcc, env.monoAcc),
+    ),
+    mis: await env.budget.saveCategory(
+      CategoryInputLike.leaf('Молоко Mis', 55, env.groupFood, env.tryAcc, env.monoAcc),
+    ),
+  );
+
+  test('the model says "new" but the product exists at the paid price: it is reused', () async {
+    await env.init(llm: llmClient());
+    final m = await milk();
+    final before = await env.count('budget_categories');
+    translateAndPick(
+      [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': 'Молоко', 'confidence': 0.9},
+      ],
+      ['Молоко'],
+    );
+    final jobId = await env.sendReceipt(
+      receiptOf([rl('XYZ TEJ 1L', 59.0, qty: 1, unit: 'kg', unitPrice: 59)]),
+    );
+    await env.drain();
+    final l = (await env.draft(jobId)).lines.single;
+    expect(l['category_id'], m.dost, reason: 'Молоко Dost costs 59 on the same accounts');
+    expect(l['new_category'], isFalse);
+    expect(l['needs_answer'], isFalse);
+    expect(await questionsOf(jobId), isEmpty);
+    expect(await env.count('budget_categories'), before, reason: 'nothing created');
+  });
+
+  test('similar milk at another price is asked, existing first and create last', () async {
+    await env.init(llm: llmClient());
+    final m = await milk();
+    translateAndPick(
+      [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': 'Молоко', 'confidence': 0.9},
+      ],
+      ['Молоко'],
+    );
+    final jobId = await env.sendReceipt(
+      receiptOf([rl('XYZ TEJ 1L', 61.5, qty: 1, unit: 'kg', unitPrice: 61.5)]),
+    );
+    await env.drain();
+    final l = (await env.draft(jobId)).lines.single;
+    expect(l['new_category'], isFalse, reason: 'nothing is made without a tap');
+    expect(l['needs_answer'], isTrue);
+    final q = (await questionsOf(jobId)).singleWhere((q) => q['id'] == 'cat:0');
+    final options = (q['options'] as List).cast<String>();
+    final ids = (q['option_ids'] as List).cast<String>();
+    expect(options.take(2), everyElement(contains('Молоко')));
+    expect(ids.take(2).toSet(), {m.dost, m.mis});
+    expect(options.last, startsWith('Створити'), reason: 'create stays, as the last option');
+    expect(ids.last, startsWith('create:'));
+    expect(q['recommended'], 0, reason: 'the first existing one is recommended, not create');
+    expect(q['text'], contains('схожі'));
+  });
+
+  test('no similar category at all: the model\'s new category is offered as before', () async {
+    await env.init(llm: llmClient());
+    await milk();
+    translateAndPick(
+      [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': 'Чорнослив', 'confidence': 0.9},
+      ],
+      ['Чорнослив'],
+    );
+    final jobId = await env.sendReceipt(
+      receiptOf([rl('XYZ ERIK 1L', 65.0, qty: 1, unit: 'kg', unitPrice: 65)]),
+    );
+    await env.drain();
+    final l = (await env.draft(jobId)).lines.single;
+    expect(l['new_category'], isTrue);
+    expect(l['needs_answer'], isFalse);
+  });
+
+  test('a model that answers a list it was not given cannot overwrite the glossary names', () async {
+    await env.init(llm: llmClient());
+    // Only the second name is unknown to the glossary. The model answers for 1 AND 2
+    // (it repeats its own word list): the whole reply is dropped.
+    llmServer.enqueueJson({
+      'items': [
+        {'n': 1, 'ua': 'молоко'},
+        {'n': 2, 'ua': 'лаваш'},
+      ],
+    });
+    llmServer.enqueueJson({
+      'items': [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': '', 'confidence': 0.8},
+        {'n': 2, 'pick': 'new', 'group': 'g1', 'name': '', 'confidence': 0.8},
+      ],
+    });
+    final jobId = await env.sendReceipt(
+      receiptOf([
+        rl('PATATES', 88.94, qty: 3.015, unit: 'kg', unitPrice: 29.5),
+        rl('XYZ TEJ 1L', 59.0, qty: 1, unit: 'kg', unitPrice: 59),
+      ]),
+    );
+    await env.drain();
+    final lines = (await env.draft(jobId)).lines;
+    expect((lines[0]['ua_name'] as String).toLowerCase(), 'картопля');
+    expect((lines[1]['ua_name'] as String).toLowerCase(), isNot('лаваш'));
+  });
+
   test('lines a rule already places never reach the model', () async {
     await env.init(llm: llmClient());
     final jobId = await env.sendReceipt(

@@ -18,6 +18,7 @@ import 'ai_item_suggester.dart';
 import 'ai_protocol.dart';
 import 'alias_source.dart';
 import 'bazaar_parser.dart';
+import 'category_match.dart';
 import 'category_resolver.dart';
 import 'dedupe_service.dart';
 import 'extracted_receipt.dart';
@@ -1017,8 +1018,29 @@ class DraftBuilder {
 
     // The model's suggestion (translated, chosen among the real categories).
     final sug = ctx.suggestions[line.index];
-    if (sug != null) {
-      if (sug.uaName.isNotEmpty) line.uaName = sug.uaName;
+    if (sug != null && sug.uaName.isNotEmpty) line.uaName = sug.uaName;
+
+    // A new category only when the product does not exist yet: a similar name
+    // (printed or translated) at the paid price on compatible accounts IS the
+    // product, whatever the model said. Similar ones at another price are asked
+    // about, never silently replaced by a new category.
+    final similar = await _similar(ctx, line, usable, sug);
+    final existingPick = sug != null && sug.categoryId != null;
+    if (!existingPick) {
+      final matchId = findExistingMatch(
+        similar,
+        unitPrice: line.unitPrice,
+        useAccountId: ctx.useAccount?.id,
+      );
+      final found = matchId == null ? null : ctx.byId[matchId];
+      if (found != null) {
+        line.confidence = 0.8;
+        line.flags = [...line.flags, kFlagSuggested];
+        return found;
+      }
+    }
+
+    if (sug != null && !(sug.isNew && similar.isNotEmpty)) {
       final target = ctx.byId[sug.categoryId ?? sug.groupId];
       if (target != null && sug.confidence >= minSuggestConfidence) {
         line.confidence = sug.confidence;
@@ -1035,7 +1057,7 @@ class DraftBuilder {
     // one-tap "create it". What the user typed last time that matched nothing
     // drives the nearest ones, so a miss gets a different, useful card.
     final miss = ctx.catMiss(line.index);
-    var choices = usable;
+    var choices = similar;
     if (miss != null) {
       final r = await resolver.resolve(miss, limit: 6);
       choices = [
@@ -1066,7 +1088,10 @@ class DraftBuilder {
       Question(
         id: 'cat:${line.index}',
         text: miss == null
-            ? 'Яка категорія для «${line.displayName}» (${fmtMoney(line.amount)} ${ctx.currency})?'
+            ? (line.candidates.isEmpty
+                  ? 'Яка категорія для «${line.displayName}» (${fmtMoney(line.amount)} ${ctx.currency})?'
+                  : 'Знайшов схожі категорії для «${line.displayName}» '
+                        '(${fmtMoney(line.amount)} ${ctx.currency}). Оберіть одну або створіть нову.')
             : 'Не знайшов категорію «$miss». Оберіть найближчу, створіть нову або '
                   'напишіть іншу назву.',
         options: [for (final c in line.candidates) c.label, ?create],
@@ -1101,6 +1126,39 @@ class DraftBuilder {
       return _Lookup(ctx.byId[usable.first.id], usable, decided: true);
     }
     return _Lookup(null, usable, decided: false);
+  }
+
+  /// Existing products whose name resembles the line: the printed name's matches
+  /// ([usable]) plus the translated name's. A group is never a product. Those at
+  /// the paid price come first, so the question offers them before the others.
+  Future<List<CategoryCandidate>> _similar(
+    _Ctx ctx,
+    DraftLine line,
+    List<CategoryCandidate> usable,
+    LineSuggestion? sug,
+  ) async {
+    final seen = <String>{};
+    final all = <CategoryCandidate>[];
+    void add(Iterable<CategoryCandidate> cs) {
+      for (final c in cs) {
+        final cat = ctx.byId[c.id];
+        if (cat == null || !seen.add(c.id)) continue;
+        if (c.isAggregate && !ctx.isWrapper(cat)) continue;
+        all.add(c);
+      }
+    }
+
+    add(usable);
+    final ua = sug?.uaName;
+    if (ua != null && ua.isNotEmpty && ua != line.name) {
+      add((await resolver.resolve(ua, limit: 6)).candidates);
+    }
+    final price = line.unitPrice;
+    if (price == null || !(price > 0)) return all;
+    bool atPrice(CategoryCandidate c) =>
+        (!c.isAggregate && pricesMatch(c.price, price)) ||
+        c.variants.any((v) => pricesMatch(v.price, price));
+    return [...all.where(atPrice), ...all.where((c) => !atPrice(c))];
   }
 
   /// One batched model call per receipt: Ukrainian names and category

@@ -6,6 +6,13 @@ import '../budget_rules.dart';
 import '../budget_service.dart';
 import 'alias_source.dart';
 
+/// Is [leaf] the price of [paid]? A weighed line's unit price is its amount
+/// divided by the weight, so cent rounding moves it a little (`30.62 / 0.785` is
+/// 39.0064 for a printed 39.00): a gap of up to half a percent is the same price.
+bool pricesMatch(double? leaf, double paid) =>
+    leaf != null &&
+    (leaf - paid).abs() <= (0.005 > 0.005 * paid.abs() ? 0.005 : 0.005 * paid.abs());
+
 /// What to do with a product whose price (or payment method) differs from the
 /// categories we have.
 enum PlanKind {
@@ -114,8 +121,7 @@ class PricePlanner {
   final AppDatabase db;
   final BudgetService budget;
 
-  static bool _samePrice(double? a, double b) =>
-      a != null && (a - b).abs() < 0.005;
+  static bool _samePrice(double? a, double b) => pricesMatch(a, b);
 
   /// Plans the change for product [categoryId] now costing [newPrice].
   /// Reads only. Cases:

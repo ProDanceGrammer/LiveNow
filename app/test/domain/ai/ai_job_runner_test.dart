@@ -489,9 +489,10 @@ void main() {
       final tx = (await env.transactions()).single;
       expect(tx.categoryId, gouda);
 
-      // 2. the model server has nothing to say (500): deterministic fallback
+      // 2. the model server has nothing to say (500): deterministic fallback.
+      // 140 for 300 g is 467/kg: neither cheese has that price (500 would just be Гауда).
       final b = await env.sendReceipt(
-        receiptOf([rl('Сир 300 г', 150.00, name: 'Сир 300 г')], at: '2026-10-09T10:00:00'),
+        receiptOf([rl('Сир 300 г', 140.00, name: 'Сир 300 г')], at: '2026-10-09T10:00:00'),
       );
       await env.drain();
       expect((await env.job(b)).state, AiJobState.needsInput);
@@ -525,7 +526,7 @@ void main() {
         CategoryInputLike.leaf('Сир Едам', 450, env.groupFood, env.tryAcc, env.monoAcc),
       );
       final b = await env.sendReceipt(
-        receiptOf([rl('Сир 300 г', 150.00, name: 'Сир 300 г')], at: '2026-10-09T10:00:00'),
+        receiptOf([rl('Сир 300 г', 140.00, name: 'Сир 300 г')], at: '2026-10-09T10:00:00'),
       );
       await env.drain();
       final q = (await env.message(b, AiMessageKind.question))!;
@@ -538,7 +539,7 @@ void main() {
       await env.chat.answerQuestion(q.id, 'cat:0', 'щось зовсім інше', optionId: edam);
       await env.drain();
       expect((await env.job(b)).state, AiJobState.done);
-      // 500/kg is not Edam's 450: the commit records a price-change variant of Edam.
+      // 467/kg is not Edam's 450: the commit records a price-change variant of Edam.
       final tx = (await env.transactions()).single;
       expect(
         await env.count(
