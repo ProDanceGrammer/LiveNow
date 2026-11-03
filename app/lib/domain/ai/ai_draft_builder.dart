@@ -1069,7 +1069,7 @@ class DraftBuilder {
     final miss = ctx.catMiss(line.index);
     var choices = similar;
     if (miss != null) {
-      final r = await resolver.resolve(miss, limit: 6);
+      final r = await resolver.resolve(miss, limit: kMaxOffered);
       choices = [
         for (final c in r.candidates)
           if (!(c.isAggregate && !ctx.isWrapper(ctx.byId[c.id]!))) c,
@@ -1079,17 +1079,13 @@ class DraftBuilder {
     // price variant adds nothing), each with its group (`Їжа › Сир`), usual price
     // and unit, so the user can check what a choice is before tapping it.
     final seen = <String>{};
+    // The model's own pick, too weak to apply unasked, is still worth offering.
+    final weakPick = miss == null && sug != null ? ctx.byId[sug.categoryId] : null;
     line.candidates = [
-      for (final c in choices)
-        if (seen.add(c.id))
-          DraftChoice(
-            c.id,
-            c.name,
-            parentName: c.parentName,
-            price: c.price,
-            unit: c.unit.name,
-          ),
-    ].where((c) => seen.add('label:${c.label}')).take(3).toList();
+      if (weakPick != null && (!ctx.parents.contains(weakPick.id) || ctx.isWrapper(weakPick)))
+        _choiceOfCategory(ctx, weakPick),
+      for (final c in choices) _choiceOf(ctx, c),
+    ].where((c) => seen.add(c.id) && seen.add('label:${c.label}')).take(kMaxOffered).toList();
     final group = ctx.byId[sug?.groupId] ?? ctx.defaultGroup;
     final newName = miss ?? line.displayName;
     final create = group == null ? null : createOptionLabel(newName, group.name);
@@ -1155,9 +1151,40 @@ class DraftBuilder {
     return _Lookup(null, usable, decided: false);
   }
 
+  /// How many related categories one question lists.
+  static const int kMaxOffered = 8;
+
+  DraftChoice _choiceOf(_Ctx ctx, CategoryCandidate c) {
+    final prices = <double>{
+      for (final v in c.variants)
+        if (v.price != null) v.price!,
+    }.toList()..sort();
+    return DraftChoice(
+      c.id,
+      c.name,
+      parentName: c.parentName,
+      price: c.isAggregate ? null : c.price,
+      unit: c.unit.name,
+      countAccount: ctx.account(c.accountCountId)?.name,
+      useAccount: ctx.account(c.accountUseId)?.name,
+      prices: c.isAggregate ? prices : const [],
+    );
+  }
+
+  DraftChoice _choiceOfCategory(_Ctx ctx, BudgetCategory c) => DraftChoice(
+    c.id,
+    c.name,
+    parentName: ctx.byId[c.parentId]?.name,
+    price: c.price,
+    unit: BudgetUnit.fromDb(c.unit).name,
+    countAccount: ctx.account(c.accountCountId)?.name,
+    useAccount: ctx.account(c.accountUseId)?.name,
+  );
+
   /// Existing products whose name resembles the line: the printed name's matches
-  /// ([usable]) plus the translated name's. A group is never a product. Those at
-  /// the paid price come first, so the question offers them before the others.
+  /// ([usable]), the glossary translation's and the model's translated name's.
+  /// A group is never a product. Those at the paid price come first, so the
+  /// question offers them before the others.
   Future<List<CategoryCandidate>> _similar(
     _Ctx ctx,
     DraftLine line,
@@ -1176,9 +1203,14 @@ class DraftBuilder {
     }
 
     add(usable);
+    add((await resolver.resolve(line.name, limit: kMaxOffered)).candidates);
+    final gloss = glossaryQuery(_stripStars(line.name));
+    if (gloss != null && gloss != line.name) {
+      add((await resolver.resolve(gloss, limit: kMaxOffered)).candidates);
+    }
     final ua = sug?.uaName;
-    if (ua != null && ua.isNotEmpty && ua != line.name) {
-      add((await resolver.resolve(ua, limit: 6)).candidates);
+    if (ua != null && ua.isNotEmpty && ua != line.name && ua != gloss) {
+      add((await resolver.resolve(ua, limit: kMaxOffered)).candidates);
     }
     final price = line.unitPrice;
     if (price == null || !(price > 0)) return all;

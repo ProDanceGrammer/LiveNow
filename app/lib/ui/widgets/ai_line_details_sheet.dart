@@ -27,13 +27,19 @@ String aiLineSummary(DraftLine l, String currency) {
   return '$head${_money(l.amount)} $currency';
 }
 
-/// What a candidate category is, for the details list: its usual price and unit.
-String _choiceHint(DraftChoice c) {
-  final parts = [
-    if (c.price != null) _money(c.price!),
-    if (c.unit != null && c.unit!.isNotEmpty) _unitShort(c.unit),
-  ];
-  return parts.join(' / ');
+/// What a candidate category is: its usual price(s) and unit, then the accounts
+/// it posts to (`39.00 / kg · Cash → Card`). A wrapper lists every leaf price.
+String choiceHint(DraftChoice c) {
+  final price = c.prices.isNotEmpty
+      ? c.prices.map(_qty).join(' / ')
+      : (c.price != null ? _money(c.price!) : '');
+  final unit = c.unit == null || c.unit!.isEmpty ? '' : _unitShort(c.unit);
+  final money = [if (price.isNotEmpty) price, if (unit.isNotEmpty) unit].join(' / ');
+  final accounts = [
+    ?c.countAccount,
+    if (c.useAccount != null && c.useAccount != c.countAccount) c.useAccount!,
+  ].join(' → ');
+  return [if (money.isNotEmpty) money, if (accounts.isNotEmpty) accounts].join(' · ');
 }
 
 /// The data of ONE receipt line a question is about, so it can be checked before
@@ -69,9 +75,9 @@ Future<void> showAiLineDetails(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: Text(line.candidates[i].label),
-                subtitle: _choiceHint(line.candidates[i]).isEmpty
+                subtitle: choiceHint(line.candidates[i]).isEmpty
                     ? null
-                    : Text(_choiceHint(line.candidates[i])),
+                    : Text(choiceHint(line.candidates[i])),
                 enabled: onChoose != null,
                 onTap: onChoose == null
                     ? null

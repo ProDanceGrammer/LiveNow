@@ -606,7 +606,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('ai-question-open-0')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('ai-line-details')), findsOneWidget);
-    expect(find.textContaining('120.00'), findsOneWidget, reason: 'the usual price of option 2');
+    expect(
+      find.descendant(of: find.byKey(const ValueKey('ai-line-details')), matching: find.textContaining('120.00')),
+      findsOneWidget,
+      reason: 'the usual price of option 2',
+    );
+    // The same hint is on the option row itself, no sheet needed.
+    expect(find.byKey(const ValueKey('ai-question-info-0-1')), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('ai-detail-choice-1')));
     await settle(tester);
     final q = await answeredQuestion(tester, qId);

@@ -124,6 +124,17 @@ class _QuestionRowState extends ConsumerState<_QuestionRow> {
     return i < ids.length && ids[i].isNotEmpty ? ids[i] : null;
   }
 
+  /// The offered category behind option [i] (matched by id), when the line is known.
+  DraftChoice? _choiceOfOption(int i) {
+    final id = _idOf(i);
+    final line = widget.line;
+    if (id == null || line == null) return null;
+    for (final c in line.candidates) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
   Future<void> _openDetails() {
     final line = widget.line!;
     return showAiLineDetails(
@@ -167,6 +178,18 @@ class _QuestionRowState extends ConsumerState<_QuestionRow> {
                   key: ValueKey(_key('ai-question-line-${widget.number}')),
                   style: widget.theme.textTheme.labelMedium,
                 ),
+              if (line != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    'Details',
+                    key: ValueKey(_key('ai-question-details-${widget.number}')),
+                    style: widget.theme.textTheme.labelMedium?.copyWith(
+                      color: cs.primary,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -176,11 +199,33 @@ class _QuestionRowState extends ConsumerState<_QuestionRow> {
             style: widget.theme.textTheme.labelMedium,
           )
         else ...[
+          for (var i = 0; i < q.options.length; i++)
+            if (_choiceOfOption(i) case final c?)
+              // Its own Material: the chat bubble paints a coloured box behind.
+              Material(
+                type: MaterialType.transparency,
+                child: ListTile(
+                  key: ValueKey(_key('ai-question-chip-${widget.number}-$i')),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  tileColor: q.recommended == i ? cs.primaryContainer : null,
+                  title: Text(c.label),
+                  subtitle: choiceHint(c).isEmpty ? null : Text(choiceHint(c)),
+                  trailing: IconButton(
+                    key: ValueKey(_key('ai-question-info-${widget.number}-$i')),
+                    tooltip: 'Details',
+                    icon: const Icon(Icons.info_outline, size: 18),
+                    onPressed: _openDetails,
+                  ),
+                  onTap: () => _answer(q.options[i], optionId: _idOf(i)),
+                ),
+              ),
           if (q.options.isNotEmpty)
             Wrap(
               spacing: 6,
               children: [
                 for (var i = 0; i < q.options.length; i++)
+                  if (_choiceOfOption(i) == null)
                   ActionChip(
                     key: ValueKey(
                       _key('ai-question-chip-${widget.number}-$i'),

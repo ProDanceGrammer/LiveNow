@@ -22,9 +22,24 @@ List<String> _strs(Object? v) => [
 
 /// A category option offered for a line (a question's quick reply).
 class DraftChoice {
-  const DraftChoice(this.id, this.name, {this.parentName, this.price, this.unit});
+  const DraftChoice(
+    this.id,
+    this.name, {
+    this.parentName,
+    this.price,
+    this.unit,
+    this.countAccount,
+    this.useAccount,
+    this.prices = const [],
+  });
   final String id;
   final String name;
+
+  /// The accounts the category posts to (names), and, for a category that is a
+  /// same-name wrapper of price variants, every leaf price (sorted).
+  final String? countAccount;
+  final String? useAccount;
+  final List<double> prices;
 
   /// The group the category sits under (two categories can share a name), the
   /// category's usual price and unit: what the user needs to tell options apart.
@@ -42,6 +57,9 @@ class DraftChoice {
     if (parentName != null) 'parent': parentName,
     if (price != null) 'price': price,
     if (unit != null) 'unit': unit,
+    if (countAccount != null) 'count_acc': countAccount,
+    if (useAccount != null) 'use_acc': useAccount,
+    if (prices.isNotEmpty) 'prices': prices,
   };
   factory DraftChoice.fromJson(Map<String, dynamic> j) => DraftChoice(
     (j['id'] ?? '').toString(),
@@ -49,6 +67,13 @@ class DraftChoice {
     parentName: _s(j['parent']),
     price: _d(j['price']),
     unit: _s(j['unit']),
+    countAccount: _s(j['count_acc']),
+    useAccount: _s(j['use_acc']),
+    prices: [
+      if (j['prices'] is List)
+        for (final p in j['prices'] as List)
+          if (_d(p) != null) _d(p)!,
+    ],
   );
 }
 

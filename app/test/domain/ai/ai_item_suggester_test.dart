@@ -350,6 +350,41 @@ void main() {
     expect(q['text'], contains('схожі'));
   });
 
+  test('every related category is offered (not just three) with price and accounts', () async {
+    await env.init(llm: llmClient());
+    final ids = <String>[];
+    for (final (name, price) in [
+      ('Молоко Dost', 59.0),
+      ('Молоко Mis', 55.0),
+      ('Молоко Sutas', 52.0),
+      ('Молоко Pinar', 57.0),
+      ('Молоко Torku', 49.0),
+    ]) {
+      ids.add(
+        await env.budget.saveCategory(
+          CategoryInputLike.leaf(name, price, env.groupFood, env.tryAcc, env.monoAcc),
+        ),
+      );
+    }
+    translateAndPick(
+      [
+        {'n': 1, 'pick': 'new', 'group': 'g1', 'name': 'Молоко', 'confidence': 0.9},
+      ],
+      ['Молоко'],
+    );
+    final jobId = await env.sendReceipt(
+      receiptOf([rl('XYZ TEJ 1L', 61.5, qty: 1, unit: 'kg', unitPrice: 61.5)]),
+    );
+    await env.drain();
+    final l = (await env.draft(jobId)).lines.single;
+    final cands = (l['candidates'] as List).cast<Map>();
+    expect(cands.map((c) => c['id']).toSet(), ids.toSet(), reason: 'all five, none cut off');
+    expect(cands.first['count_acc'], isNotNull);
+    expect(cands.first['price'], isNotNull);
+    final q = (await questionsOf(jobId)).singleWhere((q) => q['id'] == 'cat:0');
+    expect((q['options'] as List).length, 6, reason: 'five categories and Create');
+  });
+
   test('no similar category at all: the model\'s new category is offered as before', () async {
     await env.init(llm: llmClient());
     await milk();
