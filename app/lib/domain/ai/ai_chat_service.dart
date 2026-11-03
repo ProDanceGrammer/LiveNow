@@ -81,21 +81,62 @@ class AiChatService {
         ),
       );
 
-  Future<void> archiveThread(String id, {bool archived = true}) =>
-      (db.update(db.aiThreadsTable)..where((t) => t.id.equals(id))).write(
-        AiThreadsTableCompanion(
-          archived: Value(archived),
-          updatedAt: Value(dateTimeToDb(DateTime.now())!),
-        ),
+  /// Deletes a chat for good: the thread, its messages, jobs, batches (with their
+  /// items) and photos, in one transaction. These are ordinary deletes, so each one
+  /// leaves a sync tombstone and the chat disappears on the hub and the other
+  /// devices too (the hub then drops the photo files that lost their row). What
+  /// the chat already put into the budget (transactions, categories) and what the
+  /// assistant learned (aliases, rules) stay: they are the user's data.
+  Future<void> deleteThread(String id) async {
+    final v = [Variable.withString(id)];
+    await db.transaction(() async {
+      await db.customUpdate(
+        'DELETE FROM ai_batch_items WHERE batch_id IN '
+        '(SELECT id FROM ai_batches WHERE thread_id = ?)',
+        variables: v,
+        updates: {db.aiBatchItemsTable},
+        updateKind: UpdateKind.delete,
       );
-
-  /// Threads, most recently active first.
-  Stream<List<AiThread>> watchThreads({bool includeArchived = false}) {
-    final q = db.select(db.aiThreadsTable);
-    if (!includeArchived) q.where((t) => t.archived.equals(false));
-    q.orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
-    return q.watch();
+      await db.customUpdate(
+        'DELETE FROM ai_batches WHERE thread_id = ?',
+        variables: v,
+        updates: {db.aiBatchesTable},
+        updateKind: UpdateKind.delete,
+      );
+      await db.customUpdate(
+        'DELETE FROM ai_blobs WHERE message_id IN '
+        '(SELECT id FROM ai_messages WHERE thread_id = ?) OR job_id IN '
+        '(SELECT id FROM ai_jobs WHERE thread_id = ?)',
+        variables: [...v, ...v],
+        updates: {db.aiBlobsTable},
+        updateKind: UpdateKind.delete,
+      );
+      await db.customUpdate(
+        'DELETE FROM ai_messages WHERE thread_id = ?',
+        variables: v,
+        updates: {db.aiMessagesTable},
+        updateKind: UpdateKind.delete,
+      );
+      await db.customUpdate(
+        'DELETE FROM ai_jobs WHERE thread_id = ?',
+        variables: v,
+        updates: {db.aiJobsTable},
+        updateKind: UpdateKind.delete,
+      );
+      await db.customUpdate(
+        'DELETE FROM ai_threads WHERE id = ?',
+        variables: v,
+        updates: {db.aiThreadsTable},
+        updateKind: UpdateKind.delete,
+      );
+    });
   }
+
+  /// Threads, most recently active first. (A chat that was archived by an older
+  /// version shows again: it can be deleted now.)
+  Stream<List<AiThread>> watchThreads() => (db.select(
+    db.aiThreadsTable,
+  )..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])).watch();
 
   // ---- reading --------------------------------------------------------------
 

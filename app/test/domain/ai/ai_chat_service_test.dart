@@ -357,14 +357,71 @@ void main() {
       );
     });
 
-    test('archived threads are hidden', () async {
-      await chat.archiveThread(thread);
-      expect(await chat.watchThreads().first, isEmpty);
-      expect(
-        await chat.watchThreads(includeArchived: true).first,
-        hasLength(1),
+    test('a chat archived by an older version shows again, so it can be deleted', () async {
+      await (db.update(db.aiThreadsTable)..where((t) => t.id.equals(thread))).write(
+        const AiThreadsTableCompanion(archived: Value(true)),
       );
-      await chat.renameThread(thread, 'Old');
+      expect(await chat.watchThreads().first, hasLength(1));
+    });
+  });
+
+  group('deleteThread', () {
+    Future<int> count(String table) async => (await db
+            .customSelect('SELECT COUNT(*) AS n FROM $table')
+            .getSingle())
+        .read<int>('n');
+
+    test('removes the chat with its messages, jobs, batches and photos; others stay', () async {
+      final other = await chat.createThread(title: 'Other');
+      final photo = await chat.sendPhoto(thread, Uint8List.fromList(List.generate(40, (i) => i)));
+      await chat.sendText(thread, 'купив молоко 59');
+      final keep = await chat.sendText(other, 'keep me');
+      final now = dateTimeToDb(DateTime.now())!;
+      await db.into(db.aiBatchesTable).insert(
+        AiBatchesTableCompanion.insert(
+          id: 'b1',
+          jobId: photo.jobId!,
+          threadId: thread,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      await db.into(db.aiBatchItemsTable).insert(
+        AiBatchItemsTableCompanion.insert(
+          id: 'bi1',
+          batchId: 'b1',
+          entityType: 'transaction',
+          entityId: 'tx1',
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      final blobId = (await db.select(db.aiBlobsTable).get()).single.id;
+      final msgIds = [for (final m in await messages()) if (m.threadId == thread) m.id];
+      expect(msgIds, isNotEmpty);
+
+      await chat.deleteThread(thread);
+
+      expect((await db.select(db.aiThreadsTable).get()).map((t) => t.id), [other]);
+      expect((await messages()).map((m) => m.id), [keep.messageId]);
+      expect((await jobs()).map((j) => j.id), [keep.jobId]);
+      expect(await count('ai_blobs'), 0);
+      expect(await count('ai_batches'), 0);
+      expect(await count('ai_batch_items'), 0);
+      expect(await chat.watchThreads().first, hasLength(1));
+
+      // Every delete leaves a tombstone, so the hub and the other devices drop it too.
+      expect((await versionOf('ai_threads', thread)).deleted, 1);
+      expect((await versionOf('ai_messages', msgIds.first)).deleted, 1);
+      expect((await versionOf('ai_blobs', blobId)).deleted, 1);
+      expect((await versionOf('ai_batches', 'b1')).deleted, 1);
+      expect((await versionOf('ai_threads', other)).deleted, 0);
+    });
+
+    test('an empty or unknown chat is not an error', () async {
+      await chat.deleteThread(thread);
+      await chat.deleteThread(thread);
+      expect(await chat.watchThreads().first, isEmpty);
     });
   });
 

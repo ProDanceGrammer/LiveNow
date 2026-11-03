@@ -194,6 +194,9 @@ class AiJobRunner {
   }
 
   Future<void> _guarded(AiJob job, {required bool resume}) async {
+    // Its chat was deleted (the job went with it): nothing to do, and nothing
+    // may be written back for it.
+    if (await _job(job.id) == null) return;
     try {
       if (resume) {
         await _resume(job);
@@ -1056,6 +1059,8 @@ class AiJobRunner {
     final existing = await _message(id);
     final now = _stamp();
     if (existing == null) {
+      // A job whose chat was deleted while it ran must not bring the chat back.
+      if (await _job(job.id) == null) return;
       await db
           .into(db.aiMessagesTable)
           .insert(

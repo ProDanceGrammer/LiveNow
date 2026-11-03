@@ -30,9 +30,13 @@ class FakeExtractor implements ReceiptExtractor {
   Object? error;
   int calls = 0;
 
+  /// Runs inside `extract`, i.e. while the job is running (a test deletes its chat here).
+  Future<void> Function()? onExtract;
+
   @override
   Future<ExtractedReceipt> extract(Uint8List image, {String? mime}) async {
     calls++;
+    await onExtract?.call();
     if (error != null) throw error!;
     return queue.isNotEmpty ? queue.removeAt(0) : receipt!;
   }

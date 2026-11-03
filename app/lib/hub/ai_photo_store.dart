@@ -93,6 +93,32 @@ class AiPhotoStore {
     return n;
   }
 
+  /// Deletes the photo files whose `ai_blobs` row no longer exists (its chat was
+  /// deleted: the row's tombstone arrived through sync, the file did not go with it).
+  /// [liveIds] are the ids of all rows. A file younger than [minAge] stays, so a
+  /// photo being written while its row is still on the way is never lost. Returns
+  /// how many files were removed.
+  Future<int> purgeOrphans(
+    Set<String> liveIds, {
+    Duration minAge = const Duration(minutes: 10),
+    DateTime? now,
+  }) async {
+    if (!await root.exists()) return 0;
+    final limit = (now ?? DateTime.now()).subtract(minAge);
+    var n = 0;
+    await for (final e in root.list(followLinks: false)) {
+      if (e is! File) continue;
+      final name = e.uri.pathSegments.last;
+      final dot = name.indexOf('.');
+      final id = dot < 0 ? name : name.substring(0, dot);
+      if (liveIds.contains(id)) continue;
+      if ((await e.lastModified()).isAfter(limit)) continue;
+      await e.delete();
+      n++;
+    }
+    return n;
+  }
+
   /// The file part of storing a photo that arrived through sync: decodes the
   /// row's base64 `data` into a file. The caller then sets `stored_on_hub_at`
   /// and clears `data` silently.

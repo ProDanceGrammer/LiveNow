@@ -155,6 +155,28 @@ void main() {
     expect(calls.last, 'bigger');
   });
 
+  test('removes photo files whose chat was deleted, keeps live and fresh ones', () async {
+    const live = '11111111-2222-3333-4444-555555555551';
+    const gone = '11111111-2222-3333-4444-555555555552';
+    const fresh = '11111111-2222-3333-4444-555555555553';
+    for (final id in [live, gone, fresh]) {
+      await photos.save(id, Uint8List.fromList([1, 2, 3]), 'image/jpeg');
+    }
+    final old = DateTime.now().subtract(const Duration(hours: 2));
+    await File('${photos.root.path}/$live.jpg').setLastModified(old);
+    await File('${photos.root.path}/$gone.jpg').setLastModified(old);
+    // `fresh` has no row either, but it was written a moment ago: the row may still
+    // be on its way through sync.
+    await db.into(db.aiBlobsTable).insert(
+      AiBlobsTableCompanion.insert(id: live, createdAt: _now, updatedAt: _now),
+    );
+    make();
+    expect(await worker.purgeOrphanPhotos(), 1);
+    expect(await photos.exists(gone), isFalse);
+    expect(await photos.exists(live), isTrue);
+    expect(await photos.exists(fresh), isTrue);
+  });
+
   test('purges photos older than the retention days', () async {
     final id = '11111111-2222-3333-4444-555555555555';
     await photos.save(id, Uint8List.fromList([1, 2, 3]), 'image/jpeg');

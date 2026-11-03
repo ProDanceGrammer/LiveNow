@@ -42,7 +42,7 @@ class AiHubRequired extends StatelessWidget {
   );
 }
 
-/// The list of chats: open, create, rename, archive.
+/// The list of chats: open, create, rename, delete.
 class AiThreadsScreen extends ConsumerWidget {
   const AiThreadsScreen({super.key});
 
@@ -93,6 +93,45 @@ class AiThreadsScreen extends ConsumerWidget {
     if (title != null) await service.renameThread(t.id, title);
   }
 
+  /// Asks, then deletes the chat for good (here and on the hub).
+  Future<void> _delete(BuildContext context, WidgetRef ref, AiThread t) async {
+    final service = ref.read(aiChatServiceProvider);
+    final overlay = rootOverlayOf(context);
+    final name = t.title.isEmpty ? 'New chat' : t.title;
+    final ok = await showStackedDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete chat?'),
+        content: Text(
+          '«$name» with all its messages and photos will be deleted here and on '
+          'the hub. Transactions it already added to the budget stay.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('ai-thread-delete-cancel'),
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('ai-thread-delete-confirm'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await service.deleteThread(t.id);
+    } catch (e) {
+      showInfoToast(overlay, '$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ready = ref.watch(aiHubReadyProvider);
@@ -139,20 +178,22 @@ class AiThreadsScreen extends ConsumerWidget {
                                 key: ValueKey('ai-thread-menu-${t.id}'),
                                 onSelected: (v) {
                                   if (v == 'rename') _rename(context, ref, t);
-                                  if (v == 'archive') {
-                                    ref
-                                        .read(aiChatServiceProvider)
-                                        .archiveThread(t.id);
-                                  }
+                                  if (v == 'delete') _delete(context, ref, t);
                                 },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
+                                itemBuilder: (ctx) => [
+                                  const PopupMenuItem(
                                     value: 'rename',
                                     child: Text('Rename'),
                                   ),
                                   PopupMenuItem(
-                                    value: 'archive',
-                                    child: Text('Archive'),
+                                    key: ValueKey('ai-thread-delete-${t.id}'),
+                                    value: 'delete',
+                                    child: Text(
+                                      'Delete',
+                                      style: TextStyle(
+                                        color: Theme.of(ctx).colorScheme.error,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),

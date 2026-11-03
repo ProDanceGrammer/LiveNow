@@ -193,6 +193,35 @@ void main() {
     expect(find.byKey(const ValueKey('ai-chat-input')), findsNothing);
   });
 
+  uiTest('a chat is deleted for good after a confirmation; Cancel keeps it', (tester) async {
+    await mount(tester, const AiThreadsScreen(), seed: () async {
+      await chat.sendText(thread, 'купив молоко 59');
+    });
+    expect(find.text('Archive'), findsNothing);
+    await tester.tap(find.byKey(ValueKey('ai-thread-menu-$thread')));
+    await tester.pumpAndSettle();
+    expect(find.text('Archive'), findsNothing, reason: 'there is no archive any more');
+    await tester.tap(find.byKey(ValueKey('ai-thread-delete-$thread')));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete chat?'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('ai-thread-delete-cancel')));
+    await settle(tester);
+    expect(await count(tester, 'ai_threads'), 1);
+    expect(await count(tester, 'ai_messages'), 1);
+
+    await tester.tap(find.byKey(ValueKey('ai-thread-menu-$thread')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('ai-thread-delete-$thread')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ai-thread-delete-confirm')));
+    await settle(tester);
+    expect(await count(tester, 'ai_threads'), 0);
+    expect(await count(tester, 'ai_messages'), 0);
+    expect(await count(tester, 'ai_jobs'), 0);
+    expect(find.byKey(const ValueKey('ai-threads-empty')), findsOneWidget);
+  });
+
   uiTest('new chat button creates a thread', (tester) async {
     await mount(tester, const AiThreadsScreen());
     await tester.tap(find.byKey(const ValueKey('ai-new-thread')));

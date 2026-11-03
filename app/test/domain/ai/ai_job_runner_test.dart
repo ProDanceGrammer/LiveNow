@@ -551,6 +551,29 @@ void main() {
       );
     });
 
+    test('a chat deleted before its job runs leaves nothing behind', () async {
+      await env.init();
+      await env.sendReceipt(receiptOf(e1Lines()));
+      await env.chat.deleteThread(env.thread);
+      await env.drain();
+      expect(await env.count('ai_jobs'), 0);
+      expect(await env.count('ai_threads'), 0);
+      expect(await env.count('ai_messages'), 0);
+      expect(env.extractor.calls, 0, reason: 'no job, no work');
+    });
+
+    test('a chat deleted while its job runs is not brought back by the job', () async {
+      await env.init();
+      env.extractor.onExtract = () => env.chat.deleteThread(env.thread);
+      await env.sendReceipt(receiptOf(e1Lines()));
+      await env.drain();
+      expect(env.extractor.calls, greaterThanOrEqualTo(1));
+      expect(await env.count('ai_threads'), 0);
+      expect(await env.count('ai_jobs'), 0);
+      expect(await env.count('ai_messages'), 0, reason: 'no draft, status or error for a deleted chat');
+      expect(await env.count('budget_transactions'), 0);
+    });
+
     test('a job fails after 3 attempts with an error row', () async {
       await env.init();
       env.extractor.error = const ReceiptExtractionException('OCR found no text');

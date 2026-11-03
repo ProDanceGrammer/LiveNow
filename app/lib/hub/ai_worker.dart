@@ -100,7 +100,10 @@ class AiWorker {
       debounce,
     ).listen((_) => wake());
     _safety = Timer.periodic(safetyInterval, (_) => wake());
-    _retention = Timer.periodic(retentionInterval, (_) => purgeOldPhotos());
+    _retention = Timer.periodic(retentionInterval, (_) {
+      purgeOldPhotos();
+      purgeOrphanPhotos();
+    });
     unawaited(purgeOldPhotos());
     wake();
   }
@@ -140,6 +143,17 @@ class AiWorker {
               updatedAt: Value(dateTimeToDb(DateTime.now())!),
             ),
           );
+
+  /// Deletes the photo files whose chat was deleted (no `ai_blobs` row any more).
+  Future<int> purgeOrphanPhotos() async {
+    try {
+      final rows = await db.customSelect('SELECT id FROM ai_blobs').get();
+      return await photos.purgeOrphans({for (final r in rows) r.read<String>('id')});
+    } on Object catch (e, st) {
+      await _report(e, st, 'AI worker: orphan photos');
+      return 0;
+    }
+  }
 
   /// Deletes photo files older than `photo_retention_days` (0 or less = keep).
   Future<int> purgeOldPhotos() async {
