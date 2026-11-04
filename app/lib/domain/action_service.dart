@@ -4,6 +4,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import '../core/data_exceptions.dart';
 import '../core/ids.dart';
+import '../core/local_time.dart';
 import '../core/number_rules.dart';
 import '../core/settings.dart';
 import '../core/text_rules.dart';
@@ -1227,12 +1228,18 @@ class ActionService {
       startAt: dateTimeFromDb(action.startAt),
       endAt: dateTimeFromDb(action.endAt),
     );
-    final next = applyPostponeRule(
+    var next = applyPostponeRule(
       rule,
       current,
       nowUtc: DateTime.now().toUtc(),
       hours: _workHours(),
     );
+    // An all-day action has no time of day: "+1 hour" or "tomorrow morning" move
+    // it to that DAY (its start snapped to the day's start, no end).
+    final moved = next.startAt;
+    if (action.isAllDay && moved != null) {
+      next = ActionSchedule(startAt: localDayStart(moved), endAt: null);
+    }
     final nowText = dateTimeToDb(DateTime.now())!;
 
     await db.transaction(() async {

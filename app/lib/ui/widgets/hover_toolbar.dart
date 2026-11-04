@@ -31,11 +31,18 @@ class HoverToolbarHost extends StatefulWidget {
   /// Height the toolbar occupies, used to place it above the child.
   final double toolbarHeight;
 
+  /// For a child much narrower than the toolbar (a day column of the all-day
+  /// strip): the toolbar may use the whole overlay width and is centred on the
+  /// child as far as the screen allows, instead of being squeezed (scaled down)
+  /// into the space left of the child's right edge.
+  final bool spreadAcross;
+
   const HoverToolbarHost({
     super.key,
     required this.child,
     required this.toolbarBuilder,
     this.toolbarHeight = kHoverToolbarHeight,
+    this.spreadAcross = false,
   });
 
   @override
@@ -138,14 +145,24 @@ class _HoverToolbarHostState extends State<HoverToolbarHost> {
           8.0,
           info.overlaySize.width,
         );
+        // Spread: centred on the child (alignment x runs -1..1 over the free
+        // width, so the bar stays on screen at both edges).
+        final centre = corner.dx - info.childSize.width / 2;
+        final spreadX = info.overlaySize.width <= 0
+            ? 0.0
+            : (centre / info.overlaySize.width * 2 - 1).clamp(-1.0, 1.0);
         return Positioned(
           top: top,
           left: 0,
           right: 0,
           child: Padding(
-            padding: EdgeInsets.only(left: 8, right: right),
+            padding: widget.spreadAcross
+                ? const EdgeInsets.symmetric(horizontal: 8)
+                : EdgeInsets.only(left: 8, right: right),
             child: Align(
-              alignment: Alignment.centerRight,
+              alignment: widget.spreadAcross
+                  ? Alignment(spreadX, 0)
+                  : Alignment.centerRight,
               child: MouseRegion(
                 onEnter: (_) {
                   _overBar = true;

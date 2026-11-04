@@ -16,8 +16,8 @@ import '../theme/glass_theme.dart';
 import '../undo.dart';
 import '../urgency_colors.dart';
 import '../widgets/glass.dart';
-import '../widgets/glass_icon_tile.dart';
 import '../widgets/hover_toolbar.dart';
+import '../widgets/quick_action_bar.dart';
 import '../widgets/round_check.dart';
 
 /// The key of the strip (the Current board's marquee selection ignores presses
@@ -215,17 +215,32 @@ class AllDayWeekStrip extends ConsumerWidget {
                       color: line,
                     ),
                   Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Column(
-                        key: ValueKey('allday-strip-col-$i'),
-                        children: [
-                          for (final a in byDay[i])
-                            _StripCard(
-                              key: ValueKey('allday-card-${a.id}'),
-                              item: a,
-                            ),
-                        ],
+                    // Drop target: the whole column, also its empty part.
+                    child: DragTarget<ActionListItem>(
+                      key: ValueKey('allday-strip-drop-$i'),
+                      hitTestBehavior: HitTestBehavior.opaque,
+                      onWillAcceptWithDetails: (d) =>
+                          !_isOnDay(d.data, dayStarts[i], i == 6 ? null : dayStarts[i + 1]),
+                      onAcceptWithDetails: (d) =>
+                          _dropOnDay(context, ref, d.data, dayStarts[i]),
+                      builder: (_, hovering, _) => Container(
+                        decoration: BoxDecoration(
+                          color: hovering.isEmpty
+                              ? null
+                              : scheme.primary.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Column(
+                          key: ValueKey('allday-strip-col-$i'),
+                          children: [
+                            for (final a in byDay[i])
+                              _StripCard(
+                                key: ValueKey('allday-card-${a.id}'),
+                                item: a,
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -304,6 +319,27 @@ class AllDayWeekStrip extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Whether [a] already sits on the day [from] .. [to) (no drop needed there).
+bool _isOnDay(ActionListItem a, DateTime from, DateTime? to) {
+  final s = a.startAt;
+  return s != null && !s.isBefore(from) && (to == null || s.isBefore(to));
+}
+
+/// Moves a dragged all-day card to [dayStart] (undoable, like the postpone buttons).
+void _dropOnDay(
+  BuildContext context,
+  WidgetRef ref,
+  ActionListItem item,
+  DateTime dayStart,
+) {
+  runUndoableMoveMany(
+    context,
+    ref,
+    [ScheduleChange(item.id, startAt: dayStart, endAt: null, isAllDay: true)],
+    description: 'Moved to ${_weekdays[_local(dayStart).weekday - 1]} ${_local(dayStart).day}',
+  );
 }
 
 /// One all-day action in the strip: round Done checkbox + name, tinted like the
@@ -434,35 +470,36 @@ class _StripCard extends ConsumerWidget {
         child: body,
       );
     }
-    return HoverToolbarHost(
-      toolbarHeight: 40,
-      toolbarBuilder: (_) => HoverToolbarPill(
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            GlassIconTile(
-              key: ValueKey('allday-card-monday-${item.id}'),
-              icon: Icons.calendar_view_week,
-              hue: GlassHue.blue,
-              tooltip: 'Postpone to Monday',
-              size: 28,
-              iconSize: 18,
-              onTap: () => _toMonday(context, ref),
-            ),
-            const SizedBox(width: 2),
-            GlassIconTile(
-              key: ValueKey('allday-card-week-${item.id}'),
-              icon: Icons.fast_forward,
-              hue: GlassHue.lavender,
-              tooltip: 'Postpone 7 days',
-              size: 28,
-              iconSize: 18,
-              onTap: () => _plusWeek(context, ref),
-            ),
-          ],
+    // Desktop: the same quick-action buttons as a regular action (Start, Finish,
+    // postpone rules, Delete ...) on hover, and the card can be dragged onto
+    // another day column of the shown week.
+    return Draggable<ActionListItem>(
+      key: ValueKey('allday-drag-${item.id}'),
+      data: item,
+      maxSimultaneousDrags: 1,
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: Material(
+        type: MaterialType.transparency,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 180),
+          child: Opacity(opacity: 0.9, child: body),
         ),
       ),
-      child: body,
+      childWhenDragging: Opacity(opacity: 0.35, child: body),
+      child: HoverToolbarHost(
+        toolbarHeight: 40,
+        spreadAcross: true,
+        toolbarBuilder: (_) => HoverToolbarPill(
+          child: QuickActionBar(
+            actionId: item.id,
+            onDelete: () => runUndoableDelete(context, ref, item.id),
+            tileSize: 28,
+            iconSize: 18,
+            spacing: 2,
+          ),
+        ),
+        child: body,
+      ),
     );
   }
 }

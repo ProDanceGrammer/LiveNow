@@ -7,7 +7,6 @@ import 'package:livenow/core/local_time.dart';
 import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/action_service.dart';
-import 'package:livenow/domain/all_day_postpone.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/all_day_week.dart';
 import 'package:livenow/ui/dialog_stack.dart';
@@ -311,7 +310,7 @@ void main() {
     return g;
   }
 
-  testWidgets('hovering shows the two buttons; To Monday moves the card, Undo restores it', (
+  testWidgets('hovering shows the regular quick-action buttons; next week moves the card, Undo restores it', (
     tester,
   ) async {
     late String id;
@@ -325,23 +324,17 @@ void main() {
         );
       },
     );
-    expect(find.byKey(ValueKey('allday-card-monday-$id')), findsNothing);
+    expect(find.byTooltip('Delete'), findsNothing);
     final original = await startOf(tester, id);
 
     await hover(tester, card(id));
-    expect(find.byKey(ValueKey('allday-card-monday-$id')), findsOneWidget);
-    expect(find.byKey(ValueKey('allday-card-week-$id')), findsOneWidget);
+    for (final t in ['Start', 'Finish', 'Postpone: next week', 'Delete']) {
+      expect(find.byTooltip(t), findsOneWidget, reason: t);
+    }
 
-    await tester.tap(find.byKey(ValueKey('allday-card-monday-$id')));
+    await tester.tap(find.byTooltip('Postpone: next week'));
     await settle(tester);
-
-    // (Compared as instants: a TZDateTime never equals a plain DateTime.)
-    final moved = (await startOf(tester, id))!.millisecondsSinceEpoch;
-    expect(moved, allDayToMonday(original!).millisecondsSinceEpoch);
-    expect(
-      moved,
-      day(0).add(const Duration(days: 7)).millisecondsSinceEpoch, // next Monday
-    );
+    expect((await startOf(tester, id))!.isAfter(original!), isTrue);
     expect(card(id), findsNothing); // it left this week
 
     await tester.tap(find.text('Undo'));
@@ -351,41 +344,83 @@ void main() {
     await unmount(tester);
   });
 
-  testWidgets('+7 days moves the card a week, still all-day, and keeps a done tick', (
+  testWidgets('a time-of-day postpone keeps an all-day action all-day, on a whole day', (
     tester,
   ) async {
     late String id;
     await mount(
       tester,
       seed: () async {
-        id = await service.createAction(
-          name: 'Drink water',
-          isAllDay: true,
-          startAt: day(1),
-        );
+        id = await service.createAction(name: 'Drink water', isAllDay: true, startAt: day(1));
+      },
+    );
+    await tester.runAsync(() => service.postpone(id, PostponeRule.plusFiveHours));
+    final row = (await tester.runAsync(
+      () => (db.select(db.actionsTable)..where((t) => t.id.equals(id))).getSingle(),
+    ))!;
+    expect(row.isAllDay, isTrue);
+    expect(row.endAt, isNull);
+    final start = dateTimeFromDb(row.startAt)!;
+    expect(start.millisecondsSinceEpoch, localDayStart(start).millisecondsSinceEpoch);
+    await unmount(tester);
+  });
+
+  Future<void> dragCard(WidgetTester tester, String id, Finder to) async {
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: tester.getCenter(card(id)));
+    addTearDown(g.removePointer);
+    await g.down(tester.getCenter(card(id)));
+    await tester.pump();
+    final target = tester.getCenter(to);
+    final from = tester.getCenter(card(id));
+    for (var i = 1; i <= 10; i++) {
+      await g.moveTo(Offset.lerp(from, target, i / 10)!);
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await g.up();
+    await settle(tester);
+  }
+
+  testWidgets('dragging a card onto another day moves it there, Undo brings it back', (
+    tester,
+  ) async {
+    late String id;
+    await mount(
+      tester,
+      seed: () async {
+        id = await service.createAction(name: 'Drink water', isAllDay: true, startAt: day(1));
       },
     );
     final original = await startOf(tester, id);
-
-    await hover(tester, card(id));
-    await tester.tap(find.byKey(ValueKey('allday-card-week-$id')));
-    await settle(tester);
+    await dragCard(tester, id, find.byKey(const ValueKey('allday-strip-drop-4')));
 
     final row = (await tester.runAsync(
       () => (db.select(db.actionsTable)..where((t) => t.id.equals(id))).getSingle(),
     ))!;
-    expect(dateTimeFromDb(row.startAt), original!.add(const Duration(days: 7)));
+    expect(dateTimeFromDb(row.startAt)!.millisecondsSinceEpoch, day(4).millisecondsSinceEpoch);
     expect(row.isAllDay, isTrue);
     expect(row.endAt, isNull);
-    expect(card(id), findsNothing);
+    expect(find.descendant(of: column(4), matching: card(id)), findsOneWidget);
 
-    // Next week it is there.
-    await tester.tap(find.byKey(const ValueKey('allday-strip-next')));
+    await tester.tap(find.text('Undo'));
     await settle(tester);
-    expect(
-      find.descendant(of: column(1), matching: card(id)),
-      findsOneWidget,
+    expect(await startOf(tester, id), original);
+    expect(find.descendant(of: column(1), matching: card(id)), findsOneWidget);
+    await unmount(tester);
+  });
+
+  testWidgets('dropping a card on its own day changes nothing', (tester) async {
+    late String id;
+    await mount(
+      tester,
+      seed: () async {
+        id = await service.createAction(name: 'Drink water', isAllDay: true, startAt: day(1));
+      },
     );
+    final original = await startOf(tester, id);
+    await dragCard(tester, id, find.byKey(const ValueKey('allday-strip-drop-1')));
+    expect(await startOf(tester, id), original);
+    expect(find.text('Undo'), findsNothing);
     await unmount(tester);
   });
 
