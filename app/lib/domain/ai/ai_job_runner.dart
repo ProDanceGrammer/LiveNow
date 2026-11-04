@@ -356,7 +356,12 @@ class AiJobRunner {
     final guessed = d.pendingLines.any(
       (l) => l.suggested && (l.confidence ?? 0) < autoSuggestConfidence,
     );
-    final auto = !await settings.draftFirstActive() && !guessed;
+    // A photographed receipt is ALWAYS shown as an editable list first and written
+    // only after the user's Confirm; typed purchases keep the auto mode.
+    final reviewAlways = job.kind == AiJobKind.receipt ||
+        job.kind == AiJobKind.screenshot ||
+        job.kind == AiJobKind.photos;
+    final auto = !reviewAlways && !await settings.draftFirstActive() && !guessed;
     if (open) {
       // Auto mode: write the obvious lines now and ask about the rest.
       if (auto && d.blockers.isEmpty) {
@@ -465,9 +470,15 @@ class AiJobRunner {
       userConfirmed = true;
       for (final e in decision.edits) {
         final ov = _lineOv(d, e.index);
-        if (e.categoryId != null) ov['category_id'] = e.categoryId;
+        if (e.categoryId != null) {
+          ov['category_id'] = e.categoryId;
+          // A category chosen by hand replaces an earlier "create" request.
+          if (e.newName == null) ov.remove('new_name');
+        }
+        if (e.newName != null && e.newName!.trim().isNotEmpty) ov['new_name'] = e.newName!.trim();
         if (e.quantity != null) ov['quantity'] = e.quantity;
         if (e.unitPrice != null) ov['unit_price'] = e.unitPrice;
+        if (e.unit == 'piece' || e.unit == 'kilogram') ov['unit'] = e.unit;
       }
     }
     if (userConfirmed) {

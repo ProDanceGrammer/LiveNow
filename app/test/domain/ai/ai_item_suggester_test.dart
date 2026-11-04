@@ -264,7 +264,7 @@ void main() {
     expect((await env.transactions()).single.categoryId, chickenId);
   });
 
-  test('an unknown pack weight is estimated and flagged, not asked', () async {
+  test('an unknown pack weight is NOT guessed from the model: the list asks for it', () async {
     await env.init(llm: llmClient());
     final chickenId = await chicken();
     translateAndPick(
@@ -278,11 +278,10 @@ void main() {
     final d = await env.draft(jobId);
     final l = d.lines.single;
     expect(l['category_id'], chickenId);
-    expect(l['needs_answer'], isFalse, reason: 'no weight question');
-    expect(l['quantity'], closeTo(0.5, 1e-9));
-    expect(l['unit_price'], closeTo(330, 1e-6));
-    expect(l['flags'], containsAll(['weight_guess', 'suggested']));
-    expect(await env.message(jobId, AiMessageKind.question), isNull);
+    expect(l['needs_answer'], isTrue, reason: 'no data on the receipt: ask');
+    expect(l['quantity'], isNull, reason: 'no model estimate');
+    expect(l['flags'], isNot(contains('weight_guess')));
+    expect(await env.message(jobId, AiMessageKind.question), isNotNull);
   });
 
   Future<List<Map<String, dynamic>>> questionsOf(String jobId) async {

@@ -210,6 +210,13 @@ class RunnerEnv {
     return DraftCardView(m.id, jsonDecode(m.contentJson) as Map<String, dynamic>);
   }
 
+  /// The user's Confirm on the job's draft (a receipt is never written without it).
+  Future<void> confirm(String jobId) async {
+    final d = await draft(jobId);
+    await chat.confirmDraft(d.messageId);
+    await drain();
+  }
+
   Future<List<BudgetTransaction>> transactions() =>
       (db.select(db.budgetTransactionsTable)..orderBy([(t) => OrderingTerm(expression: t.id)])).get();
 }

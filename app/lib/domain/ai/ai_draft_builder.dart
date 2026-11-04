@@ -6,6 +6,8 @@
 /// again after every answer or edit.
 library;
 
+import 'dart:math' as math;
+
 import '../../core/ids.dart';
 import '../../data/ai/llm_client.dart';
 import '../../data/database.dart';
@@ -855,8 +857,15 @@ class DraftBuilder {
     }
     if (price != null && price > 0) {
       line.unitPrice = price;
-      if (line.quantity != null) line.amount = _r2(price * line.quantity!);
+      // The printed amount stays when quantity x price only differs by rounding
+      // (the list edits quantity and price together), so the sum check is exact.
+      final product = line.quantity == null ? null : price * line.quantity!;
+      if (product != null && (product - line.amount).abs() > math.max(0.02, line.amount * 0.005)) {
+        line.amount = _r2(product);
+      }
     }
+    final unitEdit = ov['unit'];
+    if (unitEdit == 'piece' || unitEdit == 'kilogram') line.unit = unitEdit as String;
 
     final chosen = await _chooseCategory(ctx, line, ov);
     if (chosen == null) return; // a category question is open
@@ -914,16 +923,8 @@ class DraftBuilder {
       return;
     }
     if (line.quantity == null || line.unitPrice == null) {
-      // The model's estimate of a pack's weight beats a question: it is shown in
-      // the draft as an estimate (and never written without a Confirm).
-      final grams = ctx.suggestions[line.index]?.grams;
-      if (grams != null && unit == BudgetUnit.kilogram && line.amount > 0) {
-        line.quantity = grams / 1000;
-        line.unitPrice = line.amount / line.quantity!;
-        line.flags = [...line.flags, kFlagWeightGuess, if (!line.suggested) kFlagSuggested];
-        line.confidence ??= 0.5;
-        unknownWeight = false;
-      }
+      // No guessing of a pack's weight (the model's gram estimate is NOT used):
+      // the receipt says it, or the user is asked / types it into the list.
       // Told in words ("хліб 40"): nobody knows the pack weight, so take the
       // category's usual price. The amount is exact either way; the quantity is
       // flagged as an estimate.

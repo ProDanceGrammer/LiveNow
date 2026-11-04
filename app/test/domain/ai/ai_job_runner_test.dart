@@ -154,6 +154,7 @@ void main() {
       await bazaarAction();
       final jobId = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
+      await env.confirm(jobId);
       expect((await env.job(jobId)).state, AiJobState.done);
       final before = await env.transactions();
       final ids = {for (final t in before) t.id};
@@ -251,7 +252,7 @@ void main() {
       expect((await env.transactions()).length, 2);
     });
 
-    test('Q1: auto-commit mode writes the obvious lines and asks about the rest', () async {
+    test('Q1: a receipt is never written unseen; Confirm waits for the open questions', () async {
       await env.init(autoMode: true);
       await bazaarAction();
       final jobId = await env.sendReceipt(
@@ -260,22 +261,20 @@ void main() {
       await env.drain();
       var job = await env.job(jobId);
       expect(job.state, AiJobState.needsInput);
-      expect((await env.transactions()).length, 1, reason: 'only the obvious line');
-      final batches = await env.db.select(env.db.aiBatchesTable).get();
-      expect(batches, hasLength(1));
-      final result = await env.message(jobId, AiMessageKind.result);
-      expect(result!.body, contains('Курага'));
-      expect(result.body, contains('Ще чекають'));
+      expect(await env.count('budget_transactions'), 0, reason: 'nothing before Confirm');
+      expect(await env.count('ai_batches'), 0);
 
       final q = (await env.message(jobId, AiMessageKind.question))!;
       await env.chat.answerQuestion(q.id, 'weight:1', '1 кг');
       await env.drain();
+      expect((await env.job(jobId)).state, AiJobState.draftReady);
+      expect(await env.count('budget_transactions'), 0);
+
+      await env.confirm(jobId);
       job = await env.job(jobId);
       expect(job.state, AiJobState.done);
       expect((await env.transactions()).length, 2);
-      expect(await env.count('ai_batches'), 1, reason: 'the SAME batch');
       expect(await env.count('ai_batch_items'), 2, reason: 'one transaction per line');
-      expect(await env.settings.confirmedCount(), 0, reason: 'nobody confirmed a draft');
     });
 
     test('I2: a sum mismatch commits nothing and says by how much', () async {
@@ -304,6 +303,7 @@ void main() {
       await bazaarAction();
       final first = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
+      await env.confirm(first);
       expect((await env.job(first)).state, AiJobState.done);
       final second = await env.sendReceipt();
       await env.drain();
@@ -324,13 +324,15 @@ void main() {
     test('I6: "add anyway" records the duplicate on purpose', () async {
       await env.init(autoMode: true);
       await bazaarAction();
-      await env.sendReceipt(receiptOf(e1Lines()));
+      final first = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
+      await env.confirm(first);
       final second = await env.sendReceipt();
       await env.drain();
       final q = (await env.message(second, AiMessageKind.question))!;
       await env.chat.answerQuestion(q.id, 'dup', 'Все одно додати');
       await env.drain();
+      await env.confirm(second);
       expect((await env.job(second)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 10);
     });
@@ -357,6 +359,7 @@ void main() {
         ),
       );
       await env.drain();
+      await env.confirm(jobId);
       expect((await env.job(jobId)).state, AiJobState.done);
       final d = await env.draft(jobId);
       expect([for (final l in d.lines) l['i']], [0, 1]);
@@ -384,6 +387,7 @@ void main() {
         ]),
       );
       await env.drain();
+      await env.confirm(jobId);
       expect((await env.job(jobId)).state, AiJobState.done);
       final d = await env.draft(jobId);
       expect(d.lines.single['price_change'], isTrue);
@@ -429,6 +433,68 @@ void main() {
       expect(salami.unitPrice, closeTo(325, 1e-6), reason: 'amount kept, price follows the quantity');
     });
 
+    test('a Confirm that sets quantity AND price keeps the printed amount; the unit edit is applied', () async {
+      await env.init();
+      await bazaarAction();
+      final jobId = await env.sendReceipt(receiptOf(e1Lines()));
+      await env.drain();
+      final d = await env.draft(jobId);
+      // 0.2 kg x 325 is the printed 65 of line 2 (the list sends both numbers).
+      await env.chat.confirmDraft(
+        d.messageId,
+        edits: const [LineEdit(index: 2, quantity: 0.2, unitPrice: 325, unit: 'kilogram')],
+      );
+      await env.drain();
+      expect((await env.job(jobId)).state, AiJobState.done);
+      final line = (await env.draft(jobId)).lines.firstWhere((l) => l['i'] == 2);
+      expect(line['quantity'], closeTo(0.2, 1e-9));
+      expect(line['unit_price'], closeTo(325, 1e-9));
+      expect(line['unit'], 'kilogram');
+      final sum = (await env.draft(jobId)).sum;
+      expect(sum['ok'], isTrue, reason: 'the printed amounts are untouched');
+    });
+
+    test('a Confirm can create a new category in a group, typed by the user', () async {
+      await env.init();
+      await bazaarAction();
+      final jobId = await env.sendReceipt(receiptOf([rl('SAKA SU', 20.00)]));
+      await env.drain();
+      expect((await env.job(jobId)).state, AiJobState.needsInput);
+      final d = await env.draft(jobId);
+      await env.chat.confirmDraft(
+        d.messageId,
+        edits: [
+          LineEdit(
+            index: 0,
+            categoryId: env.groupFood,
+            newName: 'Вода Saka',
+            quantity: 1,
+            unitPrice: 20,
+            unit: 'piece',
+          ),
+        ],
+      );
+      await env.drain();
+      expect((await env.job(jobId)).state, AiJobState.done);
+      final tx = (await env.transactions()).single;
+      expect(tx.unitPrice * tx.quantity, closeTo(20, 1e-6));
+      final cat = await (env.db.select(env.db.budgetCategoriesTable)
+            ..where((t) => t.id.equals(tx.categoryId!)))
+          .getSingle();
+      expect(cat.name, contains('Вода Saka'));
+      expect(cat.parentId, env.groupFood);
+    });
+
+    test('LineEdit JSON: unit and new_name round-trip, an old payload still parses', () async {
+      await env.init(); // the group's tearDown closes the env
+      const e = LineEdit(index: 3, categoryId: 'g', newName: 'X', quantity: 2, unitPrice: 5, unit: 'piece');
+      final back = LineEdit.fromJson(e.toJson());
+      expect([back.index, back.categoryId, back.newName, back.quantity, back.unitPrice, back.unit], [3, 'g', 'X', 2.0, 5.0, 'piece']);
+      final old = LineEdit.fromJson({'i': 1, 'category_id': 'c', 'quantity': 1, 'unit_price': 2});
+      expect(old.unit, isNull);
+      expect(old.newName, isNull);
+    });
+
     test('Reject writes nothing and finishes the job', () async {
       await env.init();
       await bazaarAction();
@@ -459,6 +525,7 @@ void main() {
       expect(card.questions.single.id, 'card:9999');
       await env.chat.answerQuestion(q.id, 'card:9999', 'Monobank');
       await env.drain();
+      await env.confirm(jobId);
       expect((await env.job(jobId)).state, AiJobState.done);
       expect((await env.rules.get('card.9999'))!['account_id'], env.monoAcc);
       expect(await env.count('budget_transactions'), 1);
@@ -483,6 +550,7 @@ void main() {
       });
       final a = await env.sendReceipt(receiptOf([rl('Сир 200 г', 100.00, name: 'Сир 200 г')], at: '2026-10-08T19:40:00'));
       await env.drain();
+      await env.confirm(a);
       expect((await env.job(a)).state, AiJobState.done);
       var d = await env.draft(a);
       expect(d.lines.single['category_id'], isNotNull);
@@ -511,6 +579,7 @@ void main() {
       // The user picks one; it becomes an alias and the job completes.
       await env.chat.answerQuestion(q.id, 'cat:0', 'Сир Едам');
       await env.drain();
+      await env.confirm(b);
       expect((await env.job(b)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 2);
       expect((await env.aliases.row('Сир 300 г'))!.categoryId, isNotNull);
@@ -538,6 +607,7 @@ void main() {
       // The text matches no category at all: only the id says which one was tapped.
       await env.chat.answerQuestion(q.id, 'cat:0', 'щось зовсім інше', optionId: edam);
       await env.drain();
+      await env.confirm(b);
       expect((await env.job(b)).state, AiJobState.done);
       // 467/kg is not Edam's 450: the commit records a price-change variant of Edam.
       final tx = (await env.transactions()).single;
@@ -750,6 +820,7 @@ void main() {
       env.extractor.receipt = receiptOf(e1Lines());
       final job = await env.sendPhotos([1, 2]);
       await env.drain();
+      await env.confirm(job);
       expect((await env.job(job)).state, AiJobState.done, reason: (await env.job(job)).error);
       final txs = await env.transactions();
       expect(txs, hasLength(5));
@@ -785,6 +856,7 @@ void main() {
       env.extractor.receipt = receiptOf(e1Lines());
       final job = await env.sendPhotos([1]);
       await env.drain();
+      await env.confirm(job);
       expect((await env.job(job)).state, AiJobState.done);
       final txs = await env.transactions();
       expect(txs, hasLength(5));
@@ -795,8 +867,9 @@ void main() {
       await env.init(autoMode: true, ocr: OcrClient(baseUrl: ocrServer.url));
       ocrServer.replyFor = ocrFor;
       await bazaarAction();
-      await env.sendReceipt(receiptOf(e1Lines()));
+      final earlier = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
+      await env.confirm(earlier);
       final job = await env.sendPhotos([2]);
       await env.drain();
       expect((await env.job(job)).state, AiJobState.done);
@@ -873,6 +946,7 @@ void main() {
       env.extractor.receipt = receiptOf(e1Lines());
       final job = await env.sendPhotos([1]);
       await env.drain();
+      await env.confirm(job);
       expect((await env.job(job)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 5);
     });
@@ -887,6 +961,7 @@ void main() {
       await bazaarAction();
       final receiptJob = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
+      await env.confirm(receiptJob);
       expect((await env.job(receiptJob)).state, AiJobState.done);
       final rateBefore = {
         for (final t in await env.transactions()) t.id: t.rateInteract,

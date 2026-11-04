@@ -214,18 +214,30 @@ class LineEdit {
     this.categoryId,
     this.quantity,
     this.unitPrice,
+    this.unit,
+    this.newName,
   });
 
   final int index;
+
+  /// An existing category; with [newName] it is the GROUP the new category goes in.
   final String? categoryId;
   final double? quantity;
   final double? unitPrice;
+
+  /// `kilogram` or `piece`.
+  final String? unit;
+
+  /// Create a new category of this name under the group [categoryId].
+  final String? newName;
 
   Map<String, dynamic> toJson() => {
     'i': index,
     'category_id': categoryId,
     'quantity': quantity,
     'unit_price': unitPrice,
+    if (unit != null) 'unit': unit,
+    if (newName != null) 'new_name': newName,
   };
 
   factory LineEdit.fromJson(Map<String, dynamic> j) => LineEdit(
@@ -233,6 +245,8 @@ class LineEdit {
     categoryId: j['category_id']?.toString(),
     quantity: (j['quantity'] as num?)?.toDouble(),
     unitPrice: (j['unit_price'] as num?)?.toDouble(),
+    unit: j['unit']?.toString(),
+    newName: j['new_name']?.toString(),
   );
 }
 

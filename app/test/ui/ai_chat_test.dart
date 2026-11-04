@@ -375,14 +375,15 @@ void main() {
         );
       },
     );
-    expect(find.text('Milk  ->  Dairy'), findsOneWidget);
+    expect(find.text('Milk'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-cat-0')), matching: find.text('Dairy')), findsOneWidget);
     expect(find.text('price change'), findsOneWidget);
     expect(find.text('new category'), findsOneWidget);
     expect(find.text('needs answer'), findsOneWidget);
     expect(find.text('Lines add up to 120 TRY'), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-draft-line-1')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('ai-draft-line-0')));
+    await tester.tap(find.byKey(const ValueKey('ai-line-name-0')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('ai-line-qty')), '3');
     await tester.enterText(find.byKey(const ValueKey('ai-line-price')), '25,5');
@@ -393,7 +394,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ai-line-save')));
     await tester.pumpAndSettle();
-    expect(find.text('Milk  ->  Cheese'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-cat-0')), matching: find.text('Cheese')), findsOneWidget);
     expect(find.text('edited'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('ai-draft-confirm')));
@@ -448,11 +449,135 @@ void main() {
         );
       },
     );
-    expect(find.text('Курка (філе)  ->  Курка (грудка)'), findsOneWidget);
+    expect(find.text('Курка (філе)'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-cat-0')), matching: find.text('Курка (грудка)')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-line-printed-0')), findsOneWidget);
     expect(find.text('BANVIT PILIC BONFILE'), findsOneWidget);
     expect(find.text('suggested 87%'), findsOneWidget);
     expect(find.text('weight estimated'), findsOneWidget);
+  });
+
+  /// Taps Confirm and returns the decision the card sent.
+  Future<ConfirmDecision> sentDecision(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('ai-draft-confirm')));
+    await settle(tester);
+    final row = (await tester.runAsync(
+      () => (db.select(db.aiMessagesTable)
+            ..where((t) => t.kind.equals(AiMessageKind.confirm)))
+          .getSingle(),
+    ))!;
+    return ConfirmDecision.fromJson(jsonDecode(row.contentJson) as Map<String, dynamic>);
+  }
+
+  Future<void> seedDraft() async {
+    final job = await insertJob(AiJobState.draftReady, AiStage.waiting);
+    await insertMessage(kind: AiMessageKind.draft, json: draftJson, jobId: job);
+  }
+
+  uiTest('tapping the quantity edits it in place; the price follows, the amount stays', (tester) async {
+    await mount(tester, AiChatScreenForTest.of(() => thread), seed: seedDraft);
+    await tester.tap(find.byKey(const ValueKey('ai-cell-qty-0')));
+    await tester.pump();
+    await tester.pump();
+    await tester.enterText(find.byKey(const ValueKey('ai-cell-qty-0-field')), '4');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    // 60 / 4 = 15 per unit; the printed amount of the line is still 60.
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-price-0')), matching: find.text('15')), findsOneWidget);
+    expect(find.text('= 60'), findsWidgets);
+    expect(find.text('Confirm (1 edited)'), findsOneWidget);
+    final d = await sentDecision(tester);
+    expect(d.edits.single.index, 0);
+    expect(d.edits.single.quantity, 4);
+    expect(d.edits.single.unitPrice, 15);
+  });
+
+  uiTest('tapping the price edits it; the quantity follows. The unit chip toggles kg / pcs', (tester) async {
+    await mount(tester, AiChatScreenForTest.of(() => thread), seed: seedDraft);
+    await tester.tap(find.byKey(const ValueKey('ai-cell-price-0')));
+    await tester.pump();
+    await tester.pump();
+    await tester.enterText(find.byKey(const ValueKey('ai-cell-price-0-field')), '20');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-qty-0')), matching: find.text('3')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-unit-0')), matching: find.text('kg')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('ai-cell-unit-0')));
+    await tester.pump();
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-unit-0')), matching: find.text('pcs')), findsOneWidget);
+    final d = await sentDecision(tester);
+    expect(d.edits.single.unitPrice, 20);
+    expect(d.edits.single.quantity, 3);
+    expect(d.edits.single.unit, 'piece');
+  });
+
+  uiTest('the category chooser: an offered one, a searched one, and a new one in a group', (tester) async {
+    late String groupId, milk;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        final seed = Seed(db);
+        groupId = await seed.group('Food');
+        await seed.leaf('Cheese', price: 10, parentId: groupId);
+        milk = await seed.leaf('Milk Dost', price: 59, parentId: groupId);
+        final job = await insertJob(AiJobState.draftReady, AiStage.waiting);
+        await insertMessage(
+          kind: AiMessageKind.draft,
+          json: {
+            ...draftJson,
+            'lines': [
+              {
+                'i': 0,
+                'name': 'SUT',
+                'quantity': 1,
+                'unit_price': 60,
+                'amount': 60,
+                'needs_answer': true,
+                'candidates': [
+                  {'id': milk, 'name': 'Milk Dost', 'parent': 'Food', 'price': 59, 'unit': 'kilogram', 'use_acc': 'Card'},
+                ],
+              },
+            ],
+            'sum': {'lines_sum': 60, 'expected': 60, 'difference': 0, 'ok': true},
+          },
+          jobId: job,
+        );
+      },
+    );
+    // Undecided: tapping the category cell offers the assistant's list with prices.
+    await tester.tap(find.byKey(const ValueKey('ai-cell-cat-0')));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    expect(find.byKey(const ValueKey('ai-category-chooser')), findsOneWidget);
+    expect(find.textContaining('59.00'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('ai-chooser-offer-0')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-cat-0')), matching: find.text('Milk Dost')), findsOneWidget);
+
+    // By typing: finds Cheese.
+    await tester.tap(find.byKey(const ValueKey('ai-cell-cat-0')));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    await tester.enterText(find.byKey(const ValueKey('ai-chooser-search')), 'chee');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ai-chooser-result-0')));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('ai-cell-cat-0')), matching: find.text('Cheese')), findsOneWidget);
+
+    // A name that exists nowhere: create it in the group.
+    await tester.tap(find.byKey(const ValueKey('ai-cell-cat-0')));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    await tester.enterText(find.byKey(const ValueKey('ai-chooser-search')), 'Prunes');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ai-chooser-create')));
+    await tester.pumpAndSettle();
+    expect(find.text('Prunes (new)'), findsOneWidget);
+
+    final d = await sentDecision(tester);
+    expect(d.edits.single.categoryId, groupId, reason: 'the group the new category goes in');
+    expect(d.edits.single.newName, 'Prunes');
   });
 
   uiTest('Reject writes a reject decision', (tester) async {
