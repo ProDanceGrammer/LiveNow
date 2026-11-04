@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
 import '../../domain/ai/ai_draft.dart';
+import '../../domain/ai/alias_source.dart';
+import '../../domain/ai/receipt_memory.dart';
 import '../../domain/ai/ai_protocol.dart';
 import '../ai_providers.dart';
 import 'ai_category_chooser.dart';
@@ -150,14 +152,26 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
   Future<void> _pickCategory(DraftLine line) async {
     final r = await showAiCategoryChooser(context, line: line);
     if (r == null || !mounted) return;
+    final twins = [
+      for (final l in DraftCard.fromJson(aiContent(widget.message)).lines)
+        if (l.index != line.index &&
+            !l.skipped &&
+            !l.committed &&
+            productKey(l.name) == productKey(line.name))
+          l,
+    ];
     setState(() {
-      _edits[line.index] = _merged(
-        line,
-        category: true,
-        categoryId: r.id,
-        newName: r.newName,
-      );
-      _categoryNames[line.index] = r.newName == null ? r.name : '${r.newName} (new)';
+      for (final l in [line, ...twins]) {
+        // A twin keeps a category the user already chose for it.
+        if (l != line && _edits[l.index]?.categoryId != null) continue;
+        _edits[l.index] = _merged(
+          l,
+          category: true,
+          categoryId: r.id,
+          newName: r.newName,
+        );
+        _categoryNames[l.index] = r.newName == null ? r.name : '${r.newName} (new)';
+      }
     });
   }
 
@@ -180,6 +194,14 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
       );
       if (r.categoryName != null) _categoryNames[line.index] = r.categoryName!;
     });
+  }
+
+  bool _hasTwins(List<DraftLine> lines) {
+    final seen = <String>{};
+    for (final l in lines) {
+      if (!seen.add(productKey(l.name))) return true;
+    }
+    return false;
   }
 
   @override
@@ -206,6 +228,20 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
               padding: const EdgeInsets.only(top: 2),
               child: Text(
                 'Check the suggestions: tap a category, quantity, unit or price to change it.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          if (draft.seen != null && !decided)
+            _SeenPanel(
+              keyOf: _key,
+              seen: SeenReceipt.fromJson(draft.seen!),
+              currency: draft.currency,
+            ),
+          if (!decided && _hasTwins(shown))
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Lines with the same name share one category.',
                 style: theme.textTheme.bodySmall,
               ),
             ),
@@ -288,6 +324,47 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
             Text(
               widget.decision?.confirm == false ? 'Rejected' : 'Confirmed',
               style: theme.textTheme.labelMedium,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What was saved the first time this receipt was confirmed (read-only); the
+/// question card below asks what to do with the copy.
+class _SeenPanel extends StatelessWidget {
+  const _SeenPanel({required this.keyOf, required this.seen, required this.currency});
+
+  final String Function(String) keyOf;
+  final SeenReceipt seen;
+  final String currency;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: ValueKey(keyOf('ai-seen')),
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Already saved from this receipt${seen.at == null ? '' : ' (${_day(seen.at!)})'}:',
+            style: theme.textTheme.labelMedium,
+          ),
+          for (var i = 0; i < seen.lines.length; i++)
+            Text(
+              key: ValueKey(keyOf('ai-seen-line-$i')),
+              '${seen.lines[i].name}  ->  ${seen.lines[i].category ?? '?'}  '
+              '${_qty(seen.lines[i].quantity)} x ${_fmt(seen.lines[i].unitPrice)} '
+              '= ${_fmt(seen.lines[i].amount)} $currency',
+              style: theme.textTheme.bodySmall,
             ),
         ],
       ),

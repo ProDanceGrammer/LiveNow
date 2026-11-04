@@ -41,6 +41,7 @@ import 'ai_screenshot_text.dart';
 import 'ai_settings_store.dart';
 import 'ai_transfer_text.dart';
 import 'alias_source.dart';
+import 'receipt_memory.dart';
 import 'category_resolver.dart';
 import 'invariant_validator.dart';
 import 'model_prompts.dart';
@@ -282,6 +283,7 @@ class AiJobRunner {
     final Map<String, dynamic> source;
     final blobs = <AiBlob>[];
     ScreenshotReading? screenshot;
+    var photoSha = '';
     if (job.kind == AiJobKind.bazaar) {
       final text = payload.text ?? await _messageBody(payload.messageId) ?? '';
       source = {'text': text};
@@ -297,6 +299,7 @@ class AiJobRunner {
         mime: first.mime,
       );
       source = {'receipt': receipt.toJson()};
+      photoSha = first.sha256;
       screenshot = pickScreenshot(
         shots ?? [for (final s in payload.screenshots) ScreenshotReading.fromJson(s)],
         receipt.total,
@@ -310,6 +313,7 @@ class AiJobRunner {
       source: source,
       overrides: {
         if (screenshot != null && screenshot.hasAnything) 'screenshot': screenshot.toJson(),
+        if (photoSha.isNotEmpty) 'photo_sha': photoSha,
       },
       messageTime: messageTime,
     );
@@ -472,6 +476,11 @@ class AiJobRunner {
         final ov = _lineOv(d, e.index);
         if (e.categoryId != null) {
           ov['category_id'] = e.categoryId;
+          // Picked by hand in the list: the next receipt starts from it.
+          final line = _lineOf(d, e.index);
+          if (line != null && e.newName == null && !await _isGroup(e.categoryId!)) {
+            await _aliases.remember(line.name, categoryId: e.categoryId);
+          }
           // A category chosen by hand replaces an earlier "create" request.
           if (e.newName == null) ov.remove('new_name');
         }
@@ -489,7 +498,13 @@ class AiJobRunner {
       final keep = await _applyAnswer(d, entry.question);
       d.applied = [...d.applied, entry.key];
       if (!keep) {
-        await _cancelJob(job, d, 'Пропустив: нічого не записано.');
+        await _cancelJob(
+          job,
+          d,
+          d.overrides['seen_left'] == true
+              ? 'Цей чек уже записано: залишив як є, нічого нового не записано.'
+              : 'Пропустив: нічого не записано.',
+        );
         return;
       }
     }
@@ -604,6 +619,25 @@ class AiJobRunner {
         await _aliases.remember(line.name, categoryId: categoryId);
       }
       _lineOv(d, line.index)['category_id'] = categoryId;
+    } else if (id == 'seen') {
+      final pick = q.answerId ??
+          (RegExp('залишити|leave', caseSensitive: false).hasMatch(a)
+              ? 'seen:leave'
+              : RegExp('змінити|edit', caseSensitive: false).hasMatch(a)
+                  ? 'seen:edit'
+                  : 'seen:again');
+      if (pick == 'seen:leave') {
+        d.overrides['seen_left'] = true;
+        return false;
+      }
+      d.overrides['seen_ok'] = true;
+      d.overrides['dup_ok'] = true; // answered once: the older duplicate check stays quiet
+      if (pick == 'seen:edit') {
+        // The saved rows are taken back (Undo of that batch); Confirm saves the
+        // corrected receipt in their place.
+        final batchId = d.seen?['batch_id']?.toString();
+        if (batchId != null) await _batches.undoBatch(batchId);
+      }
     } else if (id == 'dup') {
       if (!_yes(a) && !RegExp('додати|add', caseSensitive: false).hasMatch(a)) {
         return false;
@@ -728,11 +762,29 @@ class AiJobRunner {
       final planned = <PlannedTransaction>[];
       final newCats = <PlannedCategory>[];
       final moves = <PlannedMove>[];
+      // The same product twice at the same price creates its category ONCE.
+      final createdBy = <String, int>{};
+      final twinOf = <int, int>{};
       for (final l in lines) {
         final plan = await _planFor(l, d);
-        plans[l.index] = plan;
         String? target = l.categoryId;
-        if (plan != null) {
+        var twin = false;
+        if (plan != null && plan.kind != PlanKind.reuseLeaf) {
+          final k =
+              '${DraftBuilder.twinKey(l.name)}|${(l.unitPrice ?? 0).toStringAsFixed(4)}|${l.categoryId}|${l.oneOffGroupId}';
+          final first = createdBy[k];
+          if (first != null) {
+            twinOf[l.index] = first;
+            target = 'new:$first';
+            twin = true;
+          } else {
+            createdBy[k] = l.index;
+          }
+        }
+        plans[l.index] = twin ? null : plan;
+        if (twin) {
+          // nothing to plan: it uses the leaf its twin creates
+        } else if (plan != null) {
           if (plan.kind == PlanKind.reuseLeaf) {
             target = plan.leafId;
           } else {
@@ -765,8 +817,8 @@ class AiJobRunner {
             rateCount: l.rateCount,
             rateInteract: l.rateInteract,
             // Only planned leaves are checked against how it was paid.
-            accountCountId: plan == null ? null : l.countAccountId,
-            accountUseId: plan == null ? null : d.useAccountId,
+            accountCountId: plan == null && !twin ? null : l.countAccountId,
+            accountUseId: plan == null && !twin ? null : d.useAccountId,
             checkDuplicate: false,
           ),
         );
@@ -793,11 +845,14 @@ class AiJobRunner {
       );
       d.batchId = batchId;
       final actionId = await _ensureAction(job, d, batchId);
+      final leafOf = <int, String>{};
       for (final l in lines) {
         final base = 10 + l.index * 10;
         final plan = plans[l.index];
         var leafId = l.categoryId!;
-        if (plan != null) {
+        if (twinOf.containsKey(l.index) && leafOf.containsKey(twinOf[l.index])) {
+          leafId = leafOf[twinOf[l.index]]!;
+        } else if (plan != null) {
           final applied = await _planner.apply(plan);
           leafId = applied.leafId;
           // Journal in the order they happened (wrapper, move, new leaf): undo
@@ -829,6 +884,7 @@ class AiJobRunner {
             }
           }
         }
+        leafOf[l.index] = leafId;
         final txId = await _budget.createTransaction(
           id: deriveId(job.id, 'tx', l.index),
           categoryId: leafId,
@@ -856,7 +912,30 @@ class AiJobRunner {
         l.committed = true;
         // The user saw and confirmed this line: the next receipt with the same
         // printed name needs no model.
-        if (d.userConfirmed && l.suggested) await _aliases.remember(l.name, categoryId: leafId);
+        // The next receipt with this name starts from it (a price variant is
+        // remembered as its product, the same-name wrapper).
+        if (d.userConfirmed && l.name.trim().isNotEmpty) {
+          var product = leaf;
+          final parent = leaf?.parentId == null
+              ? null
+              : await (db.select(db.budgetCategoriesTable)
+                    ..where((t) => t.id.equals(leaf!.parentId!)))
+                  .getSingleOrNull();
+          if (leaf != null &&
+              parent != null &&
+              normalizeReceiptText(parent.name) == normalizeReceiptText(leaf.name)) {
+            product = parent;
+          }
+          if (product != null) await _aliases.remember(l.name, categoryId: product.id);
+        }
+      }
+      if (d.jobKind != AiJobKind.bazaar) {
+        await ReceiptMemory(db, _rules).remember(
+          sha: d.overrides['photo_sha']?.toString(),
+          fp: d.overrides['fp']?.toString(),
+          jobId: job.id,
+          batchId: batchId,
+        );
       }
       if (d.userConfirmed && !d.counted) {
         await settings.incrementConfirmed();

@@ -39,6 +39,11 @@ abstract class AliasSource {
 /// dotted/dotless i, apostrophes and runs of spaces folded.
 String normalizeReceiptText(String text) => foldSearch(stripLeadingIcon(text));
 
+/// The same product on one receipt: lines whose printed names agree (leading `*`
+/// marks and case ignored) share one category.
+String productKey(String name) =>
+    normalizeReceiptText(name.replaceFirst(RegExp(r'^[\s*]+'), '').trim());
+
 /// Map-backed [AliasSource] for tests and as a cache.
 class InMemoryAliasSource implements AliasSource {
   InMemoryAliasSource([Map<String, AliasEntry> aliases = const {}]) {

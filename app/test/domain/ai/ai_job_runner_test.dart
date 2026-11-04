@@ -298,13 +298,14 @@ void main() {
       expect((await env.job(jobId)).state, AiJobState.draftReady);
     });
 
-    test('I6: a receipt that was already recorded asks instead of inserting', () async {
+    test('I6: a receipt that was already recorded shows what was saved and asks', () async {
       await env.init(autoMode: true);
       await bazaarAction();
       final first = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
       await env.confirm(first);
       expect((await env.job(first)).state, AiJobState.done);
+      // Another photo of the same paper (own hash): found by shop + minute + total.
       final second = await env.sendReceipt();
       await env.drain();
       final job = await env.job(second);
@@ -312,16 +313,31 @@ void main() {
       expect(await env.count('budget_transactions'), 5);
       final q = (await env.message(second, AiMessageKind.question))!;
       final card = QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>);
-      expect(card.questions.single.id, 'dup');
+      expect(card.questions.single.id, 'seen');
+      final seen = Map<String, dynamic>.from((await env.draft(second)).json['seen'] as Map);
+      expect((seen['lines'] as List), hasLength(5));
 
-      // "Skip": done, still nothing new.
-      await env.chat.answerQuestion(q.id, 'dup', 'Пропустити');
+      // "Leave as it is": done, still nothing new.
+      await env.chat.answerQuestion(q.id, 'seen', 'Залишити як є', optionId: 'seen:leave');
       await env.drain();
       expect((await env.job(second)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 5);
     });
 
-    test('I6: "add anyway" records the duplicate on purpose', () async {
+    test('I6: the same photo is recognised even when the reading differs', () async {
+      await env.init(autoMode: true);
+      await bazaarAction();
+      final first = await env.sendReceipt(receiptOf(e1Lines()), true);
+      await env.drain();
+      await env.confirm(first);
+      // Same file, but the OCR read another total and no time this time.
+      final second = await env.sendReceipt(receiptOf(e1Lines(), at: '2026-10-09T10:00:00'), true);
+      await env.drain();
+      final q = (await env.message(second, AiMessageKind.question))!;
+      expect(QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>).questions.single.id, 'seen');
+    });
+
+    test('I6: "process again" adds a new copy on purpose', () async {
       await env.init(autoMode: true);
       await bazaarAction();
       final first = await env.sendReceipt(receiptOf(e1Lines()));
@@ -330,11 +346,42 @@ void main() {
       final second = await env.sendReceipt();
       await env.drain();
       final q = (await env.message(second, AiMessageKind.question))!;
-      await env.chat.answerQuestion(q.id, 'dup', 'Все одно додати');
+      await env.chat.answerQuestion(q.id, 'seen', 'Обробити ще раз', optionId: 'seen:again');
       await env.drain();
       await env.confirm(second);
       expect((await env.job(second)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 10);
+    });
+
+    test('I6: "edit saved" takes the old rows back and saves the corrected receipt in place', () async {
+      await env.init(autoMode: true);
+      await bazaarAction();
+      final first = await env.sendReceipt(receiptOf(e1Lines()));
+      await env.drain();
+      await env.confirm(first);
+      final second = await env.sendReceipt();
+      await env.drain();
+      final q = (await env.message(second, AiMessageKind.question))!;
+      await env.chat.answerQuestion(q.id, 'seen', 'Змінити збережене', optionId: 'seen:edit');
+      await env.drain();
+      expect(await env.count('budget_transactions'), 0, reason: 'taken back until the new Confirm');
+      await env.confirm(second);
+      expect((await env.job(second)).state, AiJobState.done);
+      expect(await env.count('budget_transactions'), 5);
+    });
+
+    test('I6: an undone receipt is not "seen" any more', () async {
+      await env.init(autoMode: true);
+      await bazaarAction();
+      final first = await env.sendReceipt(receiptOf(e1Lines()));
+      await env.drain();
+      await env.confirm(first);
+      final batches = await env.db.select(env.db.aiBatchesTable).get();
+      await AiBatchService(env.db).undoBatch(batches.single.id);
+      final second = await env.sendReceipt();
+      await env.drain();
+      expect(await env.message(second, AiMessageKind.question), isNull);
+      expect((await env.draft(second)).json['seen'], isNull);
     });
 
     test('E2: a split tender records only the user lines', () async {
@@ -483,6 +530,97 @@ void main() {
           .getSingle();
       expect(cat.name, contains('Вода Saka'));
       expect(cat.parentId, env.groupFood);
+    });
+
+    test('a category created in the list is the default of the next receipt', () async {
+      await env.init();
+      await bazaarAction();
+      final first = await env.sendReceipt(receiptOf([rl('ZZQX KALEM', 20.00, grams: 100)]));
+      await env.drain();
+      final d = await env.draft(first);
+      await env.chat.confirmDraft(
+        d.messageId,
+        edits: [
+          LineEdit(index: 0, categoryId: env.groupFood, newName: 'Вода Saka', quantity: 1, unitPrice: 20, unit: 'piece'),
+        ],
+      );
+      await env.drain();
+      final made = (await env.transactions()).single.categoryId;
+
+      final second = await env.sendReceipt(receiptOf([rl('ZZQX KALEM', 20.00, grams: 100)], at: '2026-10-09T11:00:00'));
+      await env.drain();
+      final line = (await env.draft(second)).lines.single;
+      expect(line['needs_answer'], isFalse, reason: 'known product: no question');
+      expect(line['category_id'], made);
+      expect(await env.message(second, AiMessageKind.question), isNull);
+    });
+
+    test('a category picked in the list is learned for the next receipt', () async {
+      await env.init();
+      await bazaarAction();
+      final first = await env.sendReceipt(receiptOf([rl('ZZQX KALEM', 20.00, grams: 100)]));
+      await env.drain();
+      await env.chat.confirmDraft(
+        (await env.draft(first)).messageId,
+        edits: [LineEdit(index: 0, categoryId: env.bread, quantity: 1, unitPrice: 20, unit: 'piece')],
+      );
+      await env.drain();
+      expect((await env.job(first)).state, AiJobState.done);
+
+      final second = await env.sendReceipt(receiptOf([rl('ZZQX KALEM', 20.00, grams: 100)], at: '2026-10-09T11:00:00'));
+      await env.drain();
+      final line = (await env.draft(second)).lines.single;
+      expect(line['needs_answer'], isFalse);
+      expect(line['category_id'], isNotNull);
+    });
+
+    test('the same product twice on one receipt is asked ONCE, and one answer fits both', () async {
+      await env.init();
+      await bazaarAction();
+      final jobId = await env.sendReceipt(receiptOf([rl('ZZQX KALEM', 20.00, grams: 100), rl('ZZQX KALEM', 20.00, grams: 100)]));
+      await env.drain();
+      final q = (await env.message(jobId, AiMessageKind.question))!;
+      final ids = [
+        for (final x in QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>).questions) x.id,
+      ];
+      expect(ids, ['cat:0'], reason: 'one question for both lines');
+      final d = await env.draft(jobId);
+      expect(d.lines.map((l) => l['needs_answer']), [true, true]);
+
+      // The answer to the first line (by text) decides the second one too.
+      final asked = QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>).questions.single;
+      // Nothing similar exists: the one offer is "create it in the group".
+      await env.chat.answerQuestion(q.id, 'cat:0', asked.options.last, optionId: asked.optionIds.last);
+      await env.drain();
+      final after = await env.draft(jobId);
+      expect(after.lines.map((l) => l['needs_answer']), [false, false]);
+      expect(after.lines[0]['category_id'], after.lines[1]['category_id']);
+    });
+
+    test('two lines that create the same new category create it once', () async {
+      await env.init();
+      await bazaarAction();
+      final jobId = await env.sendReceipt(receiptOf([rl('ZZQX KALEM', 20.00, grams: 100), rl('ZZQX KALEM', 20.00, grams: 100)]));
+      await env.drain();
+      LineEdit pick(int i) => LineEdit(
+        index: i,
+        categoryId: env.groupFood,
+        newName: 'Вода Saka',
+        quantity: 1,
+        unitPrice: 20,
+        unit: 'piece',
+      );
+      await env.chat.confirmDraft((await env.draft(jobId)).messageId, edits: [pick(0), pick(1)]);
+      await env.drain();
+      expect((await env.job(jobId)).state, AiJobState.done);
+      final txs = await env.transactions();
+      expect(txs, hasLength(2));
+      expect(txs[0].categoryId, txs[1].categoryId);
+      final made = [
+        for (final c in await env.db.select(env.db.budgetCategoriesTable).get())
+          if (c.name.contains('Вода Saka')) c,
+      ];
+      expect(made, hasLength(1));
     });
 
     test('LineEdit JSON: unit and new_name round-trip, an old payload still parses', () async {

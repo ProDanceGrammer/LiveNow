@@ -19,6 +19,7 @@ import 'ai_draft.dart';
 import 'ai_item_suggester.dart';
 import 'ai_protocol.dart';
 import 'alias_source.dart';
+import 'receipt_memory.dart';
 import 'bazaar_parser.dart';
 import 'category_match.dart';
 import 'category_resolver.dart';
@@ -155,6 +156,21 @@ class _Ctx {
     final l = overrides['lines'];
     if (l is Map && l['$i'] is Map) return Map<String, dynamic>.from(l['$i'] as Map);
     return const {};
+  }
+
+  /// A twin line takes the category choice (`category_id`, `new_name`) of its
+  /// first line, unless it has a choice of its own. Stored in the overrides.
+  void inheritCategory(int from, int to) {
+    final src = lineOv(from);
+    if (src['category_id'] == null || lineOv(to)['category_id'] != null) return;
+    final lines = overrides['lines'] is Map
+        ? Map<String, dynamic>.from(overrides['lines'] as Map)
+        : <String, dynamic>{};
+    final own = lines['$to'] is Map ? Map<String, dynamic>.from(lines['$to'] as Map) : <String, dynamic>{};
+    own['category_id'] = src['category_id'];
+    if (src['new_name'] != null) own['new_name'] = src['new_name'];
+    lines['$to'] = own;
+    overrides['lines'] = lines;
   }
 
   Map<String, dynamic> get llmChoices {
@@ -445,9 +461,12 @@ class DraftBuilder {
 
     // Lines no rule can place get a Ukrainian name and a suggestion, in one go.
     final wanted = <({int index, String printed})>[];
+    final firstWanted = <String>{};
     for (final i in mineIdx) {
       final p = parsed.lines[i];
       final ov = ctx.lineOv(i);
+      // The same product twice on one receipt is decided (and asked) once.
+      if (!firstWanted.add(twinKey(p.name))) continue;
       if (prevCommitted.containsKey(i) ||
           ov['skip'] == true ||
           ov['category_id'] != null ||
@@ -460,6 +479,7 @@ class DraftBuilder {
     }
     if (wanted.isNotEmpty) await _suggestLines(ctx, wanted);
 
+    final firstOf = <String, DraftLine>{};
     for (final i in mineIdx) {
       final p = parsed.lines[i];
       final old = prevCommitted[i];
@@ -484,6 +504,21 @@ class DraftBuilder {
         unitPrice: p.unitPrice,
         flags: [...p.flags],
       );
+      final twin = firstOf[twinKey(p.name)];
+      if (twin == null) {
+        firstOf[twinKey(p.name)] = line;
+      } else if (twin.categoryId == null && !twin.skipped && twin.questionIds.any((q) => q.startsWith('cat:'))) {
+        // The first of them is waiting for a category: so is this one (one question,
+        // one answer for both).
+        line.questionIds = [...twin.questionIds.where((q) => q.startsWith('cat:'))];
+        lines.add(line);
+        continue;
+      } else {
+        // The user's pick / the model's suggestion for the first applies to its twins.
+        ctx.inheritCategory(twin.index, i);
+        final s = ctx.suggestions[twin.index];
+        if (s != null) ctx.suggestions[i] = s;
+      }
       await _finishLine(ctx, line, merchant: ex.merchant, unknownWeight: p.questions.contains(kQuestionUnknownWeight));
       lines.add(line);
     }
@@ -499,9 +534,38 @@ class DraftBuilder {
     }
     final sum = _sum(lines, expectedAdj);
 
+    // The same receipt confirmed before (same photo, or same shop / minute / total):
+    // show what was saved and ask, before anything else.
+    final fp = typed != null || (ex.terminalDatetimeLocal ?? ex.invoiceDatetimeLocal) == null
+        ? null
+        : ReceiptMemory.fingerprint(merchant: ex.merchant, at: at, total: ex.total);
+    if (fp != null) ctx.overrides['fp'] = fp;
+    SeenReceipt? seen;
+    if (typed == null && overrides['seen_ok'] != true && prevCommitted.isEmpty && lines.isNotEmpty) {
+      seen = await ReceiptMemory(db, rules).find(
+        sha: overrides['photo_sha']?.toString(),
+        fp: fp,
+        jobId: job.id,
+      );
+      if (seen != null) {
+        ctx.blockers.add('seen');
+        ctx.questions
+          ..clear()
+          ..add(
+            Question(
+              id: 'seen',
+              text: 'Цей чек уже записано (${seen.lines.length} рядків). Що зробити?',
+              options: const ['Залишити як є', 'Обробити ще раз', 'Змінити збережене'],
+              optionIds: const ['seen:leave', 'seen:again', 'seen:edit'],
+              recommended: 0,
+            ),
+          );
+      }
+    }
+
     // Duplicate (I6): asked once, before anything was written.
     var duplicate = false;
-    if (overrides['dup_ok'] != true && prevCommitted.isEmpty && lines.isNotEmpty) {
+    if (seen == null && overrides['dup_ok'] != true && prevCommitted.isEmpty && lines.isNotEmpty) {
       final own = {for (final l in lines) deriveId(job.id, 'tx', l.index)};
       var hits = 0;
       final dedupe = DedupeService(db);
@@ -564,9 +628,13 @@ class DraftBuilder {
       userConfirmed: previous?.userConfirmed ?? false,
       counted: previous?.counted ?? false,
       batchId: previous?.batchId,
+      seen: seen?.toJson(),
     );
     return DraftBuild(card, ctx.questions);
   }
+
+  /// Lines with the same printed name are the same product.
+  static String twinKey(String name) => productKey(name);
 
   double _origNet(LineParseResult parsed, int i) => parsed.lines[i].net;
 

@@ -282,6 +282,7 @@ class DraftCard {
     this.userConfirmed = false,
     this.counted = false,
     this.batchId,
+    this.seen,
   });
 
   /// `receipt` or `bazaar`.
@@ -327,6 +328,10 @@ class DraftCard {
   bool counted;
   String? batchId;
 
+  /// An earlier confirmed receipt with the same photo / content (a `SeenReceipt`
+  /// as JSON); the card shows what was saved and asks what to do.
+  Map<String, dynamic>? seen;
+
   Iterable<DraftLine> get activeLines => lines.where((l) => !l.skipped);
   Iterable<DraftLine> get pendingLines =>
       lines.where((l) => !l.skipped && !l.committed);
@@ -354,6 +359,7 @@ class DraftCard {
     'user_confirmed': userConfirmed,
     'counted': counted,
     'batch_id': batchId,
+    if (seen != null) 'seen': seen,
   };
 
   factory DraftCard.fromJson(Map<String, dynamic> j) => DraftCard(
@@ -388,5 +394,6 @@ class DraftCard {
     userConfirmed: j['user_confirmed'] == true,
     counted: j['counted'] == true,
     batchId: _s(j['batch_id']),
+    seen: j['seen'] is Map ? Map<String, dynamic>.from(j['seen'] as Map) : null,
   );
 }

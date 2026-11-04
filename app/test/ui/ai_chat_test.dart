@@ -580,6 +580,87 @@ void main() {
     expect(d.edits.single.newName, 'Prunes');
   });
 
+  uiTest('a receipt that was saved before shows the saved lines', (tester) async {
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        final job = await insertJob(AiJobState.needsInput, AiStage.waiting);
+        await insertMessage(
+          kind: AiMessageKind.draft,
+          json: {
+            ...draftJson,
+            'seen': {
+              'batch_id': 'b1',
+              'job_id': 'j0',
+              'at': '2026-10-08T16:40:00Z',
+              'merchant': 'BIM',
+              'lines': [
+                {'name': 'Milk', 'category': 'Dairy', 'quantity': 3, 'unit_price': 20},
+                {'name': 'Bread', 'category': 'Bakery', 'quantity': 1, 'unit_price': 15},
+              ],
+            },
+          },
+          jobId: job,
+        );
+      },
+    );
+    expect(find.byKey(const ValueKey('ai-seen')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-seen-line-0')), findsOneWidget);
+    expect(find.textContaining('Milk  ->  Dairy'), findsOneWidget);
+    expect(find.textContaining('= 60'), findsWidgets);
+    expect(find.byKey(const ValueKey('ai-seen-line-1')), findsOneWidget);
+  });
+
+  uiTest('choosing a category for one line applies it to the lines with the same name', (tester) async {
+    late String cheese;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        final seed = Seed(db);
+        final group = await seed.group('Food');
+        cheese = await seed.leaf('Cheese', price: 10, parentId: group);
+        final job = await insertJob(AiJobState.draftReady, AiStage.waiting);
+        Map<String, dynamic> line(int i) => {
+          'i': i,
+          'name': 'PEYNIR',
+          'quantity': 1,
+          'unit_price': 60,
+          'amount': 60,
+          'needs_answer': true,
+          'candidates': [],
+        };
+        await insertMessage(
+          kind: AiMessageKind.draft,
+          json: {
+            ...draftJson,
+            'lines': [line(0), line(1)],
+            'sum': {'lines_sum': 120, 'expected': 120, 'difference': 0, 'ok': true},
+          },
+          jobId: job,
+        );
+      },
+    );
+    expect(find.text('Lines with the same name share one category.'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('ai-cell-cat-0')));
+    await tester.pumpAndSettle();
+    await settle(tester);
+    await tester.enterText(find.byKey(const ValueKey('ai-chooser-search')), 'chee');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ai-chooser-result-0')));
+    await tester.pumpAndSettle();
+    for (final i in [0, 1]) {
+      expect(
+        find.descendant(of: find.byKey(ValueKey('ai-cell-cat-$i')), matching: find.text('Cheese')),
+        findsOneWidget,
+      );
+    }
+    final d = await sentDecision(tester);
+    expect(d.edits.map((e) => e.index), [0, 1]);
+    expect(d.edits.every((e) => e.categoryId == cheese), isTrue);
+  });
+
   uiTest('Reject writes a reject decision', (tester) async {
     await mount(
       tester,

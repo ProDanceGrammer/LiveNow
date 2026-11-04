@@ -153,9 +153,13 @@ class RunnerEnv {
           .read<int>('n');
 
   /// A queued receipt job exactly as the phone writes it.
-  Future<String> sendReceipt([ExtractedReceipt? r]) async {
+  int _photos = 0;
+
+  /// Every call is a DIFFERENT photo (own bytes, so own hash) unless [samePhoto].
+  Future<String> sendReceipt([ExtractedReceipt? r, bool samePhoto = false]) async {
     if (r != null) extractor.receipt = r;
-    final sent = await chat.sendPhoto(thread, Uint8List.fromList(List.generate(40, (i) => i)));
+    final shift = samePhoto ? 0 : _photos++;
+    final sent = await chat.sendPhoto(thread, Uint8List.fromList(List.generate(40, (i) => (i + shift) % 256)));
     return sent.jobId!;
   }
 
