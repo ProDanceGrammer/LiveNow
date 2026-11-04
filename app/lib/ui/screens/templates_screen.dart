@@ -42,6 +42,14 @@ final templateImportServiceProvider = Provider<TemplateImportService>(
 
 /// Saved quick-entry presets: "Use" instantiates a new action from one in a
 /// single tap.
+/// A template's payload decoded once (see `_decodedCache`).
+class _Decoded {
+  const _Decoded(this.raw, this.payload, this.ids);
+  final String raw;
+  final Map<String, dynamic> payload;
+  final List<String> ids;
+}
+
 class TemplatesScreen extends ConsumerStatefulWidget {
   /// [embedded] = shown as a tab of the Actions section: no FAB of its own
   /// (the shell's round button creates a template while this tab is open).
@@ -82,12 +90,44 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
     registerSearchTarget();
   }
 
+  bool? _published;
+
+  /// Tells the averages whether this tab is on screen (a hidden tab is kept alive
+  /// by the Actions section and must not recompute anything).
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (visible == _published) return;
+    _published = visible;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(templatesTabVisibleProvider.notifier).state = visible;
+    });
+  }
+
+  /// Each template's decoded payload, kept while its JSON is unchanged (a payload
+  /// can carry the notes; it was decoded three times per row on every rebuild).
+  final _decodedCache = <String, _Decoded>{};
+
+  _Decoded _decoded(ActionTemplate t) {
+    final hit = _decodedCache[t.id];
+    if (hit != null && hit.raw == t.payload) return hit;
+    final d = _Decoded(
+      t.payload,
+      decodeTemplatePayload(t.payload, fallbackName: t.name),
+      templateMetricIds(t.payload),
+    );
+    _decodedCache[t.id] = d;
+    return d;
+  }
+
   // Ctrl+F: focus the search field and select its text.
   @override
   void openSearch() => focusSearchField(_searchFocus, _searchText);
 
   @override
   void dispose() {
+    _published = null;
     unregisterSearchTarget();
     _searchText.dispose();
     _searchFocus.dispose();
@@ -179,7 +219,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
                 }
                 final infos = {
                   for (final t in filtered)
-                    t.id: _infoOf(t, directionNames, averages[t.id], stats),
+                    t.id: _infoOf(t, _decoded(t), directionNames, averages[t.id], stats),
                 };
                 final templates = sortTemplates(
                   filtered,
@@ -206,6 +246,7 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
                       subtitle: _subtitle(
                         context,
                         t,
+                        _decoded(t).payload,
                         averages[t.id],
                         u,
                         fg: fg,
@@ -300,11 +341,11 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
   static Widget? _subtitle(
     BuildContext context,
     ActionTemplate t,
+    Map<String, dynamic> payload,
     Duration? average,
     double? urgency, {
     Color? fg,
   }) {
-    final payload = decodeTemplatePayload(t.payload, fallbackName: t.name);
     final m = payload['estimatedMinutes'];
     final manual = (m is int && m > 0) ? m : null;
     final useAverage = payload['useAverage'] != false;
@@ -347,13 +388,13 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
   /// What the list is sorted on for [t] (the urgency is shared with the tint).
   static TemplateSortInfo _infoOf(
     ActionTemplate t,
+    _Decoded decoded,
     Map<String, String> directionNames,
     Duration? average,
     Map<String, MetricStat>? stats,
   ) {
-    final payload = decodeTemplatePayload(t.payload, fallbackName: t.name);
-    final ids = templateMetricIds(t.payload);
-    final m = payload['estimatedMinutes'];
+    final ids = decoded.ids;
+    final m = decoded.payload['estimatedMinutes'];
     return TemplateSortInfo(
       name: t.name,
       direction: firstDirectionName([

@@ -1,10 +1,10 @@
-import 'package:drift/drift.dart'
-    show OrderingTerm, TableUpdate, TableUpdateQuery, innerJoin;
+import 'package:drift/drift.dart' show OrderingTerm, Variable, innerJoin;
 import 'package:flutter/foundation.dart' show mapEquals, setEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart' show StateProvider;
 
-import '../core/time_codec.dart' show dateTimeFromDb;
+import '../core/stream_utils.dart' show debounced;
+import '../core/time_codec.dart' show dateTimeFromDb, dateTimeToDb;
 import '../data/database.dart';
 import '../data/queries.dart';
 import '../domain/action_service.dart';
@@ -16,6 +16,7 @@ import '../domain/dependency_service.dart';
 import '../domain/growth_rules.dart';
 import '../domain/metric_service.dart';
 import '../domain/name_sort.dart';
+import '../domain/sequence_naming.dart' show normalizeForMatch;
 import 'views/calendar_layout.dart';
 
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -336,29 +337,67 @@ final actionUrgencyProvider = Provider.autoDispose<Map<String, double>>((ref) {
   ], snapshot.stats);
 });
 
-final _actionsWrittenProvider = StreamProvider.autoDispose<Set<TableUpdate>>((
-  ref,
-) {
+/// Whether the Templates tab is on screen (published by the screen: a hidden tab
+/// stays alive but must not recompute anything).
+final templatesTabVisibleProvider = StateProvider<bool>((ref) => false);
+
+/// A tiny signature of the finished runs of the averages' 30-day window: it
+/// changes only when a finished run is added, removed or edited, not on any other
+/// write to `actions` (open actions, sync of unrelated rows). Debounced, so a burst
+/// of writes (a sync merge) is one change.
+final _finishedRunsSignatureProvider = StreamProvider.autoDispose<String>((ref) {
   final db = ref.watch(databaseProvider);
-  return db.tableUpdates(TableUpdateQuery.onTable(db.actionsTable));
+  final cutoff = dateTimeToDb(DateTime.now().toUtc().subtract(const Duration(days: 30)))!;
+  return debounced<String>(
+    db
+        .customSelect(
+          'SELECT COUNT(*) AS n, MAX(updated_at) AS m FROM actions '
+          'WHERE done = 1 AND completed_at >= ? AND start_at IS NOT NULL '
+          'AND end_at IS NOT NULL',
+          variables: [Variable<String>(cutoff)],
+          readsFrom: {db.actionsTable},
+        )
+        .watch()
+        .map((rows) => '${rows.first.read<int>('n')}|${rows.first.read<String?>('m')}'),
+    const Duration(seconds: 1),
+  ).distinct();
 });
 
 /// Average real duration per template id (30-day mean of its runs, see
-/// `ActionService.templateAverage`); templates without runs are absent.
-/// Recomputed when actions or templates change and every minute.
+/// `ActionService.averagesByName`); templates without runs are absent.
+///
+/// ONE batched read for all templates. It is recomputed only when the template
+/// names or the finished runs change, and only while the Templates tab is shown: a
+/// hidden tab keeps its last value (and recomputes on show if something changed).
 final templateAveragesProvider =
-    FutureProvider.autoDispose<Map<String, Duration>>((ref) async {
-      ref.watch(minuteTickProvider);
-      final templates = ref.watch(templatesProvider).value ?? const [];
-      ref.watch(_actionsWrittenProvider); // any write re-runs this
-      final service = ref.read(actionServiceProvider);
-      final out = <String, Duration>{};
-      for (final t in templates) {
-        final avg = await service.templateAverage(t.name);
-        if (avg != null) out[t.id] = avg;
-      }
-      return out;
-    });
+    AsyncNotifierProvider.autoDispose<TemplateAveragesNotifier, Map<String, Duration>>(
+      TemplateAveragesNotifier.new,
+    );
+
+class TemplateAveragesNotifier extends AsyncNotifier<Map<String, Duration>> {
+  Map<String, Duration>? _last;
+  String? _computedFor;
+
+  @override
+  Future<Map<String, Duration>> build() async {
+    final visible = ref.watch(templatesTabVisibleProvider);
+    final templates = ref.watch(templatesProvider).value ?? const [];
+    final signature = ref.watch(_finishedRunsSignatureProvider).value;
+    final key = '${[for (final t in templates) t.name].join('')}|$signature';
+    // Hidden: nothing is computed; the last values stay (empty before the first).
+    if (!visible) return _last ?? const {};
+    // Nothing changed since the last computation.
+    if (key == _computedFor && _last != null) return _last!;
+    final service = ref.read(actionServiceProvider);
+    final byName = await service.averagesByName([for (final t in templates) t.name]);
+    final out = <String, Duration>{
+      for (final t in templates) t.id: ?byName[normalizeForMatch(t.name)],
+    };
+    _last = out;
+    _computedFor = key;
+    return out;
+  }
+}
 
 /// All Countable Activities, for the action editor's activity picker.
 final countableActivitiesProvider =
