@@ -18,9 +18,8 @@ import 'glass.dart';
 ///   never flash toolbars. Scrolling the enclosing scrollable hides it.
 /// - Only one toolbar exists at a time (showing one hides the previous).
 /// - Touch input never hovers, so it never shows.
-/// - When there is no room above the child inside its scroll viewport, the
-///   toolbar sits over the child's own top-right area instead; it is always
-///   clamped on screen.
+/// - The toolbar is always above the child (over whatever is there, e.g. a
+///   header), never over the child itself; it is clamped on screen only.
 class HoverToolbarHost extends StatefulWidget {
   final Widget child;
 
@@ -108,20 +107,6 @@ class _HoverToolbarHostState extends State<HoverToolbarHost> {
     if (mounted && _portal.isShowing) _portal.hide();
   }
 
-  /// Top of the enclosing scroll viewport in overlay coordinates (0 when the
-  /// child is not in a scrollable).
-  double _viewportTop() {
-    final viewport = Scrollable.maybeOf(context)?.context.findRenderObject();
-    final overlay = Overlay.maybeOf(context)?.context.findRenderObject();
-    if (viewport is! RenderBox || !viewport.attached) return 0;
-    return viewport
-        .localToGlobal(
-          Offset.zero,
-          ancestor: overlay is RenderBox ? overlay : null,
-        )
-        .dy;
-  }
-
   @override
   Widget build(BuildContext context) {
     return OverlayPortal.overlayChildLayoutBuilder(
@@ -132,14 +117,11 @@ class _HoverToolbarHostState extends State<HoverToolbarHost> {
           Offset(info.childSize.width, 0),
         );
         final h = widget.toolbarHeight;
-        // Above the child's top-right corner, overlapping it by 3 px so the
-        // pointer never crosses a gap; without room above (the first card
-        // under a header), over the child's own top edge area instead.
-        final viewportTop = _viewportTop();
+        // Always above the child's top-right corner, overlapping it by 3 px so
+        // the pointer never crosses a gap. With no room above (the first card
+        // under a header) it simply covers the header: it never moves onto the
+        // card itself. Only the screen edges clamp it.
         var top = corner.dy - h + 3;
-        if (top < viewportTop) {
-          top = math.max(corner.dy + 3, viewportTop + 3);
-        }
         top = top.clamp(0.0, math.max(0.0, info.overlaySize.height - h));
         final right = (info.overlaySize.width - corner.dx).clamp(
           8.0,

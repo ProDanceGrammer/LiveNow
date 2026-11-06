@@ -7,6 +7,7 @@ import 'package:livenow/data/database.dart';
 import 'package:livenow/data/queries.dart';
 import 'package:livenow/ui/providers.dart';
 import 'package:livenow/ui/widgets/action_card.dart';
+import 'package:livenow/ui/widgets/hover_toolbar.dart';
 import 'package:livenow/ui/widgets/round_check.dart';
 import 'package:livenow/ui/widgets/glass_icon_tile.dart';
 
@@ -329,6 +330,57 @@ void main() {
     await tester.pump();
     expect(tiles(tester), 0);
     await unmount(tester);
+  });
+  testWidgets('the toolbar is above the first card of a scroll view, never on it', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    final item = ActionListItem(
+      id: 'top1',
+      name: 'Top card',
+      done: false,
+      isAllDay: true,
+    );
+    // Open the database in real time before anything listens to it.
+    await tester.runAsync(() => db.customSelect('SELECT 1').get());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [databaseProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                // A header; the list's viewport starts right under it, so there
+                // is no room above the card INSIDE the viewport, but plenty on
+                // screen.
+                const SizedBox(height: 120),
+                Expanded(
+                  child: ListView(children: [ActionCard(action: item)]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await g.addPointer(location: const Offset(2, 2));
+    addTearDown(g.removePointer);
+    await g.moveTo(tester.getCenter(find.text('Top card')));
+    await tester.pump();
+    try {
+      expect(tiles(tester), greaterThan(0));
+      final card = tester.getRect(find.byType(HoverToolbarHost));
+      final bar = tester.getRect(find.byType(HoverToolbarPill));
+      // At most the 3 px overlap into the card.
+      expect(bar.bottom, lessThanOrEqualTo(card.top + 3.5));
+    } finally {
+      await unmount(tester);
+    }
   });
   testWidgets('direction emojis show bottom-right, beside the time line', (
     tester,
