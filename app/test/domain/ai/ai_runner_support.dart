@@ -15,6 +15,7 @@ import 'package:livenow/domain/ai/ai_protocol.dart';
 import 'package:livenow/domain/ai/ai_settings_store.dart';
 import 'package:livenow/domain/ai/extracted_receipt.dart';
 import 'package:livenow/domain/ai/receipt_extractor.dart';
+import 'package:livenow/domain/ai/service_waits.dart';
 import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/budget_rules.dart';
 import 'package:livenow/domain/budget_service.dart';
@@ -106,6 +107,7 @@ class RunnerEnv {
     LlmClient? llm,
     OcrClient? ocr,
     ReceiptExtractor? realExtractor,
+    ServiceWaits? waits,
   }) async {
     db = memoryDb();
     budget = BudgetService(db);
@@ -143,6 +145,7 @@ class RunnerEnv {
       ocr: ocr,
       settings: settings,
       storeOriginal: (b) async => stored.add(b.id),
+      waits: waits,
     );
   }
 

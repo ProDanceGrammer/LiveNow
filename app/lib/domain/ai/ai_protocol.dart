@@ -39,6 +39,10 @@ abstract final class AiMessageKind {
 
   /// Something went wrong (the text says what to do).
   static const error = 'error';
+
+  /// The user asks the hub to run a failed job again (a user row linked to the
+  /// job; the hub requeues the job and marks the row `{"handled": true}`).
+  static const retry = 'retry';
 }
 
 /// `ai_jobs.state`

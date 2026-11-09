@@ -477,6 +477,28 @@ class AiChatService {
     });
   }
 
+  /// The user taps Retry on a failed job's error card: a `retry` row linked to
+  /// the job. The hub requeues the job (the photos are still there) and removes
+  /// the error card; the app never touches the job's state itself.
+  Future<void> retryJob(String jobId) {
+    return db.transaction(() async {
+      final job = await (db.select(
+        db.aiJobsTable,
+      )..where((t) => t.id.equals(jobId))).getSingleOrNull();
+      if (job == null) throw const AiChatException('That job no longer exists.');
+      final now = dateTimeToDb(DateTime.now())!;
+      await _insertUserMessage(
+        newId(),
+        job.threadId,
+        AiMessageKind.retry,
+        'Retry',
+        jobId,
+        now,
+      );
+      await _touchThread(job.threadId, now);
+    });
+  }
+
   // ---- retention (phone) ----------------------------------------------------
 
   /// Keeps this device's copy of the chat small WITHOUT telling anyone. The

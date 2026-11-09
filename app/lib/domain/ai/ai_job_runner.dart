@@ -21,7 +21,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:drift/drift.dart'
-    show BooleanExpressionOperators, InsertMode, OrderingTerm, Value, Variable;
+    show
+        BooleanExpressionOperators,
+        InsertMode,
+        OrderingTerm,
+        StringExpressionOperators,
+        Value,
+        Variable;
 
 import '../../core/ids.dart';
 import '../../core/time_codec.dart';
@@ -48,11 +54,16 @@ import 'model_prompts.dart';
 import 'price_planner.dart';
 import 'receipt_extractor.dart';
 import 'receipt_fx_rules.dart';
+import 'service_waits.dart';
 import 'transfer_builder.dart';
 import 'typed_expense.dart';
 
 /// A job is given up after this many failed or interrupted attempts.
 const kMaxJobAttempts = 3;
+
+/// A job waiting for an unreachable OCR service / model server is given up
+/// after this much time of the hub running and trying (see [ServiceWaits]).
+const kServiceWaitLimit = Duration(hours: 3);
 
 class AiJobRunner {
   AiJobRunner({
@@ -62,8 +73,10 @@ class AiJobRunner {
     this.ocr,
     required this.settings,
     this.storeOriginal,
+    ServiceWaits? waits,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now,
+       waits = waits ?? ServiceWaits(),
        _aliases = DbAliasSource(db),
        _rules = AiRulesMemory(db),
        _batches = AiBatchService(db),
@@ -84,6 +97,10 @@ class AiJobRunner {
   /// Saves the original photo on the hub (its own folder). Only after it
   /// returns is the photo row marked stored and its bytes dropped.
   final Future<void> Function(AiBlob blob)? storeOriginal;
+
+  /// Waiting time per job for an unreachable service. The hub's worker passes
+  /// ONE instance to every runner it builds (a runner lives for one step).
+  final ServiceWaits waits;
   final DateTime Function() _clock;
 
   final DbAliasSource _aliases;
@@ -117,11 +134,13 @@ class AiJobRunner {
   // Entry point
   // ===========================================================================
 
-  /// Does one unit of work. Order: (1) a job that was interrupted while running
+  /// Does one unit of work. Order: (0) the user's Retry of failed jobs
+  /// (requeues them); (1) a job that was interrupted while running
   /// or committing, else the oldest queued job; (2) a waiting job (needs_input /
   /// draft_ready) with new user input; (3) nothing: false.
   Future<bool> runNext() async {
     _gaveUp = false;
+    if (await _applyRetries()) return true;
     final job = await _nextRunnable();
     if (job != null) {
       await _guarded(job, resume: false);
@@ -194,6 +213,56 @@ class AiJobRunner {
     return null;
   }
 
+  /// The user's Retry on a failed job (a `retry` user row, see
+  /// `AiChatService.retryJob`): the job goes back to the queue with a fresh
+  /// attempt count and its error card is removed. A retry of a job that is not
+  /// failed (pressed twice, already running again) is only marked handled.
+  /// True when there was such a row.
+  Future<bool> _applyRetries() async {
+    final rows =
+        await (db.select(db.aiMessagesTable)
+              ..where(
+                (t) =>
+                    t.role.equals(AiRole.user) &
+                    t.kind.equals(AiMessageKind.retry) &
+                    t.contentJson.like('%"handled"%').not(),
+              )
+              ..orderBy([
+                (t) => OrderingTerm.asc(t.createdAt),
+                (t) => OrderingTerm.asc(t.id),
+              ]))
+            .get();
+    if (rows.isEmpty) return false;
+    await db.transaction(() async {
+      for (final m in rows) {
+        final jobId = m.jobId;
+        final job = jobId == null ? null : await _job(jobId);
+        if (job != null && job.state == AiJobState.failed) {
+          waits.clear(job.id);
+          await _setJob(
+            job.id,
+            state: AiJobState.queued,
+            stage: AiStage.queued,
+            error: null,
+            attempts: 0,
+          );
+          await (db.delete(db.aiMessagesTable)
+                ..where((t) => t.id.equals(deriveId(job.id, 'error-fail'))))
+              .go();
+          await _status(job, AiStage.queued);
+        }
+        await (db.update(db.aiMessagesTable)..where((t) => t.id.equals(m.id)))
+            .write(
+              AiMessagesTableCompanion(
+                contentJson: Value(jsonEncode({'v': 1, 'handled': true})),
+                updatedAt: Value(_stamp()),
+              ),
+            );
+      }
+    });
+    return true;
+  }
+
   Future<void> _guarded(AiJob job, {required bool resume}) async {
     // Its chat was deleted (the job went with it): nothing to do, and nothing
     // may be written back for it.
@@ -204,8 +273,12 @@ class AiJobRunner {
       } else {
         await _start(job);
       }
+      waits.clear(job.id);
     } on AiJobFailure catch (e) {
+      waits.clear(job.id);
       await _fail(job, e.message);
+    } on AiUnreachableException catch (e) {
+      await _waitForService(job, e, resume: resume);
     } on Object catch (e) {
       final fresh = await _job(job.id) ?? job;
       final attempts = fresh.attempts + 1;
@@ -227,6 +300,44 @@ class AiJobRunner {
         attempts: attempts,
       );
     }
+  }
+
+  /// The OCR service or the model server could not be reached (stopped, PC
+  /// just started): that is not the job's fault, so it costs no attempt. The
+  /// job is put back to wait (a queued one shows "Waiting for the hub's OCR
+  /// service") and [AiServiceWait] tells the hub's worker to start the service
+  /// and back off. Only after [kServiceWaitLimit] of the hub trying does the
+  /// job fail (with Retry).
+  Future<void> _waitForService(
+    AiJob job,
+    AiUnreachableException e, {
+    required bool resume,
+  }) async {
+    final ocrUrl = ocr?.baseUrl;
+    final isOcr = ocrUrl != null && e.message.contains(ocrUrl);
+    final text = _clip('$e');
+    if (waits.report(job.id) >= kServiceWaitLimit) {
+      waits.clear(job.id);
+      final what = isOcr ? 'Сервіс розпізнавання (OCR)' : 'Сервер моделі';
+      await _fail(
+        await _job(job.id) ?? job,
+        '$what на хабі недоступний понад ${kServiceWaitLimit.inHours} год: $text',
+      );
+      return;
+    }
+    await _setJob(
+      job.id,
+      state: resume ? job.state : AiJobState.queued,
+      stage: resume ? job.stage : AiStage.queued,
+      error: text,
+    );
+    if (!resume) {
+      await _status(
+        job,
+        isOcr ? "Waiting for the hub's OCR service" : "Waiting for the hub's model server",
+      );
+    }
+    throw AiServiceWait(ocr: isOcr, message: text);
   }
 
   static String _clip(String s) => s.length <= 300 ? s : '${s.substring(0, 300)}...';
@@ -1214,6 +1325,16 @@ class AiJobRunner {
 
   static const Object _keep = Object();
 
+  /// A failed job can run again when its input is still here: the typed text,
+  /// or photo bytes not yet moved to the hub's store (a photo is released only
+  /// after it was read, so a job that failed while reading keeps it).
+  Future<bool> _canRetry(AiJob job) async {
+    final payload = JobPayload.decode(job.payloadJson);
+    if ((payload.text ?? '').trim().isNotEmpty) return true;
+    final blobs = await _blobsOf(job, payload);
+    return blobs.any((b) => (b.data ?? '').isNotEmpty);
+  }
+
   Future<void> _fail(AiJob job, String message) async {
     await _putMessage(
       deriveId(job.id, 'error-fail'),
@@ -1221,6 +1342,7 @@ class AiJobRunner {
       role: AiRole.assistant,
       kind: AiMessageKind.error,
       body: message,
+      contentJson: jsonEncode({'v': 1, 'retryable': await _canRetry(job)}),
     );
     await _setJob(job.id, state: AiJobState.failed, stage: 'Failed', error: message);
     await _status(job, 'Failed');

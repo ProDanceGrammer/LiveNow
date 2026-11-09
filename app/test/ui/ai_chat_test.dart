@@ -688,6 +688,57 @@ void main() {
     );
   });
 
+  uiTest('a failed job shows Retry; tapping it writes a retry row and hides the button', (
+    tester,
+  ) async {
+    late String errId;
+    late String job;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        job = await insertJob(AiJobState.failed, 'Failed');
+        errId = await insertMessage(
+          kind: AiMessageKind.error,
+          body: 'OCR service unreachable',
+          json: {'v': 1, 'retryable': true},
+          jobId: job,
+          createdAt: '2026-01-01T00:00:00.000000Z', // before the Retry row (now)
+        );
+      },
+    );
+    final retry = find.byKey(ValueKey('ai-error-retry-$errId'));
+    expect(retry, findsOneWidget);
+    await tester.tap(retry);
+    await settle(tester);
+    final row = (await tester.runAsync(
+      () => (db.select(db.aiMessagesTable)
+            ..where((t) => t.kind.equals(AiMessageKind.retry)))
+          .getSingle(),
+    ))!;
+    expect(row.jobId, job);
+    expect(row.role, AiRole.user);
+    expect(retry, findsNothing, reason: 'already retried: the hub requeues it');
+  });
+
+  uiTest('an error that cannot be retried has no Retry button', (tester) async {
+    late String errId;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        final job = await insertJob(AiJobState.failed, 'Failed');
+        errId = await insertMessage(
+          kind: AiMessageKind.error,
+          body: 'Photo not found',
+          json: {'v': 1, 'retryable': false},
+          jobId: job,
+        );
+      },
+    );
+    expect(find.byKey(ValueKey('ai-error-retry-$errId')), findsNothing);
+  });
+
   uiTest('question chips answer and write the answer', (tester) async {
     late String qId;
     await mount(

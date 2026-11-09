@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
 import 'package:livenow/domain/ai/ai_settings_store.dart';
+import 'package:livenow/domain/ai/service_waits.dart';
 import 'package:livenow/hub/ai_photo_store.dart';
 import 'package:livenow/hub/ai_worker.dart';
 
@@ -63,9 +64,13 @@ void main() {
     return true;
   };
 
-  AiWorker make({AiRunnerFactory? factory}) => worker = AiWorker(
+  AiWorker make({
+    AiRunnerFactory? factory,
+    Future<bool> Function(String url)? ensureOcr,
+  }) => worker = AiWorker(
     db: db,
     photos: photos,
+    ensureOcr: ensureOcr,
     runnerFactory: factory ?? fakeStep,
     debounce: const Duration(milliseconds: 10),
     safetyInterval: const Duration(milliseconds: 300),
@@ -139,6 +144,48 @@ void main() {
     await worker.start();
     await eventually(() async => await stateOf('j1') == AiJobState.done);
     expect(failures, 2);
+  });
+
+  test('a job waiting for OCR makes the worker start OCR and back off, then it runs', () async {
+    var waitsLeft = 2;
+    final ocrStarts = <String>[];
+    make(
+      ensureOcr: (url) async {
+        ocrStarts.add(url);
+        return true;
+      },
+      factory: (s) {
+        final real = fakeStep(s);
+        return () async {
+          if (waitsLeft > 0) {
+            waitsLeft--;
+            throw const AiServiceWait(ocr: true, message: 'refused');
+          }
+          return real();
+        };
+      },
+    );
+    await addJob('j1');
+    await worker.start();
+    await eventually(() async => await stateOf('j1') == AiJobState.done);
+    expect(waitsLeft, 0);
+    // once at start (the hub has jobs) + once per wait
+    await eventually(() async => ocrStarts.length == 3);
+    expect(ocrStarts.toSet(), {'http://127.0.0.1:47655'});
+  });
+
+  test('ServiceWaits counts at most one back-off of a long gap', () {
+    var now = DateTime.utc(2026, 11, 9);
+    final w = ServiceWaits(maxGap: const Duration(minutes: 6), clock: () => now);
+    expect(w.report('j'), Duration.zero);
+    now = now.add(const Duration(minutes: 5));
+    expect(w.report('j'), const Duration(minutes: 5));
+    now = now.add(const Duration(hours: 10));
+    expect(w.report('j'), const Duration(minutes: 11));
+    expect(w.report('other'), Duration.zero);
+    w.clear('j');
+    now = now.add(const Duration(minutes: 5));
+    expect(w.report('j'), Duration.zero);
   });
 
   test('a changed setting is used by the next job without a restart', () async {

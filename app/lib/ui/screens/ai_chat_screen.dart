@@ -10,7 +10,6 @@ import '../../domain/ai/photo_prep.dart';
 import '../ai_history_loader.dart';
 import '../ai_providers.dart';
 import '../ai_ui_providers.dart';
-import '../providers.dart' show databaseProvider;
 import '../widgets/ai_draft_card.dart';
 import '../widgets/ai_message_widgets.dart';
 import '../widgets/ai_question_card.dart';
@@ -161,18 +160,9 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     final jobId = error.jobId;
     if (jobId == null) return;
     final overlay = rootOverlayOf(context);
-    final db = ref.read(databaseProvider);
     final service = ref.read(aiChatServiceProvider);
     try {
-      final job = await (db.select(
-        db.aiJobsTable,
-      )..where((t) => t.id.equals(jobId))).getSingleOrNull();
-      final text = job == null ? null : JobPayload.decode(job.payloadJson).text;
-      if (text == null || text.isEmpty) {
-        showInfoToast(overlay, 'Send the photo again to retry.');
-        return;
-      }
-      await service.sendText(widget.threadId, text);
+      await service.retryJob(jobId);
     } catch (e) {
       showInfoToast(overlay, '$e');
     }
@@ -223,11 +213,21 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
           );
         }
         final decisions = <String, ConfirmDecision>{};
+        // The newest Retry the user sent per job: an error card older than it
+        // was already retried (the hub removes it once the job is requeued).
+        final retriedAt = <String, String>{};
         for (final m in items) {
           if (m.kind == AiMessageKind.confirm) {
             final d = ConfirmDecision.fromJson(aiContent(m));
             decisions[d.draftMessageId] = d;
+          } else if (m.kind == AiMessageKind.retry && m.jobId != null) {
+            retriedAt[m.jobId!] = m.createdAt;
           }
+        }
+        bool canRetry(AiMessage error) {
+          if (aiContent(error)['retryable'] != true) return false;
+          final at = retriedAt[error.jobId];
+          return at == null || at.compareTo(error.createdAt) < 0;
         }
         String? lastOf(String kind) {
           for (var i = items.length - 1; i >= 0; i--) {
@@ -310,9 +310,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                     AiMessageKind.confirm => AiDecisionBubble(message: m),
                     AiMessageKind.error => AiErrorCard(
                       message: m,
-                      onRetry: aiContent(m)['retryable'] == true
-                          ? () => _retry(m)
-                          : null,
+                      onRetry: canRetry(m) ? () => _retry(m) : null,
                     ),
                     _ => AiTextBubble(message: m),
                   },

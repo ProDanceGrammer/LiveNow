@@ -10,6 +10,7 @@ import 'package:livenow/domain/ai/ai_batch_service.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
 import 'package:livenow/domain/ai/extracted_receipt.dart';
 import 'package:livenow/domain/ai/receipt_extractor.dart';
+import 'package:livenow/domain/ai/service_waits.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 
 import '../../data/ai/mock_llm_server.dart';
@@ -1147,6 +1148,113 @@ void main() {
       expect((await env.job(shot)).state, AiJobState.done);
       expect((await env.message(shot, AiMessageKind.text))!.body, contains('Не знайшов'));
       expect(await env.count('ai_batches'), 0);
+    });
+  });
+
+  // Bug 2026-11-09: the hub's OCR service was not running; the job burned its 3
+  // attempts within seconds and failed for good, without a working Retry.
+  group('E. unreachable OCR service, Retry', () {
+    late DateTime now;
+    late ServiceWaits waits;
+
+    /// OCR "runs" on a closed port; the extractor reports it unreachable.
+    Future<void> initDown() async {
+      now = DateTime.utc(2026, 11, 9, 20);
+      waits = ServiceWaits(clock: () => now);
+      await env.init(ocr: OcrClient(baseUrl: 'http://127.0.0.1:1'), waits: waits);
+      env.extractor.error = const AiUnreachableException(
+        'http://127.0.0.1:1/ocr: SocketException: refused',
+      );
+    }
+
+    Future<void> tryOnce() async {
+      try {
+        await env.runner.runNext();
+      } on AiServiceWait {
+        // the worker backs off here
+      }
+    }
+
+    test('the job waits without spending attempts and runs once OCR is back', () async {
+      await initDown();
+      final jobId = await env.sendReceipt(receiptOf(e1Lines()));
+      for (var i = 0; i < 5; i++) {
+        await expectLater(
+          env.runner.runNext(),
+          throwsA(isA<AiServiceWait>().having((e) => e.ocr, 'ocr', isTrue)),
+        );
+        now = now.add(const Duration(minutes: 5));
+      }
+      final job = await env.job(jobId);
+      expect(job.state, AiJobState.queued);
+      expect(job.attempts, 0);
+      expect(job.error, contains('refused'));
+      expect(
+        (await env.message(jobId, AiMessageKind.status))!.body,
+        "Waiting for the hub's OCR service",
+      );
+      expect(await env.message(jobId, AiMessageKind.error), isNull);
+
+      env.extractor.error = null;
+      await env.drain();
+      expect(await env.message(jobId, AiMessageKind.draft), isNotNull);
+      expect(await env.message(jobId, AiMessageKind.error), isNull);
+    });
+
+    test('fails with Retry after 3 h of the hub trying; a long gap counts as minutes', () async {
+      await initDown();
+      final jobId = await env.sendReceipt(receiptOf(e1Lines()));
+      await tryOnce();
+      now = now.add(const Duration(hours: 10)); // PC asleep / hub off: counts 6 min
+      await tryOnce();
+      expect((await env.job(jobId)).state, AiJobState.queued);
+      var tries = 0;
+      while ((await env.job(jobId)).state == AiJobState.queued && tries++ < 100) {
+        now = now.add(const Duration(minutes: 5));
+        await tryOnce();
+      }
+      // 6 min + 35 x 5 min = 181 min: the 35th try crosses 3 h.
+      expect(tries, 35);
+      final job = await env.job(jobId);
+      expect(job.state, AiJobState.failed);
+      expect(job.attempts, 0);
+      final err = (await env.message(jobId, AiMessageKind.error))!;
+      expect(err.body, contains('OCR'));
+      expect(err.body, contains('3 год'));
+      expect(jsonDecode(err.contentJson)['retryable'], isTrue);
+    });
+
+    test('Retry requeues a failed photo job, removes its error card, runs it', () async {
+      await env.init();
+      env.extractor.error = const ReceiptExtractionException('OCR found no text');
+      final jobId = await env.sendReceipt(receiptOf(e1Lines()));
+      await env.drain();
+      expect((await env.job(jobId)).state, AiJobState.failed);
+      final err = (await env.message(jobId, AiMessageKind.error))!;
+      expect(jsonDecode(err.contentJson)['retryable'], isTrue, reason: 'the photo is still here');
+
+      await env.chat.retryJob(jobId);
+      env.extractor.error = null;
+      expect(await env.runner.runNext(), isTrue, reason: 'applying a Retry is work');
+      final job = await env.job(jobId);
+      expect(job.state, AiJobState.queued);
+      expect(job.attempts, 0);
+      expect(job.error, isNull);
+      expect(await env.message(jobId, AiMessageKind.error), isNull);
+
+      await env.drain();
+      expect(await env.message(jobId, AiMessageKind.draft), isNotNull);
+      final retry = await (env.db.select(env.db.aiMessagesTable)
+            ..where((t) => t.kind.equals(AiMessageKind.retry)))
+          .getSingle();
+      expect(jsonDecode(retry.contentJson)['handled'], isTrue);
+
+      // A second Retry of a job that is no longer failed changes nothing.
+      final before = await env.job(jobId);
+      await env.chat.retryJob(jobId);
+      expect(await env.runner.runNext(), isTrue);
+      expect((await env.job(jobId)).state, before.state);
+      expect(await env.runner.runNext(), isFalse);
     });
   });
 }

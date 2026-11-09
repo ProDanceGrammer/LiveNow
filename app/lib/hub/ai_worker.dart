@@ -13,6 +13,7 @@ import '../data/database.dart';
 import '../domain/ai/ai_job_runner.dart';
 import '../domain/ai/ai_protocol.dart';
 import '../domain/ai/ai_settings_store.dart';
+import '../domain/ai/service_waits.dart';
 import 'ai_photo_store.dart';
 
 /// One unit of work: true when it did something (the shape of
@@ -41,6 +42,7 @@ class AiWorker {
     this.backoffMax = const Duration(minutes: 5),
     this.mergePoll = const Duration(milliseconds: 200),
     this.mergeWaitPolls = 300,
+    this.ensureOcr,
     void Function(String line)? log,
   }) : settings = AiSettingsStore(db),
        _log = log ?? ((_) {}) {
@@ -61,6 +63,17 @@ class AiWorker {
   /// that this round is skipped (the next wake or timer tries again).
   final Duration mergePoll;
   final int mergeWaitPolls;
+
+  /// Starts the OCR service when it is down (the hub passes
+  /// `OcrLauncher.ensureRunning`); null = never start anything (tests).
+  final Future<bool> Function(String ocrUrl)? ensureOcr;
+
+  /// Waiting time of jobs for an unreachable service, shared by every runner
+  /// this worker builds. A gap longer than one back-off means the hub was not
+  /// trying, so it is capped.
+  late final ServiceWaits waits = ServiceWaits(
+    maxGap: backoffMax + const Duration(minutes: 1),
+  );
   final void Function(String) _log;
 
   late final AiRunnerFactory _factory;
@@ -105,7 +118,24 @@ class AiWorker {
       purgeOrphanPhotos();
     });
     unawaited(purgeOldPhotos());
+    unawaited(_startOcrIfUsed());
     wake();
+  }
+
+  /// The assistant is in use on this hub (it has jobs): make sure the OCR
+  /// service runs, as the logon task would.
+  Future<void> _startOcrIfUsed() async {
+    final ensure = ensureOcr;
+    if (ensure == null) return;
+    try {
+      final any = await db
+          .customSelect('SELECT 1 FROM ai_jobs LIMIT 1')
+          .getSingleOrNull();
+      if (any == null || _stopped) return;
+      await ensure((await settings.load()).ocrUrl);
+    } on Object catch (e, st) {
+      await _report(e, st, 'AI worker: starting the OCR service');
+    }
   }
 
   /// Stops listening and waits for the job in flight to end its step.
@@ -198,15 +228,35 @@ class AiWorker {
       }
       _failures = 0;
       _lastLogged = null;
+    } on AiServiceWait catch (e) {
+      // A job waits for the OCR service / model server: not an error of the
+      // hub. Start OCR (fire-and-forget: it may take a minute to load) and look
+      // again after a back-off.
+      final line = 'AI worker: waiting, $e';
+      if (line != _lastLogged) {
+        _lastLogged = line;
+        _log(line);
+      }
+      final ensure = ensureOcr;
+      if (e.ocr && ensure != null) {
+        unawaited(
+          settings.load().then((s) => ensure(s.ocrUrl)).catchError((_) => false),
+        );
+      }
+      _backOff();
     } on Object catch (e, st) {
       await _report(e, st, 'AI worker: running a job');
-      _failures++;
-      var delay = backoffBase * (1 << (_failures - 1).clamp(0, 10));
-      if (delay > backoffMax) delay = backoffMax;
-      _blockedUntil = DateTime.now().add(delay);
-      _backoffTimer?.cancel();
-      if (!_stopped) _backoffTimer = Timer(delay, wake);
+      _backOff();
     }
+  }
+
+  void _backOff() {
+    _failures++;
+    var delay = backoffBase * (1 << (_failures - 1).clamp(0, 10));
+    if (delay > backoffMax) delay = backoffMax;
+    _blockedUntil = DateTime.now().add(delay);
+    _backoffTimer?.cancel();
+    if (!_stopped) _backoffTimer = Timer(delay, wake);
   }
 
   /// True when no merge is running (waits a little while one is).
@@ -259,6 +309,7 @@ class AiWorker {
       ocr: ocr,
       settings: settings,
       storeOriginal: photos.storeBlobFromRow,
+      waits: waits,
     ).runNext;
   }
 }
