@@ -31,6 +31,14 @@ final aiMessagesProvider = StreamProvider.autoDispose
           ref.watch(aiChatServiceProvider).watchMessages(threadId),
     );
 
+/// The action a draft card names, live (null while it does not exist here).
+final aiDraftActionProvider = StreamProvider.autoDispose.family<ActionRow?, String>(
+  (ref, id) {
+    final db = ref.watch(databaseProvider);
+    return (db.select(db.actionsTable)..where((t) => t.id.equals(id))).watchSingleOrNull();
+  },
+);
+
 final aiJobProvider = StreamProvider.autoDispose.family<AiJob?, String>(
   (ref, jobId) => ref.watch(aiChatServiceProvider).watchJob(jobId),
 );

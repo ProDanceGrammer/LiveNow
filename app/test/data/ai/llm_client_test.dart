@@ -50,6 +50,18 @@ void main() {
     expect((b['messages'] as List).length, 2);
   });
 
+  test('a used-up processing deadline is a timeout, nothing is sent', () async {
+    server.enqueueJson({'ok': true});
+    final c = LlmClient(
+      baseUrl: server.url,
+      model: 'qwen-test',
+      deadline: DateTime.utc(2026, 11, 10, 1),
+      clock: () => DateTime.utc(2026, 11, 10, 2),
+    );
+    await expectLater(c.chatJson([LlmMessage.user('x')], schema: const {'type': 'object'}), throwsA(isA<AiTimeoutException>()));
+    expect(server.chatRequests, isEmpty);
+  });
+
   test('base URL with trailing /v1/ is normalised', () {
     expect(client().baseUrl, server.url);
   });

@@ -49,21 +49,25 @@ import 'ai_transfer_text.dart';
 import 'alias_source.dart';
 import 'receipt_memory.dart';
 import 'category_resolver.dart';
+import 'extracted_receipt.dart' show ExtractedReceipt, ReceiptLine, Tender;
 import 'invariant_validator.dart';
 import 'model_prompts.dart';
 import 'price_planner.dart';
+import 'job_progress.dart';
 import 'receipt_extractor.dart';
 import 'receipt_fx_rules.dart';
-import 'service_waits.dart';
+import 'sum_verifier.dart' show tenderFromAnswer;
 import 'transfer_builder.dart';
 import 'typed_expense.dart';
 
 /// A job is given up after this many failed or interrupted attempts.
 const kMaxJobAttempts = 3;
 
-/// A job waiting for an unreachable OCR service / model server is given up
-/// after this much time of the hub running and trying (see [ServiceWaits]).
-const kServiceWaitLimit = Duration(hours: 3);
+/// How long the model may work on one processing run of a job (the hub
+/// starts on a message -> its reply or draft; a resumed job gets its own).
+/// The hub gives its model clients this deadline; a timeout past it fails the
+/// job at once (with Retry) instead of starting the same slow work again.
+const kModelProcessingLimit = Duration(hours: 3);
 
 class AiJobRunner {
   AiJobRunner({
@@ -73,10 +77,9 @@ class AiJobRunner {
     this.ocr,
     required this.settings,
     this.storeOriginal,
-    ServiceWaits? waits,
+    this.startService,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now,
-       waits = waits ?? ServiceWaits(),
        _aliases = DbAliasSource(db),
        _rules = AiRulesMemory(db),
        _batches = AiBatchService(db),
@@ -98,9 +101,10 @@ class AiJobRunner {
   /// returns is the photo row marked stored and its bytes dropped.
   final Future<void> Function(AiBlob blob)? storeOriginal;
 
-  /// Waiting time per job for an unreachable service. The hub's worker passes
-  /// ONE instance to every runner it builds (a runner lives for one step).
-  final ServiceWaits waits;
+  /// Starts the OCR service ([ocr]) or the model server when a call to it was
+  /// refused; true when it answers now. The hub passes its launcher; null (or
+  /// false) = the job fails at once with Retry.
+  final Future<bool> Function({required bool ocr})? startService;
   final DateTime Function() _clock;
 
   final DbAliasSource _aliases;
@@ -238,7 +242,6 @@ class AiJobRunner {
         final jobId = m.jobId;
         final job = jobId == null ? null : await _job(jobId);
         if (job != null && job.state == AiJobState.failed) {
-          waits.clear(job.id);
           await _setJob(
             job.id,
             state: AiJobState.queued,
@@ -263,81 +266,214 @@ class AiJobRunner {
     return true;
   }
 
-  Future<void> _guarded(AiJob job, {required bool resume}) async {
+  /// Runs one step of [job]; true when it ended normally (its step times are
+  /// then learned and saved).
+  Future<bool> _guarded(
+    AiJob job, {
+    required bool resume,
+    bool restarted = false,
+    DateTime? began,
+  }) async {
     // Its chat was deleted (the job went with it): nothing to do, and nothing
     // may be written back for it.
-    if (await _job(job.id) == null) return;
+    if (await _job(job.id) == null) return false;
+    final from = began ?? _clock();
+    if (!restarted) {
+      _progress = JobProgress(timings: await _loadTimings(), clock: _clock);
+    }
+    var ok = false;
     try {
       if (resume) {
         await _resume(job);
       } else {
         await _start(job);
       }
-      waits.clear(job.id);
+      ok = true;
     } on AiJobFailure catch (e) {
-      waits.clear(job.id);
       await _fail(job, e.message);
     } on AiUnreachableException catch (e) {
-      await _waitForService(job, e, resume: resume);
-    } on Object catch (e) {
-      final fresh = await _job(job.id) ?? job;
-      final attempts = fresh.attempts + 1;
-      final text = _clip('$e');
-      if (attempts >= kMaxJobAttempts) {
-        await _setJob(job.id, attempts: attempts);
+      ok = await _serviceDown(job, e, resume: resume, restarted: restarted, began: from);
+    } on AiTimeoutException catch (e) {
+      if (_clock().difference(from) >= kModelProcessingLimit) {
         await _fail(
-          fresh,
-          'Не вдалося обробити після $kMaxJobAttempts спроб: $text',
+          await _job(job.id) ?? job,
+          'Модель на хабі обробляла повідомлення понад '
+          '${kModelProcessingLimit.inHours} год: ${_clip('$e')}',
         );
-        return;
+      } else {
+        await _attemptFailed(job, e, resume: resume);
       }
-      // Try again later: a queued job stays queued, a waiting one waits again.
-      await _setJob(
-        job.id,
-        state: resume ? job.state : AiJobState.queued,
-        stage: resume ? job.stage : AiStage.queued,
-        error: text,
-        attempts: attempts,
-      );
+    } on Object catch (e) {
+      await _attemptFailed(job, e, resume: resume);
     }
+    if (!restarted) await _endProgress(ok);
+    return ok;
   }
 
-  /// The OCR service or the model server could not be reached (stopped, PC
-  /// just started): that is not the job's fault, so it costs no attempt. The
-  /// job is put back to wait (a queued one shows "Waiting for the hub's OCR
-  /// service") and [AiServiceWait] tells the hub's worker to start the service
-  /// and back off. Only after [kServiceWaitLimit] of the hub trying does the
-  /// job fail (with Retry).
-  Future<void> _waitForService(
+  /// The steps of the current processing run (the status line's %).
+  JobProgress? _progress;
+
+  Future<StepTimings> _loadTimings() async =>
+      StepTimings.decode(await settings.get(AiSettingKey.stepTimings));
+
+  Future<void> _endProgress(bool ok) async {
+    final p = _progress;
+    _progress = null;
+    if (p == null) return;
+    if (!ok) {
+      p.abandon();
+      return;
+    }
+    p.finish();
+    await settings.set(AiSettingKey.stepTimings, p.timings.encode());
+  }
+
+  /// Starts the next step of the run: the status line shows it with the % and
+  /// the time it is expected to take (one write per step; the app moves the
+  /// bar in between). `ai_jobs.stage` keeps the coarse [AiStage].
+  Future<void> _step(AiJob job, String key, {String? detail, int units = 1}) async {
+    final stage = _stageOf(key);
+    final p = _progress;
+    if (p == null) {
+      await _status(job, stage);
+      return;
+    }
+    final snap = p.begin(JobStep(key, detail: detail, units: units));
+    await _setJob(job.id, stage: stage);
+    await _putMessage(
+      deriveId(job.id, 'status'),
+      job,
+      role: AiRole.assistant,
+      kind: AiMessageKind.status,
+      body: snap.text,
+      contentJson: jsonEncode({'v': 2, 'stage': stage, ...snap.toJson()}),
+    );
+  }
+
+  /// A slow call deep in the builder (a model call) begins: [total] calls of
+  /// this kind are needed, this is call [done] + 1.
+  Future<void> _reportStep(
     AiJob job,
-    AiUnreachableException e, {
-    required bool resume,
+    String key, {
+    int done = 0,
+    int total = 1,
+    int units = 1,
   }) async {
-    final ocrUrl = ocr?.baseUrl;
-    final isOcr = ocrUrl != null && e.message.contains(ocrUrl);
+    _progress?.replanCount(key, total - done, units: units);
+    await _step(
+      job,
+      key,
+      detail: total > 1 ? '${key == JobSteps.categories ? 'batch' : 'call'} ${done + 1} of $total' : null,
+      units: units,
+    );
+  }
+
+  StepReporter _reporterFor(AiJob job) =>
+      (key, {done = 0, total = 1, units = 1}) =>
+          _reportStep(job, key, done: done, total: total, units: units);
+
+  static String _stageOf(String key) => switch (key) {
+    JobSteps.ocr || JobSteps.lines => AiStage.reading,
+    JobSteps.checks => AiStage.checking,
+    JobSteps.startOcr || JobSteps.startModel => AiStage.queued,
+    _ => AiStage.matching,
+  };
+
+  /// What a run of [job] is expected to do, before anything is known.
+  List<JobStep> _stepsFor(AiJob job, {required bool resume}) {
+    const guess = 8; // lines on a typical receipt
+    const model = [
+      JobStep(JobSteps.translate, units: guess),
+      JobStep(JobSteps.categories, units: guess),
+      JobStep(JobSteps.checks),
+    ];
+    if (resume) return const [JobStep(JobSteps.apply), JobStep(JobSteps.checks)];
+    return switch (job.kind) {
+      AiJobKind.photos => [
+        for (var i = 0; i < JobPayload.decode(job.payloadJson).blobIds.length; i++)
+          const JobStep(JobSteps.ocr),
+        const JobStep(JobSteps.ocr),
+        const JobStep(JobSteps.lines),
+        ...model,
+      ],
+      AiJobKind.receipt => const [JobStep(JobSteps.ocr), JobStep(JobSteps.lines), ...model],
+      AiJobKind.screenshot => const [JobStep(JobSteps.ocr), JobStep(JobSteps.payment)],
+      AiJobKind.bazaar => const [JobStep(JobSteps.lines), ...model],
+      _ => const [
+        JobStep(JobSteps.message),
+        JobStep(JobSteps.translate, units: 2),
+        JobStep(JobSteps.categories, units: 2),
+        JobStep(JobSteps.checks),
+      ],
+    };
+  }
+
+  /// An error that may pass (a bad reply, a crash): costs one attempt; the job
+  /// fails after [kMaxJobAttempts].
+  Future<void> _attemptFailed(AiJob job, Object e, {required bool resume}) async {
+    final fresh = await _job(job.id) ?? job;
+    final attempts = fresh.attempts + 1;
     final text = _clip('$e');
-    if (waits.report(job.id) >= kServiceWaitLimit) {
-      waits.clear(job.id);
-      final what = isOcr ? 'Сервіс розпізнавання (OCR)' : 'Сервер моделі';
+    if (attempts >= kMaxJobAttempts) {
+      await _setJob(job.id, attempts: attempts);
       await _fail(
-        await _job(job.id) ?? job,
-        '$what на хабі недоступний понад ${kServiceWaitLimit.inHours} год: $text',
+        fresh,
+        'Не вдалося обробити після $kMaxJobAttempts спроб: $text',
       );
       return;
     }
+    // Try again later: a queued job stays queued, a waiting one waits again.
     await _setJob(
       job.id,
       state: resume ? job.state : AiJobState.queued,
       stage: resume ? job.stage : AiStage.queued,
       error: text,
+      attempts: attempts,
     );
-    if (!resume) {
-      await _status(
-        job,
-        isOcr ? "Waiting for the hub's OCR service" : "Waiting for the hub's model server",
-      );
+  }
+
+  /// The OCR service or the model server refused the call (stopped, PC just
+  /// started, Ollama's updater stopped it). Not the job's fault, so no attempt
+  /// is counted: the hub starts the service and the same step runs once more.
+  /// When it cannot be started (or is refused again right after) the job
+  /// fails at once, saying which service, with Retry; nothing waits.
+  Future<bool> _serviceDown(
+    AiJob job,
+    AiUnreachableException e, {
+    required bool resume,
+    required bool restarted,
+    required DateTime began,
+  }) async {
+    final ocrUrl = ocr?.baseUrl;
+    // The clients put the full request URL first (`<base>/ocr: ...`).
+    final isOcr = ocrUrl != null && e.message.startsWith('$ocrUrl/');
+    final start = startService;
+    if (!restarted && start != null) {
+      if (!resume) await _step(job, isOcr ? JobSteps.startOcr : JobSteps.startModel);
+      if (await start(ocr: isOcr)) {
+        // Back to where this step began, then the same step again.
+        await _setJob(
+          job.id,
+          state: resume ? job.state : AiJobState.queued,
+          stage: resume ? job.stage : AiStage.queued,
+        );
+        final fresh = await _job(job.id);
+        if (fresh == null) return false;
+        return _guarded(fresh, resume: resume, restarted: true, began: began);
+      }
     }
-    throw AiServiceWait(ocr: isOcr, message: text);
+    final what = isOcr ? 'Сервіс розпізнавання (OCR)' : 'Сервер моделі (Ollama)';
+    await _fail(
+      await _job(job.id) ?? job,
+      '$what на хабі не запущений, і хаб не зміг його запустити: ${_clip('$e')}',
+    );
+    return false;
+  }
+
+  /// The user's message named a group for this line: the pick is not learned.
+  static bool _askedInGroup(DraftCard d, int index) {
+    final m = d.overrides['in_group'];
+    return m is Map && m['$index'] != null;
   }
 
   static String _clip(String s) => s.length <= 300 ? s : '${s.substring(0, 300)}...';
@@ -353,7 +489,7 @@ class AiJobRunner {
         ? AiStage.reading
         : AiStage.matching;
     await _setJob(job.id, state: AiJobState.running, stage: stage);
-    await _status(job, stage);
+    _progress?.plan(_stepsFor(job, resume: false));
     switch (job.kind) {
       case AiJobKind.receipt:
       case AiJobKind.bazaar:
@@ -384,7 +520,7 @@ class AiJobRunner {
     final existing = await _draftOf(job);
     if (existing != null) {
       // A previous attempt got this far: no second extraction.
-      await _status(job, AiStage.matching);
+      await _step(job, JobSteps.lines);
       final b = await _rebuild(job, existing);
       await _evaluate(job, b);
       return;
@@ -405,6 +541,7 @@ class AiJobRunner {
       if (first == null || (first.data ?? '').isEmpty) {
         throw const AiJobFailure('Фото чека не знайдено: надішліть його ще раз.');
       }
+      await _step(job, JobSteps.ocr, detail: photo != null && release.length > 1 ? 'the receipt' : null);
       final receipt = await extractor.extract(
         base64Decode(first.data!),
         mime: first.mime,
@@ -417,11 +554,12 @@ class AiJobRunner {
         solo: shots != null ? solo : payload.receiptCount == 1,
       );
     }
-    await _status(job, AiStage.matching);
+    await _step(job, JobSteps.lines);
     final b = await _builder.build(
       job: job,
       kind: job.kind,
       source: source,
+      onStep: _reporterFor(job),
       overrides: {
         if (screenshot != null && screenshot.hasAnything) 'screenshot': screenshot.toJson(),
         if (photoSha.isNotEmpty) 'photo_sha': photoSha,
@@ -442,6 +580,7 @@ class AiJobRunner {
       overrides: Map<String, dynamic>.from(d.overrides),
       messageTime: await _messageTime(job, payload),
       previous: d,
+      onStep: _reporterFor(job),
     );
   }
 
@@ -452,6 +591,7 @@ class AiJobRunner {
   /// Saves the draft, refreshes the question card and chooses the next state:
   /// ask, wait for Confirm (draft-first), or commit.
   Future<void> _evaluate(AiJob job, DraftBuild b) async {
+    await _step(job, JobSteps.checks);
     final d = b.card;
     final open = b.questions.isNotEmpty;
     final pending = d.pendingLines.isNotEmpty;
@@ -570,7 +710,8 @@ class AiJobRunner {
     final d = await _draftOf(job);
     if (d == null) throw const AiJobFailure('Чернетку не знайдено.');
     await _setJob(job.id, state: AiJobState.running, stage: AiStage.matching);
-    await _status(job, AiStage.matching);
+    _progress?.plan(_stepsFor(job, resume: true));
+    await _step(job, JobSteps.apply);
 
     var userConfirmed = false;
     for (final m in await _pendingMessages(job, d)) {
@@ -589,7 +730,10 @@ class AiJobRunner {
           ov['category_id'] = e.categoryId;
           // Picked by hand in the list: the next receipt starts from it.
           final line = _lineOf(d, e.index);
-          if (line != null && e.newName == null && !await _isGroup(e.categoryId!)) {
+          if (line != null &&
+              e.newName == null &&
+              !_askedInGroup(d, e.index) &&
+              !await _isGroup(e.categoryId!)) {
             await _aliases.remember(line.name, categoryId: e.categoryId);
           }
           // A category chosen by hand replaces an earlier "create" request.
@@ -725,8 +869,9 @@ class AiJobRunner {
         d.overrides['cat_miss'] = miss;
         return true;
       }
-      // A group is not a product: only a real category is learned.
-      if (!await _isGroup(categoryId)) {
+      // A group is not a product: only a real category is learned. A pick
+      // inside a group the user named is asked again next time.
+      if (!_askedInGroup(d, line.index) && !await _isGroup(categoryId)) {
         await _aliases.remember(line.name, categoryId: categoryId);
       }
       _lineOv(d, line.index)['category_id'] = categoryId;
@@ -758,8 +903,29 @@ class AiJobRunner {
       if (!_yes(a)) return false;
       d.overrides['tender_ok'] = true;
     } else if (id == 'mine') {
-      final m = RegExp(r'\d{4}').firstMatch(a);
-      if (m != null) d.overrides['mine_last4'] = m.group(0);
+      // A tapped option is `tender:<i>`; typed text (or an older phone's tapped
+      // text) names the tender by its amount or its card's last-4.
+      final receipt = d.source['receipt'];
+      final tenders = [
+        if (receipt is Map && receipt['tenders'] is List)
+          for (final t in receipt['tenders'] as List)
+            if (t is Map) Tender.fromJson(Map<String, dynamic>.from(t)),
+      ];
+      final aid = q.answerId;
+      final tapped = aid != null && aid.startsWith('tender:')
+          ? int.tryParse(aid.substring(7))
+          : null;
+      final i = tapped != null && tapped >= 0 && tapped < tenders.length
+          ? tapped
+          : tenderFromAnswer(tenders, a);
+      if (i == null) {
+        d.overrides['mine_miss'] = a;
+      } else {
+        d.overrides.remove('mine_miss');
+        d.overrides['mine_tender'] = i;
+        final last4 = tenders[i].last4;
+        if (last4 != null) d.overrides['mine_last4'] = last4;
+      }
     } else if (id.startsWith('card:')) {
       final acc = await _accountFromAnswer(a);
       if (acc != null) {
@@ -1025,7 +1191,7 @@ class AiJobRunner {
         // printed name needs no model.
         // The next receipt with this name starts from it (a price variant is
         // remembered as its product, the same-name wrapper).
-        if (d.userConfirmed && l.name.trim().isNotEmpty) {
+        if (d.userConfirmed && l.name.trim().isNotEmpty && !_askedInGroup(d, l.index)) {
           var product = leaf;
           final parent = leaf?.parentId == null
               ? null
@@ -1479,10 +1645,10 @@ class AiJobRunner {
   /// What a photo says when it is a bank screenshot (the amount charged in ₴
   /// and/or the bank's rate); null for a receipt. Without an OCR service the
   /// photos cannot be told apart, so each one counts as a receipt.
-  Future<ScreenshotReading?> _screenshotReading(AiBlob b) async {
+  Future<ScreenshotReading?> _screenshotReading(AiBlob b, {required DateTime now}) async {
     try {
       final text = await _ocrText(base64Decode(b.data!), b.mime);
-      final reading = parseBankScreenshot(text);
+      final reading = parseBankScreenshot(text, now: now.toLocal());
       return reading.hasAnything ? reading : null;
     } on AiJobFailure {
       return null;
@@ -1505,8 +1671,10 @@ class AiJobRunner {
     final receipts = <AiBlob>[];
     final shotBlobs = <AiBlob>[];
     final shots = <ScreenshotReading>[];
-    for (final b in blobs) {
-      final reading = await _screenshotReading(b);
+    for (var i = 0; i < blobs.length; i++) {
+      final b = blobs[i];
+      await _step(job, JobSteps.ocr, detail: blobs.length > 1 ? 'photo ${i + 1} of ${blobs.length}' : null);
+      final reading = await _screenshotReading(b, now: await _messageTime(job, payload));
       if (reading == null) {
         receipts.add(b);
       } else {
@@ -1524,9 +1692,13 @@ class AiJobRunner {
       );
       return;
     }
+    // Screenshots alone: the message may say what each one was (by its sum or
+    // day, or one text for all of them).
+    final captions = receipts.isEmpty
+        ? captionsForShots(payload.text, shots, now: await _messageTime(job, payload))
+        : const <String?>[];
     if (receipts.isEmpty && shots.length == 1) {
-      await _status(job, AiStage.matching);
-      await _applyScreenshot(job, payload, blobs, shots.first);
+      await _applyScreenshot(job, payload, blobs, shots.first, caption: captions.first);
       return;
     }
     // Several receipts, or several screenshots alone: one job each, so every
@@ -1545,10 +1717,14 @@ class AiJobRunner {
             ),
           )
       else
-        for (final s in shotBlobs)
+        for (var i = 0; i < shotBlobs.length; i++)
           (
             kind: AiJobKind.screenshot,
-            payload: JobPayload(messageId: payload.messageId, blobIds: [s.id]),
+            payload: JobPayload(
+              messageId: payload.messageId,
+              blobIds: [shotBlobs[i].id],
+              text: captions[i],
+            ),
           ),
     ];
     await _spawn(job, kids);
@@ -1601,10 +1777,17 @@ class AiJobRunner {
     if (first == null) {
       throw const AiJobFailure('Скріншот не знайдено: надішліть його ще раз.');
     }
+    final existing = await _draftOf(job);
+    if (existing != null) {
+      // A previous attempt already made the purchase draft.
+      await _evaluate(job, await _rebuild(job, existing));
+      return;
+    }
     final bytes = base64Decode(first.data!);
+    await _step(job, JobSteps.ocr);
     final text = await _ocrText(bytes, first.mime);
-    await _status(job, AiStage.matching);
-    final reading = parseBankScreenshot(text);
+    final now = await _messageTime(job, payload);
+    final reading = parseBankScreenshot(text, now: now);
     if (!reading.hasAnything) {
       await _replyAndFinish(
         job,
@@ -1614,25 +1797,94 @@ class AiJobRunner {
       await _releasePhotos(blobs);
       return;
     }
-    await _applyScreenshot(job, payload, blobs, reading);
+    await _applyScreenshot(
+      job,
+      payload,
+      blobs,
+      reading,
+      caption: captionsForShots(payload.text, [reading], now: now).first,
+    );
   }
 
-  /// A late screenshot: new rates for the newest recorded receipt it fits.
-  Future<void> _applyScreenshot(
+  /// A bank screenshot that is a purchase of its own: one editable line named
+  /// by the message ([caption]), else by the merchant on the screenshot (not
+  /// translated); the shop amount in lira, the charged hryvnia and the rate
+  /// from the screenshot, its day when readable. The category: the remembered
+  /// one for that name, else the model, else a question. Confirm writes it.
+  Future<void> _startShotPurchase(
     AiJob job,
     JobPayload payload,
     List<AiBlob> blobs,
     ScreenshotReading reading,
+    String? caption,
   ) async {
-    final target = await _batchForScreenshot(job, reading);
-    if (target == null) {
+    final existing = await _draftOf(job);
+    if (existing != null) {
+      await _evaluate(job, await _rebuild(job, existing));
+      return;
+    }
+    final amount = reading.shopAmount;
+    if (amount == null || amount <= 0) {
       await _replyAndFinish(
         job,
-        'Не знайшов записаного чека, до якого належить цей скріншот'
-        '${reading.countAmount == null ? '' : ' (сума ${fmtMoney(reading.countAmount!)})'}. '
-        'Спочатку надішліть чек.',
+        'Не вдалося прочитати суму на скріншоті. Надішліть чіткіший знімок '
+        'або напишіть покупку словами.',
       );
       await _releasePhotos(blobs);
+      return;
+    }
+    final merchant = reading.merchant;
+    final name = caption ?? merchant ?? 'Оплата карткою';
+    final date = reading.date;
+    final receipt = ExtractedReceipt(
+      // With the message's name the merchant goes before it in the
+      // transaction's name; alone it IS the line.
+      merchant: caption == null ? null : merchant,
+      invoiceDatetimeLocal: date == null ? null : isoLocalOf(date),
+      currency: reading.countAmount != null ? 'TRY' : 'UAH',
+      total: amount,
+      tenders: [Tender(method: 'card', amount: amount)],
+      lines: [ReceiptLine(raw: name, name: name, lineTotal: amount)],
+    );
+    final photo = blobs.where((b) => b.sha256.isNotEmpty).firstOrNull;
+    final b = await _builder.build(
+      job: job,
+      kind: AiJobKind.receipt,
+      onStep: _reporterFor(job),
+      source: {
+        'receipt': receipt.toJson(),
+        'payment': true,
+        // The user's words name it (and may name a group of categories).
+        if (caption != null) 'named': true,
+        // A merchant's name is a name, not a product to translate.
+        if (caption == null) 'keep_names': true,
+      },
+      overrides: {
+        'screenshot': reading.toJson(),
+        if (photo != null) 'photo_sha': photo.sha256,
+      },
+      messageTime: await _messageTime(job, payload),
+    );
+    await _saveDraft(job, b.card);
+    await _releasePhotos(blobs);
+    await _evaluate(job, b);
+  }
+
+  /// A screenshot without a receipt in the same message: new rates for the
+  /// newest recorded receipt it fits; when the message says what it was
+  /// ([caption]: the text wins) or no recorded receipt fits, it is a purchase
+  /// of its own.
+  Future<void> _applyScreenshot(
+    AiJob job,
+    JobPayload payload,
+    List<AiBlob> blobs,
+    ScreenshotReading reading, {
+    String? caption,
+  }) async {
+    await _step(job, JobSteps.payment);
+    final target = caption == null ? await _batchForScreenshot(job, reading) : null;
+    if (target == null) {
+      await _startShotPurchase(job, payload, blobs, reading, caption);
       return;
     }
 
@@ -1768,7 +2020,12 @@ class AiJobRunner {
         .customSelect(
           'SELECT b.id AS id FROM ai_batches b JOIN ai_jobs j ON j.id = b.job_id '
           "WHERE b.thread_id = ? AND b.undone_at IS NULL AND j.id <> ? "
-          "AND j.kind IN ('receipt', 'bazaar', 'photos') ORDER BY b.created_at DESC, b.id DESC",
+          "AND j.kind IN ('receipt', 'bazaar', 'photos') "
+          // A payment recorded from a screenshot already has its rate: the next
+          // screenshot of the same sum is another purchase, not a fix of it.
+          "AND NOT EXISTS (SELECT 1 FROM ai_messages m WHERE m.job_id = j.id "
+          "AND m.kind = 'draft' AND m.content_json LIKE '%\"payment\":true%') "
+          'ORDER BY b.created_at DESC, b.id DESC',
           variables: [Variable.withString(job.threadId), Variable.withString(job.id)],
         )
         .get();
@@ -1806,6 +2063,7 @@ class AiJobRunner {
   // ===========================================================================
 
   Future<void> _startText(AiJob job) async {
+    await _step(job, JobSteps.message);
     final payload = JobPayload.decode(job.payloadJson);
     final text = (payload.text ?? await _messageBody(payload.messageId) ?? '').trim();
     final transfer = parseTransferText(text);
@@ -1849,16 +2107,15 @@ class AiJobRunner {
   ) async {
     final existing = await _draftOf(job);
     if (existing != null) {
-      await _status(job, AiStage.matching);
       await _evaluate(job, await _rebuild(job, existing));
       return;
     }
     final payload = JobPayload.decode(job.payloadJson);
     final account = typed.accountIndex == null ? null : accounts[typed.accountIndex!];
-    await _status(job, AiStage.matching);
     final b = await _builder.build(
       job: job,
       kind: AiJobKind.receipt,
+      onStep: _reporterFor(job),
       source: {
         'receipt': typed.toReceipt(typed.currency ?? 'TRY').toJson(),
         'typed': {

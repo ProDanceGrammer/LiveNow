@@ -2,12 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ids.dart';
+import '../../core/time_codec.dart';
 import '../../data/database.dart';
+import '../../domain/ai/action_creator.dart' show kNewActionHalfSpan;
 import '../../domain/ai/ai_draft.dart';
 import '../../domain/ai/alias_source.dart';
 import '../../domain/ai/receipt_memory.dart';
 import '../../domain/ai/ai_protocol.dart';
 import '../ai_providers.dart';
+import '../open_entity.dart';
+import '../time_format.dart';
 import 'ai_category_chooser.dart';
 import 'ai_line_editor.dart';
 import 'ai_message_widgets.dart';
@@ -275,13 +280,21 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
                 ),
               ),
             ),
+          if (draft.action != null)
+            _DraftActionLine(
+              action: draft.action!,
+              at: draft.at,
+              // Confirm gives a new action this id (`_ensureAction`).
+              createdId: widget.message.jobId == null
+                  ? null
+                  : deriveId(widget.message.jobId!, 'action'),
+              keyName: _key('ai-draft-action'),
+            ),
           if (draft.action != null || draft.useAccountName != null)
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
                 [
-                  if (draft.action != null)
-                    'Action: ${draft.action!.name}${draft.action!.isNew ? ' (new)' : ''}',
                   if (draft.useAccountName != null)
                     'Account: ${draft.useAccountName}',
                   'Rate: ${draft.fxSource}',
@@ -333,6 +346,66 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
 
 /// What was saved the first time this receipt was confirmed (read-only); the
 /// question card below asks what to do with the copy.
+/// `Action: <name> · <start → end>` of the action the purchase goes to. An
+/// action that exists here shows its live name and schedule and opens its edit
+/// menu on tap; a new one (created only by Confirm) shows the span Confirm will
+/// give it and is not tappable.
+class _DraftActionLine extends ConsumerWidget {
+  const _DraftActionLine({
+    required this.action,
+    required this.at,
+    required this.createdId,
+    required this.keyName,
+  });
+
+  final DraftAction action;
+  final DateTime at;
+  final String? createdId;
+  final String keyName;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final id = action.id ?? (action.isNew ? createdId : null);
+    final row = id == null ? null : ref.watch(aiDraftActionProvider(id)).asData?.value;
+    final String text;
+    if (row != null) {
+      final when = formatShortSchedule(
+        dateTimeFromDb(row.startAt),
+        dateTimeFromDb(row.endAt),
+        isAllDay: row.isAllDay,
+      );
+      text = 'Action: ${row.name}${when == null ? '' : ' · $when'}';
+    } else {
+      final when = action.isNew
+          ? formatShortSchedule(at.subtract(kNewActionHalfSpan), at.add(kNewActionHalfSpan))
+          : null;
+      text = 'Action: ${action.name}${action.isNew ? ' (new)' : ''}'
+          '${when == null ? '' : ' · $when'}';
+    }
+    final label = Text(
+      text,
+      key: ValueKey(keyName),
+      style: row == null
+          ? theme.textTheme.bodySmall
+          : theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.primary,
+              decoration: TextDecoration.underline,
+              decorationColor: theme.colorScheme.primary,
+            ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: row == null
+          ? label
+          : InkWell(
+              onTap: () => openActionById(context, ref, row.id),
+              child: label,
+            ),
+    );
+  }
+}
+
 class _SeenPanel extends StatelessWidget {
   const _SeenPanel({required this.keyOf, required this.seen, required this.currency});
 

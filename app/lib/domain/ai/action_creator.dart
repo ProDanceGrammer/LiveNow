@@ -3,6 +3,10 @@ import 'package:drift/drift.dart' show Variable;
 import '../../data/database.dart';
 import '../action_service.dart';
 
+/// How far a created action reaches on each side of the receipt time (the draft
+/// card shows this span before Confirm creates it).
+const kNewActionHalfSpan = Duration(minutes: 20);
+
 /// T4: a shop/bazaar action around a receipt that has none, with the growth
 /// directions and countable activity of the most recent action of that name.
 class ActionCreator {
@@ -11,14 +15,14 @@ class ActionCreator {
   final AppDatabase db;
   final ActionService actions;
 
-  /// Creates [name] spanning [receiptUtc] +/- [minutes] (default 20) and
+  /// Creates [name] spanning [receiptUtc] +/- [minutes] ([kNewActionHalfSpan]) and
   /// returns its id. [id] (e.g. `deriveId(jobId, 'action')`) makes a re-run
   /// return the same action. Links are copied from the newest same-name action
   /// (by `start_at`), if any.
   Future<String> create({
     required String name,
     required DateTime receiptUtc,
-    int minutes = 20,
+    Duration half = kNewActionHalfSpan,
     String? id,
   }) async {
     final latest = await db
@@ -40,7 +44,6 @@ class ActionCreator {
           .get();
       metricIds = [for (final l in links) l.read<String>('metric_id')];
     }
-    final half = Duration(minutes: minutes);
     return actions.createAction(
       id: id,
       name: name,

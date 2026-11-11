@@ -91,4 +91,48 @@ void main() {
     expect(s.status, SplitStatus.unknownTender);
     expect(s.needsQuestion, isTrue);
   });
+
+  group('bug 2026-11-10: the picked tender ends the "which payment" question', () {
+    const noDigitsMine = Tender(method: 'card', amount: 195.45);
+    const noDigitsOther = Tender(method: 'card', amount: 149.00);
+
+    test('the user\'s pick wins and splits the lines', () {
+      final s = splitTenders(
+        lineNets: lines,
+        tenders: const [noDigitsOther, noDigitsMine],
+        mineIndex: 1,
+      );
+      expect(s.status, SplitStatus.split);
+      expect(s.mine, [0, 1]);
+      expect(s.needsQuestion, isFalse);
+    });
+
+    test('a picked tender without an amount takes every line', () {
+      final s = splitTenders(
+        lineNets: lines,
+        tenders: const [Tender(method: 'card'), noDigitsOther],
+        mineIndex: 0,
+      );
+      expect(s.status, SplitStatus.allMine);
+      expect(s.needsQuestion, isFalse);
+    });
+
+    test('an answer names its tender by amount, never by the amount\'s digits', () {
+      const tenders = [
+        Tender(method: 'card', amount: 500),
+        Tender(method: 'card', amount: 2048.41),
+      ];
+      // The exact text of the tapped option (older phones send only it).
+      expect(tenderFromAnswer(tenders, '•••• ? — 2048.41'), 1);
+      expect(tenderFromAnswer(tenders, '2048.41'), 1);
+      expect(tenderFromAnswer(tenders, '2 048,41'), 1);
+      expect(tenderFromAnswer(tenders, '2048'), isNull);
+      expect(tenderFromAnswer(tenders, 'не знаю'), isNull);
+    });
+
+    test('an answer names its tender by the card\'s last 4 digits', () {
+      expect(tenderFromAnswer(const [other, mine], 'картка 6141'), 1);
+      expect(tenderFromAnswer(const [other, mine], '•••• 9999 — 149.00'), 0);
+    });
+  });
 }

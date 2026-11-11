@@ -10,6 +10,7 @@ import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/ai/ai_batch_service.dart';
 import 'package:livenow/domain/ai/ai_chat_service.dart';
+import 'package:livenow/domain/action_service.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/ui/ai_ui_providers.dart';
@@ -18,6 +19,8 @@ import 'package:livenow/ui/screens/ai_chat_screen.dart';
 import 'package:livenow/ui/screens/ai_threads_screen.dart';
 import 'package:livenow/ui/screens/budget_screen.dart';
 import 'package:livenow/ui/sync_providers.dart';
+import 'package:livenow/ui/time_format.dart';
+import 'package:livenow/ui/widgets/action_editor.dart';
 
 import '../domain/ai/ai_test_support.dart';
 
@@ -341,6 +344,47 @@ void main() {
     expect(find.text('Matching categories'), findsOneWidget);
   });
 
+  uiTest('a v2 status shows the step, a live % and its time, and a bar', (tester) async {
+    final started = DateTime.now().toUtc().subtract(const Duration(seconds: 30));
+    late String job;
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      seed: () async {
+        job = await insertJob(AiJobState.running, AiStage.matching);
+        await insertMessage(
+          kind: AiMessageKind.status,
+          body: 'Matching categories · batch 2 of 3 · 20%',
+          jobId: job,
+          json: {
+            'v': 2,
+            'stage': AiStage.matching,
+            'step': 'categories',
+            'label': 'Matching categories',
+            'detail': 'batch 2 of 3',
+            'pct_from': 20.0,
+            'pct_to': 60.0,
+            'started': started.toIso8601String(),
+            'estimate_ms': 60000,
+          },
+        );
+      },
+    );
+    // Half of the step's 60 s are gone: 20 + 40 * 0.5.
+    expect(find.textContaining('Matching categories · batch 2 of 3 · 40% · 0:3'), findsOneWidget);
+    final bar = tester.widget<LinearProgressIndicator>(find.byKey(const ValueKey('ai-status-bar')));
+    expect(bar.value, closeTo(0.4, 0.01));
+
+    // Done: no bar, the plain text.
+    await tester.runAsync(() async {
+      await (db.update(db.aiJobsTable)..where((t) => t.id.equals(job)))
+          .write(const AiJobsTableCompanion(state: Value(AiJobState.done)));
+    });
+    await settle(tester);
+    expect(find.byKey(const ValueKey('ai-status-bar')), findsNothing);
+    expect(find.text('Matching categories · batch 2 of 3 · 20%'), findsOneWidget);
+  });
+
   uiTest('waiting-for-hub badge when jobs are queued and sync is offline', (
     tester,
   ) async {
@@ -509,6 +553,48 @@ void main() {
     expect(d.edits.single.unitPrice, 20);
     expect(d.edits.single.quantity, 3);
     expect(d.edits.single.unit, 'piece');
+  });
+
+  uiTest('a new action shows the span Confirm will create; it is not tappable', (tester) async {
+    await mount(tester, AiChatScreenForTest.of(() => thread), seed: seedDraft);
+    final at = DateTime.utc(2026, 10, 29, 10);
+    final when = formatShortSchedule(
+      at.subtract(const Duration(minutes: 20)),
+      at.add(const Duration(minutes: 20)),
+    );
+    expect(find.text('Action: Shop (new) · $when'), findsOneWidget);
+    expect(
+      find.ancestor(of: find.byKey(const ValueKey('ai-draft-action')), matching: find.byType(InkWell)),
+      findsNothing,
+    );
+  });
+
+  uiTest('an existing action shows its live dates and opens its edit menu on tap', (tester) async {
+    final start = DateTime.utc(2026, 11, 7, 16, 45);
+    final end = DateTime.utc(2026, 11, 7, 17, 30);
+    await mount(tester, AiChatScreenForTest.of(() => thread), seed: () async {
+      final actionId = await ActionService(db).createAction(
+        name: 'Process returns',
+        startAt: start,
+        endAt: end,
+      );
+      final job = await insertJob(AiJobState.draftReady, AiStage.waiting);
+      await insertMessage(
+        kind: AiMessageKind.draft,
+        json: {
+          ...draftJson,
+          'action': {'id': actionId, 'name': 'old name', 'new': false},
+        },
+        jobId: job,
+      );
+    });
+    final label = find.byKey(const ValueKey('ai-draft-action'));
+    // The live name, not the one stored in the draft.
+    expect(find.text('Action: Process returns · ${formatShortSchedule(start, end)}'), findsOneWidget);
+    await tester.ensureVisible(label);
+    await tester.tap(label);
+    await settle(tester);
+    expect(find.byType(ActionEditorDialog), findsOneWidget);
   });
 
   uiTest('the category chooser: an offered one, a searched one, and a new one in a group', (tester) async {

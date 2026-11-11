@@ -46,6 +46,10 @@ class MockLlmServer {
   bool modelsRoute = true;
   bool tagsRoute = true;
 
+  /// Runs when a chat request arrives, before it is answered (a test reads
+  /// what the caller wrote meanwhile).
+  Future<void> Function()? onChat;
+
   static Future<MockLlmServer> start() async =>
       MockLlmServer._(await HttpServer.bind(InternetAddress.loopbackIPv4, 0));
 
@@ -75,6 +79,7 @@ class MockLlmServer {
         res.statusCode = tagsRoute ? 200 : 404;
         if (tagsRoute) res.write(jsonEncode({'models': []}));
       } else if (req.uri.path == '/v1/chat/completions') {
+        await onChat?.call();
         if (_queue.isEmpty) {
           res.statusCode = 500;
           res.write('queue empty');

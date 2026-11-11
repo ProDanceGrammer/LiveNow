@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
 import '../../domain/ai/ai_protocol.dart';
+import '../../domain/ai/job_progress.dart' show ProgressSnapshot;
 import '../ai_history_loader.dart' show aiBlobFetcherProvider;
 import '../ai_ui_providers.dart';
 import '../dialog_stack.dart';
@@ -207,7 +209,7 @@ class _PhotoPlaceholder extends StatelessWidget {
 /// The live status line of a job: stage text + a small progress indicator while
 /// the job is working. The text is the status message row, which the hub
 /// updates in place, so this rebuilds as it changes.
-class AiStatusLine extends ConsumerWidget {
+class AiStatusLine extends ConsumerStatefulWidget {
   const AiStatusLine({super.key, required this.message, this.latest = true});
 
   final AiMessage message;
@@ -216,42 +218,109 @@ class AiStatusLine extends ConsumerWidget {
   final bool latest;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AiStatusLine> createState() => _AiStatusLineState();
+}
+
+/// While the hub works, a v2 status (one write per step: its share of the bar,
+/// when it began and how long it should take) shows the step, a live % and the
+/// step's time, and a thin bar that moves between the hub's writes.
+class _AiStatusLineState extends ConsumerState<AiStatusLine> {
+  Timer? _tick;
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  void _ticking(bool on) {
+    if (on && _tick == null) {
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!on && _tick != null) {
+      _tick!.cancel();
+      _tick = null;
+    }
+  }
+
+  static String _clock(Duration d) {
+    final s = d.inSeconds < 0 ? 0 : d.inSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
     final jobId = message.jobId;
     final job = jobId == null
         ? null
         : ref.watch(aiJobProvider(jobId)).asData?.value;
     final working = job != null && AiJobState.active.contains(job.state);
-    final text = message.body.isNotEmpty ? message.body : (job?.stage ?? '');
-    return Padding(
-      key: ValueKey(latest ? 'ai-status-line' : 'ai-status-line-${message.id}'),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (working)
-            const SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            Icon(
-              job?.state == AiJobState.done
-                  ? Icons.check_circle_outline
-                  : Icons.hourglass_empty,
-              size: 14,
-            ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              text,
-              style: Theme.of(context).textTheme.bodySmall,
-              overflow: TextOverflow.ellipsis,
-            ),
+    final snap = ProgressSnapshot.fromJson(aiContent(message));
+    final live = working && snap != null;
+    // Only the newest line moves (older ones are history).
+    _ticking(live && widget.latest);
+    final now = DateTime.now();
+    final pct = live ? snap.percentAt(now) : null;
+    final text = live
+        ? [
+            snap.label,
+            if (snap.detail != null && snap.detail!.isNotEmpty) snap.detail!,
+            '${pct!.floor()}%',
+            _clock(now.difference(snap.started)),
+          ].join(' · ')
+        : (message.body.isNotEmpty ? message.body : (job?.stage ?? ''));
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (working)
+          const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        else
+          Icon(
+            job?.state == AiJobState.done
+                ? Icons.check_circle_outline
+                : Icons.hourglass_empty,
+            size: 14,
           ),
-        ],
-      ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+    return Padding(
+      key: ValueKey(widget.latest ? 'ai-status-line' : 'ai-status-line-${message.id}'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: pct == null
+          ? row
+          : ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  row,
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      key: const ValueKey('ai-status-bar'),
+                      value: (pct / 100).clamp(0.0, 1.0),
+                      minHeight: 3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }

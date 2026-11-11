@@ -51,6 +51,47 @@ void main() {
     llmServer.enqueueJson({'items': picks});
   }
 
+  test('each model call is a step of the status line with a growing %; times are learned', () async {
+    await env.init(llm: llmClient());
+    await chicken();
+    translateAndPick(
+      [
+        {'n': 1, 'pick': 'c1', 'group': 'none', 'name': '', 'confidence': 0.9},
+        {'n': 2, 'pick': 'new', 'group': 'g1', 'name': 'Чорнослив', 'confidence': 0.8},
+      ],
+      ['Курка (філе)', 'Чорнослив'],
+    );
+    late String jobId;
+    final seen = <Map<String, dynamic>>[];
+    Future<void> grab() async {
+      final m = (await env.message(jobId, AiMessageKind.status))!;
+      seen.add({...jsonDecode(m.contentJson) as Map<String, dynamic>, 'body': m.body});
+    }
+
+    env.extractor.onExtract = grab;
+    llmServer.onChat = grab;
+    jobId = await env.sendReceipt(
+      receiptOf([
+        rl('BANVIT FILETO', 278.85, qty: 0.845, unit: 'kg', unitPrice: 330),
+        rl('TADIM ERIK KURUSU', 105.00, grams: 400),
+      ]),
+    );
+    await env.drain();
+
+    expect([for (final s in seen) s['step']], ['ocr', 'translate', 'categories']);
+    expect(seen.first['v'], 2);
+    expect(seen.first['body'], 'Reading the photo (OCR) · 0%');
+    expect(seen.last['body'], startsWith('Matching categories · '));
+    for (var i = 1; i < seen.length; i++) {
+      expect(seen[i]['pct_from'] as num, greaterThanOrEqualTo(seen[i - 1]['pct_to'] as num));
+    }
+    // The run ended: the status is plain again, the step times are kept.
+    final last = (await env.message(jobId, AiMessageKind.status))!;
+    expect(jsonDecode(last.contentJson)['v'], 1);
+    final timings = jsonDecode(await env.settings.get(AiSettingKey.stepTimings)) as Map;
+    expect(timings.keys, containsAll(['ocr', 'lines', 'translate', 'categories', 'checks']));
+  });
+
   test('translated, pre-filled with a suggestion and a new leaf: no questions', () async {
     await env.init(llm: llmClient());
     final chickenId = await chicken();

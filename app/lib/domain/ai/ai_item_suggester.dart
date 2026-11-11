@@ -10,6 +10,7 @@ library;
 import '../../data/ai/llm_client.dart';
 import '../../data/database.dart';
 import 'category_resolver.dart';
+import 'job_progress.dart';
 import 'model_prompts.dart';
 import 'tr_glossary.dart';
 
@@ -92,15 +93,19 @@ class ItemSuggester {
     required List<({int index, String printed})> items,
     required List<BudgetCategory> cats,
     String? merchant,
+    StepReporter? onStep,
+    bool translate = true,
   }) async {
     lastError = null;
     if (items.isEmpty) return const {};
 
     // 1. One call: printed names -> Ukrainian names. A name already written in
     // Cyrillic (a typed message) is the user's own word and is never translated.
+    // Names that are names (a merchant read on a bank screenshot) are kept.
     final foreign = [
-      for (var i = 0; i < items.length; i++)
-        if (!_cyrillic.hasMatch(items[i].printed)) i,
+      if (translate)
+        for (var i = 0; i < items.length; i++)
+          if (!_cyrillic.hasMatch(items[i].printed)) i,
     ];
     final ua = <int, String>{};
     // What the code-side glossary knows is never asked of the model: a 3B model
@@ -116,6 +121,7 @@ class ItemSuggester {
     }
     if (unknown.isNotEmpty) {
       try {
+        await onStep?.call(JobSteps.translate, units: unknown.length);
         final reply = await llm.runPrompt(
           translateItemsPrompt(
             items: [for (final i in unknown) (n: i + 1, name: items[i].printed)],
@@ -193,6 +199,12 @@ class ItemSuggester {
     final picks = <int, CategorySuggestion>{};
     for (var s = 0; s < decide.length; s += chunk) {
       final part = decide.sublist(s, (s + chunk).clamp(0, decide.length));
+      await onStep?.call(
+        JobSteps.categories,
+        done: s ~/ chunk,
+        total: (decide.length + chunk - 1) ~/ chunk,
+        units: part.length,
+      );
       try {
         final r = await llm.runPrompt(
           suggestCategoriesPrompt(items: part, groups: groups, merchant: merchant),

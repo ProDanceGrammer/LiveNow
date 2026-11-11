@@ -17,6 +17,7 @@ import 'action_matcher.dart';
 import 'ai_alias_db_source.dart';
 import 'ai_draft.dart';
 import 'ai_item_suggester.dart';
+import 'job_progress.dart';
 import 'ai_protocol.dart';
 import 'alias_source.dart';
 import 'receipt_memory.dart';
@@ -143,6 +144,12 @@ class _Ctx {
   /// A typed message that says income / spending: a category of the other kind
   /// is held for Confirm instead of being written. Null for photos.
   bool? wantIncome;
+
+  /// One payment read on a bank screenshot: an amount, no pack or weight.
+  bool payment = false;
+
+  /// That payment's line is named by the user's message (not the merchant).
+  bool named = false;
   final _fx = <String, ReceiptFx>{};
 
   BudgetAccount? account(String? id) {
@@ -287,7 +294,27 @@ class DraftBuilder {
     required Map<String, dynamic> overrides,
     required DateTime messageTime,
     DraftCard? previous,
+    StepReporter? onStep,
   }) async {
+    _onStep = onStep;
+    try {
+      return await _build(job, kind, source, overrides, messageTime, previous);
+    } finally {
+      _onStep = null;
+    }
+  }
+
+  /// Told before each model call of the [build] in progress (the status line).
+  StepReporter? _onStep;
+
+  Future<DraftBuild> _build(
+    AiJob job,
+    String kind,
+    Map<String, dynamic> source,
+    Map<String, dynamic> overrides,
+    DateTime messageTime,
+    DraftCard? previous,
+  ) async {
     final accounts = await db.select(db.budgetAccountsTable).get();
     if (accounts.isEmpty) {
       throw const AiJobFailure('Немає жодного рахунку в бюджеті: створіть рахунок.');
@@ -331,6 +358,8 @@ class DraftBuilder {
       overrides: overrides,
     );
     ctx.snacksId = await planner.findSnacksCategory();
+    ctx.payment = source['payment'] == true;
+    ctx.named = ctx.payment && source['named'] == true;
     if (typed != null) {
       ctx.wantIncome = typed['income'] == true;
       if (typed['unparsed'] is List) {
@@ -362,6 +391,12 @@ class DraftBuilder {
     if (at == null) {
       at = messageTime.toUtc();
       if (typed == null) ctx.notes.add('Час чека не прочитано: взято час повідомлення.');
+    } else if (forcedAt == null && ctx.payment) {
+      // A screenshot-only purchase takes its day from the screenshot.
+      final shot = overrides['screenshot'];
+      if (shot is Map && shot['day_guessed'] == true) {
+        ctx.notes.add('День на скріншоті не прочитано: перевірте дату.');
+      }
     }
 
     // Lines.
@@ -390,12 +425,25 @@ class DraftBuilder {
     };
     final mineLast4 = overrides['mine_last4']?.toString();
     final myLast4 = {...known4, ?mineLast4};
+    // The tender the user picked in the "which payment" question, and the shop
+    // amount of a bank screenshot sent with the receipt (it names the tender).
+    final mineTender = (overrides['mine_tender'] as num?)?.toInt();
+    final shot = overrides['screenshot'];
+    final shopAmount = shot is Map ? (shot['count'] as num?)?.toDouble() : null;
     var mineIdx = List<int>.generate(parsed.lines.length, (i) => i);
     double? expected = ex.total;
     Tender? mine;
     if (ex.tenders.isNotEmpty) {
-      final split = splitTenders(lineNets: nets, tenders: ex.tenders, myLast4: myLast4);
-      mine = pickMyTender(ex.tenders, myLast4: myLast4);
+      final split = splitTenders(
+        lineNets: nets,
+        tenders: ex.tenders,
+        myLast4: myLast4,
+        amountHint: shopAmount,
+        mineIndex: mineTender,
+      );
+      mine = mineTender != null && mineTender >= 0 && mineTender < ex.tenders.length
+          ? ex.tenders[mineTender]
+          : pickMyTender(ex.tenders, myLast4: myLast4, amountHint: shopAmount);
       switch (split.status) {
         case SplitStatus.allMine:
           expected = split.myAmount ?? ex.total;
@@ -425,13 +473,21 @@ class DraftBuilder {
         case SplitStatus.unknownTender:
           expected = null;
           ctx.blockers.add('mine');
+          // An answer that matched no tender is said back, so the card is
+          // never the identical question again.
+          final miss = overrides['mine_miss']?.toString();
           ctx.questions.add(
             Question(
               id: 'mine',
-              text: 'На чеку кілька оплат. Яка з них ваша?',
+              text: miss == null
+                  ? 'На чеку кілька оплат. Яка з них ваша?'
+                  : 'Не знайшов оплату «$miss». На чеку кілька оплат: виберіть вашу зі списку.',
               options: [
                 for (final t in ex.tenders)
                   '•••• ${t.last4 ?? '?'} — ${t.amount == null ? '?' : fmtMoney(t.amount!)}',
+              ],
+              optionIds: [
+                for (var i = 0; i < ex.tenders.length; i++) 'tender:$i',
               ],
             ),
           );
@@ -473,11 +529,13 @@ class DraftBuilder {
           p.net <= 0) {
         continue;
       }
-      if (!(await _lookup(ctx, p.name)).decided) {
+      if (await _namedGroup(ctx, p.name) == null && !(await _lookup(ctx, p.name)).decided) {
         wanted.add((index: i, printed: _stripStars(p.name)));
       }
     }
-    if (wanted.isNotEmpty) await _suggestLines(ctx, wanted);
+    if (wanted.isNotEmpty) {
+      await _suggestLines(ctx, wanted, translate: source['keep_names'] != true);
+    }
 
     final firstOf = <String, DraftLine>{};
     for (final i in mineIdx) {
@@ -998,13 +1056,19 @@ class DraftBuilder {
       // flagged as an estimate.
       final usual = chosen.price ?? 0;
       if (line.quantity == null &&
-          ctx.wantIncome != null &&
+          (ctx.wantIncome != null || ctx.payment) &&
           unit == BudgetUnit.kilogram &&
           usual > 0 &&
           line.amount > 0) {
         line.quantity = line.amount / usual;
         line.unitPrice = usual;
         line.flags = [...line.flags, kFlagWeightGuess];
+        unknownWeight = false;
+      } else if (line.quantity == null && ctx.payment && line.amount > 0) {
+        // A bank payment of something sold by the piece (or with no usual
+        // price): one of it, at the amount paid.
+        line.quantity = 1;
+        line.unitPrice = line.amount;
         unknownWeight = false;
       }
     }
@@ -1090,6 +1154,9 @@ class DraftBuilder {
       }
       return forced;
     }
+
+    final named = await _namedGroup(ctx, line.name);
+    if (named != null) return _askInGroup(ctx, line, named);
 
     final look = await _lookup(ctx, line.name);
     if (look.decided) return look.pick;
@@ -1223,6 +1290,58 @@ class DraftBuilder {
   /// How many related categories one question lists.
   static const int kMaxOffered = 8;
 
+  /// How many subcategories a "which one in this group" question lists.
+  static const int kMaxInGroup = 15;
+
+  /// The user's message names a GROUP of categories for a bank payment
+  /// ("кафе і ресторани" over Кафе / Ресторани): that group, else null. A
+  /// clearly best match only; a leaf or a same-name wrapper is not a group.
+  Future<BudgetCategory?> _namedGroup(_Ctx ctx, String name) async {
+    if (!ctx.named) return null;
+    final r = await resolver.resolve(name, limit: 3);
+    final top = r.candidates.firstOrNull;
+    if (top == null || top.fromAlias || !top.isAggregate || top.score < 0.8) return null;
+    final c = ctx.byId[top.id];
+    return c == null || ctx.isWrapper(c) ? null : c;
+  }
+
+  /// The user named [group]: always asked which of its subcategories (no
+  /// model, no memory: the same words may mean another one next time).
+  BudgetCategory? _askInGroup(_Ctx ctx, DraftLine line, BudgetCategory group) {
+    final leaves = <BudgetCategory>[];
+    final todo = [group.id];
+    while (todo.isNotEmpty && leaves.length < kMaxInGroup) {
+      final p = todo.removeAt(0);
+      for (final c in ctx.cats.where((c) => c.parentId == p).toList()
+        ..sort((a, b) => a.name.compareTo(b.name))) {
+        if (ctx.parents.contains(c.id) && !ctx.isWrapper(c)) {
+          todo.add(c.id);
+        } else {
+          leaves.add(c);
+        }
+      }
+    }
+    final inGroup = ctx.overrides['in_group'] is Map
+        ? Map<String, dynamic>.from(ctx.overrides['in_group'] as Map)
+        : <String, dynamic>{};
+    inGroup['${line.index}'] = group.id;
+    ctx.overrides['in_group'] = inGroup;
+    line.candidates = [for (final c in leaves.take(kMaxInGroup)) _choiceOfCategory(ctx, c)];
+    final create = createOptionLabel(line.displayName, group.name);
+    line.questionIds = [...line.questionIds, 'cat:${line.index}'];
+    ctx.questions.add(
+      Question(
+        id: 'cat:${line.index}',
+        text: 'Яка категорія з «${group.name}» для «${line.displayName}» '
+            '(${fmtMoney(line.amount)} ${ctx.currency})?',
+        options: [for (final c in line.candidates) c.label, create],
+        optionIds: [for (final c in line.candidates) c.id, 'create:${group.id}'],
+        recommended: null,
+      ),
+    );
+    return null;
+  }
+
   DraftChoice _choiceOf(_Ctx ctx, CategoryCandidate c) {
     final prices = <double>{
       for (final v in c.variants)
@@ -1296,8 +1415,9 @@ class DraftBuilder {
   /// questions without waiting for it on every rebuild.
   Future<void> _suggestLines(
     _Ctx ctx,
-    List<({int index, String printed})> wanted,
-  ) async {
+    List<({int index, String printed})> wanted, {
+    bool translate = true,
+  }) async {
     final cached = ctx.overrides['suggest'];
     if (cached is Map) {
       cached.forEach((k, v) {
@@ -1320,6 +1440,8 @@ class DraftBuilder {
         items: todo,
         cats: ctx.cats,
         merchant: ctx.merchant,
+        onStep: _onStep,
+        translate: translate,
       );
       ctx.suggestions.addAll(got);
       ctx.overrides['suggest'] = {
@@ -1353,6 +1475,7 @@ class DraftBuilder {
         CandidateCategory(id: c.id, name: c.name, hint: c.parentName),
     ];
     try {
+      await _onStep?.call(JobSteps.choice);
       final reply = await client.runPrompt(
         candidateChoicePrompt(itemText: line.raw, candidates: options, merchant: ctx.merchant),
       );

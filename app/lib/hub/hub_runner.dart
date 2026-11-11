@@ -14,7 +14,7 @@ import 'ai_admin_routes.dart';
 import 'ai_hub_reads.dart';
 import 'ai_photo_store.dart';
 import 'ai_worker.dart';
-import 'ocr_launcher.dart';
+import 'ai_service_launcher.dart';
 
 /// The file the hub writes its one-time local pairing text to, until the
 /// desktop window has connected.
@@ -115,11 +115,13 @@ class HubRunner {
       hosts: hosts ?? localAddresses,
     );
     admin.extraRoutes = AiAdminRoutes(db).handle;
+    final launcher = AiServiceLauncher(log: log.write);
     aiWorker = AiWorker(
       db: db,
       photos: photos,
       log: log.write,
-      ensureOcr: OcrLauncher(log: log.write).ensureRunning,
+      ensureOcr: launcher.ensureOcr,
+      ensureModel: launcher.ensureModel,
     );
     // Throws a SocketException when the port is taken (another hub runs).
     await server.start(port: port);

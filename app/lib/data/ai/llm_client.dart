@@ -65,7 +65,10 @@ class LlmClient {
     this.maxResponseBytes = 8 * 1024 * 1024,
     this.defaultTemperature = 0.1,
     this.extraBody = const {},
-  }) : baseUrl = _normalizeBase(baseUrl);
+    this.deadline,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now,
+       baseUrl = _normalizeBase(baseUrl);
 
   /// Server root without a trailing slash or `/v1`.
   final String baseUrl;
@@ -85,6 +88,12 @@ class LlmClient {
 
   /// Merged into every request body (server-specific fields).
   final Map<String, Object?> extraBody;
+
+  /// When set, every request ends by then (its timeout is cut to the time
+  /// left; none left = [AiTimeoutException] without sending): the hub's limit
+  /// for one processing run of a job.
+  final DateTime? deadline;
+  final DateTime Function() _clock;
 
   static String _normalizeBase(String url) {
     var u = url.trim();
@@ -243,12 +252,21 @@ class LlmClient {
     var delay = retryBaseDelay;
     for (var attempt = 0; ; attempt++) {
       try {
+        var timeout = requestTimeout;
+        final end = deadline;
+        if (end != null) {
+          final left = end.difference(_clock());
+          if (left <= Duration.zero) {
+            throw const AiTimeoutException('the processing time limit is used up');
+          }
+          if (left < timeout) timeout = left;
+        }
         final r = await aiHttpSend(
           'POST',
           uri,
           body: body,
           headers: _headers,
-          timeout: requestTimeout,
+          timeout: timeout,
           maxBytes: maxResponseBytes,
           cancel: cancel,
         );

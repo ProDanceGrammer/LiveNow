@@ -89,7 +89,7 @@ abstract final class AiJobKind {
   /// Jobs that make a draft / record a batch of transactions. A text job counts
   /// too: a purchase told in words makes a draft (transfers finish at once).
   static bool recordsBatch(String kind) =>
-      kind == receipt || kind == bazaar || kind == photos || kind == text;
+      kind == receipt || kind == bazaar || kind == photos || kind == text || kind == screenshot;
 }
 
 /// Stage strings the worker writes to `ai_jobs.stage` and the status message.
@@ -328,4 +328,7 @@ abstract final class AiSettingKey {
   /// How many receipts were already confirmed (drives the switch above).
   static const confirmedCount = 'confirmed_count';
   static const photoRetentionDays = 'photo_retention_days';
+
+  /// How long the job steps take on this hub (JSON of learned factors).
+  static const stepTimings = 'step_timings';
 }

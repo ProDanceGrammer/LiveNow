@@ -1,3 +1,4 @@
+import 'ai_transfer_text.dart' show parseAmountText;
 import 'extracted_receipt.dart' show Tender;
 
 // Sum verifier (spec I2) and tender splitter (A6). Pure. A mismatch is
@@ -84,17 +85,48 @@ Tender? pickMyTender(
   return null;
 }
 
+/// The tender an answer to "which payment is yours" names (an index into
+/// [tenders]): one whose amount equals a number in it (to the cent), else one
+/// whose card last-4 is a 4-digit group in it. Null when none matches. An
+/// amount comes first: "•••• ? — 2048.41" has no card digits, and its "2048"
+/// is not a card.
+int? tenderFromAnswer(List<Tender> tenders, String answer) {
+  final cents = {
+    for (final m in RegExp(r'\d[\d\s.,]*\d|\d').allMatches(answer))
+      if (parseAmountText(m.group(0)!) case final v?) _cents(v),
+  };
+  for (var i = 0; i < tenders.length; i++) {
+    final a = tenders[i].amount;
+    if (a != null && cents.contains(_cents(a))) return i;
+  }
+  final groups = {
+    for (final m in RegExp(r'(?<!\d)\d{4}(?!\d)').allMatches(answer)) m.group(0)!,
+  };
+  for (var i = 0; i < tenders.length; i++) {
+    final l4 = tenders[i].last4;
+    if (l4 != null && groups.contains(l4)) return i;
+  }
+  return null;
+}
+
 /// A6: finds which lines belong to the user's tender by subset-sum over the
 /// line nets (in cents). [lineNets] are the lines of the whole receipt.
+/// [mineIndex] is the tender the user picked (it wins over every other hint);
+/// a picked tender without a readable amount takes every line, so the
+/// question is never asked again.
 TenderSplit splitTenders({
   required List<double> lineNets,
   required List<Tender> tenders,
   Set<String> myLast4 = const {},
   double? amountHint,
+  int? mineIndex,
 }) {
   final all = List<int>.generate(lineNets.length, (i) => i);
-  final mine = pickMyTender(tenders, myLast4: myLast4, amountHint: amountHint);
-  if (tenders.length <= 1) {
+  final picked = mineIndex != null && mineIndex >= 0 && mineIndex < tenders.length
+      ? tenders[mineIndex]
+      : null;
+  final mine = picked ?? pickMyTender(tenders, myLast4: myLast4, amountHint: amountHint);
+  if (tenders.length <= 1 || (picked != null && picked.amount == null)) {
     return TenderSplit(SplitStatus.allMine, all, const [], myAmount: mine?.amount);
   }
   final amount = mine?.amount;

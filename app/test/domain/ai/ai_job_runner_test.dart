@@ -1,20 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
 import 'package:livenow/data/ai/llm_client.dart';
 import 'package:livenow/data/ai/ocr_client.dart';
+import 'package:livenow/domain/ai/ai_job_runner.dart' show kModelProcessingLimit;
 import 'package:livenow/data/ai/receipt_extractors.dart';
 import 'package:livenow/domain/ai/ai_batch_service.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
 import 'package:livenow/domain/ai/extracted_receipt.dart';
 import 'package:livenow/domain/ai/receipt_extractor.dart';
-import 'package:livenow/domain/ai/service_waits.dart';
+import 'package:livenow/domain/budget_rules.dart' show BudgetUnit;
 import 'package:livenow/domain/postpone_rules.dart';
 
 import '../../data/ai/mock_llm_server.dart';
 import 'ai_runner_support.dart';
+import 'ai_test_support.dart' show Seed;
 
 /// E1 (BIM, card 6141): five lines, 391.50 TRY.
 List<ReceiptLine> e1Lines() => [
@@ -418,6 +421,83 @@ void main() {
         txs.fold(0.0, (a, t) => a + t.unitPrice * t.quantity),
         closeTo(195.45, 0.02),
       );
+    });
+
+    // Bug 2026-11-10: two payments without card digits; answering "which one is
+    // yours" asked the same question again forever (its amount's first 4
+    // digits were taken as a card number).
+    for (final typed in [false, true]) {
+      test('E2: the "which payment" answer is taken (${typed ? 'option text, no id' : 'tapped option'})', () async {
+        await env.init(autoMode: true);
+        await bazaarAction();
+        await env.aliases.remember('PEYNIR 400G', categoryId: env.bread);
+        await env.aliases.remember('ZEYTIN 500G', categoryId: env.salami);
+        final jobId = await env.sendReceipt(
+          receiptOf(
+            [
+              rl('PEYNIR 400G', 99.95),
+              rl('ZEYTIN 500G', 95.50),
+              rl('SAKIZ A', 25.00),
+              rl('SAKIZ B', 25.00),
+              rl('MAKARNA 500G', 99.00),
+            ],
+            total: 344.45,
+            tenders: const [
+              Tender(method: 'card', amount: 149.00),
+              Tender(method: 'card', amount: 195.45),
+            ],
+          ),
+        );
+        await env.drain();
+        expect((await env.job(jobId)).state, AiJobState.needsInput);
+        final q = (await env.message(jobId, AiMessageKind.question))!;
+        final asked = QuestionCard.fromJson(jsonDecode(q.contentJson) as Map<String, dynamic>)
+            .questions
+            .singleWhere((x) => x.id == 'mine');
+        expect(asked.optionIds, ['tender:0', 'tender:1']);
+        await env.chat.answerQuestion(
+          q.id,
+          'mine',
+          asked.options[1],
+          optionId: typed ? null : asked.optionIds[1],
+        );
+        await env.drain();
+        final again = await env.message(jobId, AiMessageKind.question);
+        final ids = again == null
+            ? const <String>[]
+            : [
+                for (final x in QuestionCard.fromJson(jsonDecode(again.contentJson) as Map<String, dynamic>).questions)
+                  x.id,
+              ];
+        expect(ids, isNot(contains('mine')));
+        final d = await env.draft(jobId);
+        expect([for (final l in d.lines) l['i']], [0, 1]);
+        expect(d.sum['expected'], 195.45);
+      });
+    }
+
+    test('E2: a "which payment" answer that names no payment says so on the next card', () async {
+      await env.init(autoMode: true);
+      await bazaarAction();
+      final jobId = await env.sendReceipt(
+        receiptOf(
+          [rl('PEYNIR 400G', 99.95), rl('SAKIZ A', 25.00)],
+          total: 124.95,
+          tenders: const [
+            Tender(method: 'card', amount: 25.00),
+            Tender(method: 'card', amount: 99.95),
+          ],
+        ),
+      );
+      await env.drain();
+      final q = (await env.message(jobId, AiMessageKind.question))!;
+      await env.chat.answerQuestion(q.id, 'mine', '2048');
+      await env.drain();
+      final next = (await env.message(jobId, AiMessageKind.question))!;
+      final mine = QuestionCard.fromJson(jsonDecode(next.contentJson) as Map<String, dynamic>)
+          .questions
+          .singleWhere((x) => x.id == 'mine');
+      expect(mine.text, contains('Не знайшов оплату «2048»'));
     });
 
     test('E3: a changed price creates the wrapper; the batch undoes it as a whole', () async {
@@ -1076,7 +1156,26 @@ void main() {
       final parent = await env.sendPhotos([2, 4]);
       await env.drain();
       expect((await env.job(parent)).state, AiJobState.done);
-      expect(await env.count('ai_jobs', "kind = 'screenshot' AND state = 'done'"), 2);
+      // No receipt was recorded: each one is a purchase draft of its own.
+      expect(await env.count('ai_jobs', "kind = 'screenshot' AND state IN ('needs_input', 'draft_ready')"), 2);
+    });
+
+    test('bug 2026-11-10: the message names screenshots by their sums', () async {
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = (bytes) => bytes.first == 2
+          ? ocrReply(['MIGROS', 'Сума 100,00 ₴', 'У валюті 110,00 TL', 'курс 0,9091'])
+          : ocrReply(['BITAKSI', 'Сума 200,00 ₴', 'У валюті 220,00 TL', 'курс 0,9091']);
+      await env.sendPhotos([2, 4], caption: 'таксі 220, вода 110');
+      await env.drain();
+      final kids = await (env.db.select(env.db.aiJobsTable)
+            ..where((t) => t.kind.equals(AiJobKind.screenshot))
+            ..orderBy([(t) => OrderingTerm(expression: t.id)]))
+          .get();
+      expect(kids, hasLength(2));
+      final names = {
+        for (final k in kids) (await env.draft(k.id)).lines.single['amount']: (await env.draft(k.id)).lines.single['name'],
+      };
+      expect(names, {110.0: 'вода', 220.0: 'таксі'});
     });
 
     test('without an OCR service every photo is read as a receipt', () async {
@@ -1140,87 +1239,214 @@ void main() {
       }
     });
 
-    test('a screenshot with no matching receipt says so and changes nothing', () async {
+    // Bug 2026-11-10 (img_1): a screenshot alone got "Спочатку надішліть чек".
+    test('a screenshot with no recorded receipt is a purchase draft of its merchant', () async {
       await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
-      ocrServer.reply = ocrReply(['Сума 100,00 ₴', 'У валюті 110,00 TL', 'курс 0,9091']);
+      await env.aliases.remember('MIGROS KONYAALTI', categoryId: env.water);
+      await env.rules.set('card.default', {'account_id': env.monoAcc});
+      ocrServer.reply = ocrReply([
+        'MIGROS KONYAALTI',
+        '9 листопада 2026, 18:05',
+        'Сума 100,00 ₴',
+        'У валюті 110,00 TL',
+        'курс 0,9091',
+      ]);
       final shot = await env.sendScreenshot();
       await env.drain();
-      expect((await env.job(shot)).state, AiJobState.done);
-      expect((await env.message(shot, AiMessageKind.text))!.body, contains('Не знайшов'));
-      expect(await env.count('ai_batches'), 0);
+      expect((await env.job(shot)).state, AiJobState.draftReady);
+      expect(await env.message(shot, AiMessageKind.text), isNull);
+      final line = (await env.draft(shot)).lines.single;
+      expect(line['name'], 'MIGROS KONYAALTI');
+      expect(line['amount'], 110.0);
+      expect(line['category_id'], env.water);
+      await env.confirm(shot);
+      final tx = (await env.transactions()).single;
+      expect(tx.accountCountId, env.tryAcc);
+      expect(tx.accountUseId, env.monoAcc);
+      expect(tx.rateInteract, closeTo(36 * 100 / 110, 1e-3));
+      expect(tx.occurredAt, startsWith('2026-11-09'));
+    });
+
+    // Bug 2026-11-10 img_2: "кафе і ресторани. 150 лір - сувеніри" over five
+    // screenshots: the 150 TL one is souvenirs, the rest restaurants.
+    test('the message names a category group: asked inside it, never guessed', () async {
+      final llmServer = await MockLlmServer.start();
+      addTearDown(llmServer.close);
+      await env.init(
+        ocr: OcrClient(baseUrl: ocrServer.url),
+        llm: LlmClient(baseUrl: llmServer.url, model: 'm', maxRetries: 0, retryBaseDelay: Duration.zero),
+      );
+      await env.rules.set('card.default', {'account_id': env.monoAcc});
+      final seed = Seed(env.db);
+      final cafes = await seed.group('🍽 Кафе та ресторани');
+      final cafe = await seed.leaf('Кафе', price: 1, parentId: cafes, unit: BudgetUnit.piece);
+      final rest = await seed.leaf('Ресторани', price: 1, parentId: cafes, unit: BudgetUnit.piece);
+      llmServer.enqueueJson({'items': <Object>[]}); // "сувеніри": the model is asked
+      ocrServer.replyFor = (bytes) => switch (bytes.first) {
+        2 => ocrReply(['Sunset Cafe', 'nmctonana2026,19:47', 'Сума 138,29 ₴', 'У валюті 150,00 TL', 'курс 0,9219']),
+        4 => ocrReply(['Sunset Cafe', 'Сума 1 262,93 ₴', 'У валюті 1 370,00 TL', 'курс 0,9219']),
+        _ => ocrReply(['Kebap Evi', 'Сума 737,52 ₴', 'У валюті 800,00 TL', 'курс 0,9219']),
+      };
+      await env.sendPhotos([2, 4, 6], caption: 'кафе і ресторани. 150 лір - сувеніри');
+      await env.drain();
+      final kids = await (env.db.select(env.db.aiJobsTable)
+            ..where((t) => t.kind.equals(AiJobKind.screenshot)))
+          .get();
+      expect(kids, hasLength(3));
+      final byAmount = <double, String>{};
+      for (final k in kids) {
+        byAmount[(await env.draft(k.id)).lines.single['amount'] as double] = k.id;
+      }
+      expect((await env.draft(byAmount[150.0]!)).lines.single['name'], 'сувеніри');
+      // Its date line lost the day: the time is read, the day must be checked.
+      final souvenirNotes = (await env.draft(byAmount[150.0]!)).notes.join(' ');
+      expect(souvenirNotes, contains('День на скріншоті не прочитано'));
+      expect(souvenirNotes, isNot(contains('Час чека не прочитано')));
+      expect((await env.draft(byAmount[800.0]!)).notes.join(' '), contains('Час чека не прочитано'));
+      expect(llmServer.chatRequests, hasLength(1), reason: 'only the souvenirs line goes to the model');
+      for (final amount in [1370.0, 800.0]) {
+        final job = byAmount[amount]!;
+        expect((await env.draft(job)).lines.single['name'], 'кафе і ресторани');
+        final q = (jsonDecode((await env.message(job, AiMessageKind.question))!.contentJson)['questions'] as List)
+            .single as Map;
+        expect(q['option_ids'], [cafe, rest, 'create:$cafes']);
+      }
+
+      // Picking Ресторани is not learned: the next "кафе і ресторани" asks again.
+      final job = byAmount[1370.0]!;
+      final qm = (await env.message(job, AiMessageKind.question))!;
+      await env.chat.answerQuestion(qm.id, 'cat:0', 'Ресторани', optionId: rest);
+      await env.drain();
+      expect((await env.draft(job)).lines.single['category_id'], rest);
+      await env.confirm(job);
+      final again = await env.sendPhotos([8], caption: 'кафе і ресторани');
+      await env.drain();
+      expect((await env.draft(again)).lines.single['category_id'], isNull);
+      expect(await env.message(again, AiMessageKind.question), isNotNull);
+    });
+
+    test('the message names the purchase; a confirmed merchant is remembered', () async {
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
+      await env.rules.set('card.default', {'account_id': env.monoAcc});
+      ocrServer.replyFor = (bytes) => bytes.first == 7
+          ? ocrReply(['KAHVE DUNYASI', 'Сума 109,09 ₴', 'У валюті 120,00 TL', 'курс 0,9091'])
+          : ocrReply(['KAHVE DUNYASI', 'Сума 100,00 ₴', 'У валюті 110,00 TL', 'курс 0,9091']);
+
+      // No caption, nothing known: the merchant's line asks for its category.
+      final first = await env.sendPhotos([3]);
+      await env.drain();
+      final d = await env.draft(first);
+      expect(d.lines.single['name'], 'KAHVE DUNYASI');
+      expect(d.lines.single['category_id'], isNull);
+      await env.chat.confirmDraft(d.messageId, edits: [LineEdit(index: 0, categoryId: env.snacks)]);
+      await env.drain();
+      expect(await env.count('budget_transactions'), 1);
+
+      // The same merchant again: the category comes from memory.
+      final second = await env.sendPhotos([5]);
+      await env.drain();
+      expect((await env.draft(second)).lines.single['category_id'], env.snacks);
+
+      // A caption wins over the merchant; naming a plain category picks it.
+      final coffee = await Seed(env.db).leaf('☕ Кава', price: 100, parentId: env.groupFood, unit: BudgetUnit.piece);
+      final third = await env.sendPhotos([7], caption: 'кава');
+      await env.drain();
+      final line = (await env.draft(third)).lines.single;
+      expect(line['name'], 'кава');
+      expect(line['category_id'], coffee);
+      expect(await env.message(third, AiMessageKind.question), isNull);
     });
   });
 
   // Bug 2026-11-09: the hub's OCR service was not running; the job burned its 3
   // attempts within seconds and failed for good, without a working Retry.
-  group('E. unreachable OCR service, Retry', () {
-    late DateTime now;
-    late ServiceWaits waits;
+  // 2026-11-10: a refused service is started by the hub and the step runs once
+  // more; if it cannot be started the job fails at once (no waiting), and only
+  // the model's own processing may take up to 3 h.
+  group('E. unreachable OCR service / model server, Retry', () {
+    const refused = AiUnreachableException('http://127.0.0.1:1/ocr: SocketException: refused');
 
     /// OCR "runs" on a closed port; the extractor reports it unreachable.
-    Future<void> initDown() async {
-      now = DateTime.utc(2026, 11, 9, 20);
-      waits = ServiceWaits(clock: () => now);
-      await env.init(ocr: OcrClient(baseUrl: 'http://127.0.0.1:1'), waits: waits);
-      env.extractor.error = const AiUnreachableException(
-        'http://127.0.0.1:1/ocr: SocketException: refused',
-      );
+    Future<void> initDown(Future<bool> Function({required bool ocr})? startService) async {
+      await env.init(ocr: OcrClient(baseUrl: 'http://127.0.0.1:1'), startService: startService);
+      env.extractor.error = refused;
     }
 
-    Future<void> tryOnce() async {
-      try {
-        await env.runner.runNext();
-      } on AiServiceWait {
-        // the worker backs off here
-      }
-    }
-
-    test('the job waits without spending attempts and runs once OCR is back', () async {
-      await initDown();
-      final jobId = await env.sendReceipt(receiptOf(e1Lines()));
-      for (var i = 0; i < 5; i++) {
-        await expectLater(
-          env.runner.runNext(),
-          throwsA(isA<AiServiceWait>().having((e) => e.ocr, 'ocr', isTrue)),
-        );
-        now = now.add(const Duration(minutes: 5));
-      }
-      final job = await env.job(jobId);
-      expect(job.state, AiJobState.queued);
-      expect(job.attempts, 0);
-      expect(job.error, contains('refused'));
-      expect(
-        (await env.message(jobId, AiMessageKind.status))!.body,
-        "Waiting for the hub's OCR service",
-      );
-      expect(await env.message(jobId, AiMessageKind.error), isNull);
-
-      env.extractor.error = null;
+    test('the hub starts the refused service and the same step runs once more, no attempt spent', () async {
+      final asked = <bool>[];
+      final shown = <String>[];
+      late String jobId;
+      await initDown(({required ocr}) async {
+        asked.add(ocr);
+        shown.add((await env.message(jobId, AiMessageKind.status))!.body);
+        env.extractor.error = null; // it is up now
+        return true;
+      });
+      jobId = await env.sendReceipt(receiptOf(e1Lines()));
       await env.drain();
+      expect(asked, [true], reason: 'the OCR service, once');
+      final job = await env.job(jobId);
+      expect(job.attempts, 0);
       expect(await env.message(jobId, AiMessageKind.draft), isNotNull);
       expect(await env.message(jobId, AiMessageKind.error), isNull);
+      expect(shown, [startsWith("Starting the hub's OCR service · ")]);
     });
 
-    test('fails with Retry after 3 h of the hub trying; a long gap counts as minutes', () async {
-      await initDown();
+    for (final how in ['cannot be started', 'no launcher', 'refused again after a start']) {
+      test('fails at once with Retry when the service $how', () async {
+        var starts = 0;
+        await initDown(switch (how) {
+          'no launcher' => null,
+          'cannot be started' => ({required ocr}) async {
+            starts++;
+            return false;
+          },
+          _ => ({required ocr}) async {
+            starts++;
+            return true; // "up", but the call is refused again
+          },
+        });
+        final jobId = await env.sendReceipt(receiptOf(e1Lines()));
+        await env.drain();
+        expect(starts, how == 'no launcher' ? 0 : 1);
+        final job = await env.job(jobId);
+        expect(job.state, AiJobState.failed);
+        expect(job.attempts, 0);
+        final err = (await env.message(jobId, AiMessageKind.error))!;
+        expect(err.body, contains('OCR'));
+        expect(err.body, contains('не зміг його запустити'));
+        expect(jsonDecode(err.contentJson)['retryable'], isTrue);
+      });
+    }
+
+    test('a model server that is refused is named as such', () async {
+      await env.init(ocr: OcrClient(baseUrl: 'http://127.0.0.1:1'));
+      env.extractor.error = const AiUnreachableException(
+        'http://127.0.0.1:11434/v1/chat/completions: SocketException: refused',
+      );
       final jobId = await env.sendReceipt(receiptOf(e1Lines()));
-      await tryOnce();
-      now = now.add(const Duration(hours: 10)); // PC asleep / hub off: counts 6 min
-      await tryOnce();
-      expect((await env.job(jobId)).state, AiJobState.queued);
-      var tries = 0;
-      while ((await env.job(jobId)).state == AiJobState.queued && tries++ < 100) {
-        now = now.add(const Duration(minutes: 5));
-        await tryOnce();
-      }
-      // 6 min + 35 x 5 min = 181 min: the 35th try crosses 3 h.
-      expect(tries, 35);
-      final job = await env.job(jobId);
+      await env.drain();
+      expect((await env.message(jobId, AiMessageKind.error))!.body, contains('Сервер моделі (Ollama)'));
+    });
+
+    test('a timeout after 3 h of processing fails at once; a shorter one costs an attempt', () async {
+      var now = DateTime.utc(2026, 11, 10, 1);
+      await env.init(clock: () => now);
+      final jobId = await env.sendReceipt(receiptOf(e1Lines()));
+      env.extractor.error = const AiTimeoutException('no complete reply within 600 s');
+      env.extractor.onExtract = () async => now = now.add(const Duration(minutes: 10));
+      expect(await env.runner.runNext(), isTrue);
+      var job = await env.job(jobId);
+      expect(job.state, AiJobState.queued);
+      expect(job.attempts, 1);
+
+      env.extractor.onExtract = () async => now = now.add(kModelProcessingLimit);
+      await env.drain();
+      job = await env.job(jobId);
       expect(job.state, AiJobState.failed);
-      expect(job.attempts, 0);
+      expect(job.attempts, 1, reason: 'failed by the limit, not by attempts');
       final err = (await env.message(jobId, AiMessageKind.error))!;
-      expect(err.body, contains('OCR'));
-      expect(err.body, contains('3 год'));
+      expect(err.body, contains('понад 3 год'));
       expect(jsonDecode(err.contentJson)['retryable'], isTrue);
     });
 

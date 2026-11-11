@@ -76,7 +76,7 @@ void main() {
     final a = await creator.create(
       name: bazaar,
       receiptUtc: at,
-      minutes: 30,
+      half: const Duration(minutes: 30),
       id: id,
     );
     final b = await creator.create(name: bazaar, receiptUtc: at, id: id);

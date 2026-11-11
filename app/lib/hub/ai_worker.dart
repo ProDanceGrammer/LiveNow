@@ -13,7 +13,6 @@ import '../data/database.dart';
 import '../domain/ai/ai_job_runner.dart';
 import '../domain/ai/ai_protocol.dart';
 import '../domain/ai/ai_settings_store.dart';
-import '../domain/ai/service_waits.dart';
 import 'ai_photo_store.dart';
 
 /// One unit of work: true when it did something (the shape of
@@ -43,6 +42,7 @@ class AiWorker {
     this.mergePoll = const Duration(milliseconds: 200),
     this.mergeWaitPolls = 300,
     this.ensureOcr,
+    this.ensureModel,
     void Function(String line)? log,
   }) : settings = AiSettingsStore(db),
        _log = log ?? ((_) {}) {
@@ -64,16 +64,11 @@ class AiWorker {
   final Duration mergePoll;
   final int mergeWaitPolls;
 
-  /// Starts the OCR service when it is down (the hub passes
-  /// `OcrLauncher.ensureRunning`); null = never start anything (tests).
+  /// Start the OCR service / the model server when they are down (the hub
+  /// passes `AiServiceLauncher.ensureOcr` / `ensureModel`); null = never start
+  /// anything (tests).
   final Future<bool> Function(String ocrUrl)? ensureOcr;
-
-  /// Waiting time of jobs for an unreachable service, shared by every runner
-  /// this worker builds. A gap longer than one back-off means the hub was not
-  /// trying, so it is capped.
-  late final ServiceWaits waits = ServiceWaits(
-    maxGap: backoffMax + const Duration(minutes: 1),
-  );
+  final Future<bool> Function(String modelUrl)? ensureModel;
   final void Function(String) _log;
 
   late final AiRunnerFactory _factory;
@@ -118,23 +113,23 @@ class AiWorker {
       purgeOrphanPhotos();
     });
     unawaited(purgeOldPhotos());
-    unawaited(_startOcrIfUsed());
+    unawaited(_startServicesIfUsed());
     wake();
   }
 
   /// The assistant is in use on this hub (it has jobs): make sure the OCR
-  /// service runs, as the logon task would.
-  Future<void> _startOcrIfUsed() async {
-    final ensure = ensureOcr;
-    if (ensure == null) return;
+  /// service and the model server run, as the logon task would.
+  Future<void> _startServicesIfUsed() async {
+    if (ensureOcr == null && ensureModel == null) return;
     try {
       final any = await db
           .customSelect('SELECT 1 FROM ai_jobs LIMIT 1')
           .getSingleOrNull();
       if (any == null || _stopped) return;
-      await ensure((await settings.load()).ocrUrl);
+      final s = await settings.load();
+      await Future.wait([?ensureOcr?.call(s.ocrUrl), ?ensureModel?.call(s.llmUrl)]);
     } on Object catch (e, st) {
-      await _report(e, st, 'AI worker: starting the OCR service');
+      await _report(e, st, 'AI worker: starting the AI services');
     }
   }
 
@@ -228,22 +223,6 @@ class AiWorker {
       }
       _failures = 0;
       _lastLogged = null;
-    } on AiServiceWait catch (e) {
-      // A job waits for the OCR service / model server: not an error of the
-      // hub. Start OCR (fire-and-forget: it may take a minute to load) and look
-      // again after a back-off.
-      final line = 'AI worker: waiting, $e';
-      if (line != _lastLogged) {
-        _lastLogged = line;
-        _log(line);
-      }
-      final ensure = ensureOcr;
-      if (e.ocr && ensure != null) {
-        unawaited(
-          settings.load().then((s) => ensure(s.ocrUrl)).catchError((_) => false),
-        );
-      }
-      _backOff();
     } on Object catch (e, st) {
       await _report(e, st, 'AI worker: running a job');
       _backOff();
@@ -288,7 +267,15 @@ class AiWorker {
 
   AiRunStep _productionRunner(AiSettingsSnapshot s) {
     final key = s.llmToken.isEmpty ? null : s.llmToken;
-    final llm = LlmClient(baseUrl: s.llmUrl, model: s.llmModel, apiKey: key);
+    // One step = one processing run: all its model calls share the limit.
+    final deadline = DateTime.now().add(kModelProcessingLimit);
+    final llm = LlmClient(
+      baseUrl: s.llmUrl,
+      model: s.llmModel,
+      apiKey: key,
+      requestTimeout: kModelProcessingLimit,
+      deadline: deadline,
+    );
     final ocr = OcrClient(baseUrl: s.ocrUrl);
     final vlm = s.visionModel.isEmpty
         ? null
@@ -297,6 +284,8 @@ class AiWorker {
               baseUrl: s.llmUrl,
               model: s.visionModel,
               apiKey: key,
+              requestTimeout: kModelProcessingLimit,
+              deadline: deadline,
             ),
           );
     return AiJobRunner(
@@ -309,7 +298,10 @@ class AiWorker {
       ocr: ocr,
       settings: settings,
       storeOriginal: photos.storeBlobFromRow,
-      waits: waits,
+      startService: ({required bool ocr}) async {
+        final ensure = ocr ? ensureOcr : ensureModel;
+        return ensure != null && await ensure(ocr ? s.ocrUrl : s.llmUrl);
+      },
     ).runNext;
   }
 }
