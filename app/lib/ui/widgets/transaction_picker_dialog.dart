@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -71,7 +72,7 @@ class _TransactionPickerDialogState
         height: 400,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('tx-pick-search'),
               decoration: const InputDecoration(labelText: 'Search'),
               onChanged: (v) => setState(() => _query = v.toLowerCase()),

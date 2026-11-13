@@ -359,6 +359,8 @@ void main() {
     });
     await step('Templates', () async {
       await tapText('Templates');
+      await tester.tap(find.byKey(const ValueKey('templates-search-toggle')));
+      await settle(tester, 400);
       await focusField(
         'Templates search',
         find.byKey(const ValueKey('templates-search')),

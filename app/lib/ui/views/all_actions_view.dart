@@ -13,6 +13,7 @@ import '../saved_view_hooks.dart';
 import '../saved_views_bar.dart' show SavedViewsDefaultLoader;
 import '../time_format.dart';
 import '../widgets/action_list_view.dart';
+import '../widgets/app_search_field.dart';
 import '../widgets/all_actions_options_panel.dart';
 import '../widgets/all_bulk_bar.dart';
 import 'all_marquee.dart';
@@ -178,26 +179,17 @@ class _AllActionsViewState extends ConsumerState<AllActionsView>
           child: Row(
             children: [
               Expanded(
-                child: TextField(
+                child: AppSearchField(
                   key: const ValueKey('allSearchField'),
+                  clearKey: const ValueKey('allSearchClear'),
                   controller: _controller,
                   focusNode: _searchFocus,
-                  onChanged: _onChanged,
-                  decoration: InputDecoration(
+                  // The X skips the debounce: the list is unfiltered at once.
+                  onChanged: (t) => t.isEmpty ? _clear() : _onChanged(t),
+                  decoration: const InputDecoration(
                     hintText: 'Search actions',
-                    prefixIcon: const Icon(Icons.search),
+                    prefixIcon: Icon(Icons.search),
                     isDense: true,
-                    suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: _controller,
-                      builder: (context, v, _) => v.text.isEmpty
-                          ? const SizedBox.shrink()
-                          : IconButton(
-                              key: const ValueKey('allSearchClear'),
-                              tooltip: 'Clear',
-                              icon: const Icon(Icons.close),
-                              onPressed: _clear,
-                            ),
-                    ),
                   ),
                 ),
               ),

@@ -64,8 +64,13 @@ void main() {
     matching: find.text(label),
   );
 
+  // The key sits on the search field widget; the TextField is inside it.
   bool focused(WidgetTester tester, String key) => tester
-      .widget<TextField>(find.byKey(ValueKey(key)))
+      .widget<TextField>(find.descendant(
+        of: find.byKey(ValueKey(key)),
+        matching: find.byType(TextField),
+        matchRoot: true,
+      ))
       .focusNode!
       .hasFocus;
 

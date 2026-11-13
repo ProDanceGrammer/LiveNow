@@ -1,4 +1,5 @@
 import '../shortcut_keys.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -20,9 +21,11 @@ import '../dialog_stack.dart';
 import '../open_entity.dart';
 import '../urgency_colors.dart';
 import '../widgets/action_tile.dart' show formatUrgency;
+import '../widgets/app_search_field.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/param_icons.dart';
 import '../providers.dart';
+import '../undo.dart';
 import '../saved_views_bar.dart';
 import '../../domain/saved_views.dart';
 import '../../domain/template_payload.dart';
@@ -121,9 +124,24 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
     return d;
   }
 
-  // Ctrl+F: focus the search field and select its text.
+  // The search works like the Current board's: hidden behind the search icon,
+  // and closing it (the icon again or the X) clears the filter.
+  bool _searchOpen = false;
+
+  void _toggleSearch() {
+    setState(() => _searchOpen = !_searchOpen);
+    if (!_searchOpen) {
+      _searchText.clear();
+      setState(() => _query = '');
+    }
+  }
+
+  // Ctrl+F: open the search field, focus it and select its text.
   @override
-  void openSearch() => focusSearchField(_searchFocus, _searchText);
+  void openSearch() {
+    if (!_searchOpen) setState(() => _searchOpen = true);
+    focusSearchField(_searchFocus, _searchText);
+  }
 
   @override
   void dispose() {
@@ -151,18 +169,31 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: Row(
               children: [
-                Expanded(
-                  child: TextField(
-                    key: const ValueKey('templates-search'),
-                    controller: _searchText,
-                    focusNode: _searchFocus,
-                    decoration: const InputDecoration(
-                      hintText: 'Search by name or direction',
-                      prefixIcon: Icon(Icons.search),
-                      isDense: true,
+                if (_searchOpen)
+                  Expanded(
+                    child: AppSearchField(
+                      key: const ValueKey('templates-search'),
+                      clearKey: const ValueKey('templates-search-close'),
+                      controller: _searchText,
+                      focusNode: _searchFocus,
+                      autofocus: true,
+                      decoration: const InputDecoration(
+                        hintText: 'Search by name or direction',
+                        prefixIcon: Icon(Icons.search),
+                        isDense: true,
+                      ),
+                      onChanged: (v) => setState(() => _query = v.toLowerCase()),
+                      onClose: _toggleSearch,
                     ),
-                    onChanged: (v) => setState(() => _query = v.toLowerCase()),
-                  ),
+                  )
+                else
+                  const Spacer(),
+                IconButton(
+                  key: const ValueKey('templates-search-toggle'),
+                  isSelected: _searchOpen,
+                  icon: Icon(_searchOpen ? Icons.search_off : Icons.search),
+                  tooltip: _searchOpen ? 'Close search' : 'Search templates',
+                  onPressed: _toggleSearch,
                 ),
                 IconButton(
                   key: const ValueKey('templates-options-toggle'),
@@ -904,6 +935,13 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
       actions: expanded
           ? const []
           : [
+              if (widget.existing != null)
+                TextButton.icon(
+                  key: const ValueKey('template-duplicate'),
+                  onPressed: _duplicate,
+                  icon: const Icon(Icons.copy_rounded),
+                  label: const Text('Duplicate'),
+                ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
                 child: const Text('Cancel'),
@@ -914,7 +952,39 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (await _write() && mounted) Navigator.of(context).pop();
+  }
+
+  /// Saves this template's edits, copies it ("name (copy)", Undo in a toast),
+  /// closes this editor and opens the copy's.
+  Future<void> _duplicate() async {
+    final source = widget.existing;
+    if (source == null) return;
+    final db = ref.read(databaseProvider);
+    if (!await _write() || !mounted) return;
+    final name = stripUnsafeText(_nameController.text).trim();
+    final copyId = await runUndoableDuplicateTemplate(
+      context,
+      ref,
+      id: source.id,
+      name: name,
+    );
+    if (copyId == null || !mounted) return;
+    final copy = await (db.select(
+      db.actionTemplatesTable,
+    )..where((t) => t.id.equals(copyId))).getSingleOrNull();
+    if (!mounted) return;
+    // The navigator this editor is on outlives it: the copy's editor opens there.
+    final nav = Navigator.of(context);
+    nav.pop();
+    if (copy != null && nav.mounted) {
+      unawaited(TemplatesScreen.showEditTemplate(nav.context, copy));
+    }
+  }
+
+  /// Validates and stores the form (insert or update); false when invalid.
+  Future<bool> _write() async {
+    if (!_formKey.currentState!.validate()) return false;
     final db = ref.read(databaseProvider);
     final name = stripUnsafeText(_nameController.text).trim();
 
@@ -942,7 +1012,6 @@ class _TemplateEditorDialogState extends ConsumerState<_TemplateEditorDialog>
             payload: Value(payload),
           ),
         );
-
-    if (mounted) Navigator.of(context).pop();
+    return true;
   }
 }

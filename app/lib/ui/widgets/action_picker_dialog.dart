@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -97,7 +98,7 @@ class _ActionPickerDialogState extends ConsumerState<ActionPickerDialog> {
         height: 400,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               decoration: const InputDecoration(labelText: 'Search'),
               onChanged: (v) => setState(() => _query = v.toLowerCase()),
             ),
@@ -206,7 +207,7 @@ class _TemplatePickerDialogState extends ConsumerState<TemplatePickerDialog> {
         height: 400,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('template-pick-search'),
               decoration: const InputDecoration(labelText: 'Search'),
               onChanged: (v) => setState(() => _query = v.toLowerCase()),

@@ -308,7 +308,10 @@ void main() {
     // The field shows what was typed on the other tab.
     expect(
       tester
-          .widget<TextField>(find.byKey(const ValueKey('growth-search')))
+          .widget<TextField>(find.descendant(
+            of: find.byKey(const ValueKey('growth-search')),
+            matching: find.byType(TextField),
+          ))
           .controller!
           .text,
       'brav',

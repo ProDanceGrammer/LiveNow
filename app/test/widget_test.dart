@@ -36,7 +36,7 @@ void main() {
       expect(find.text('Operational'), findsNothing);
       expect(find.text('TODO'), findsNothing);
       expect(find.text('Most Important'), findsNothing);
-      expect(find.text('All'), findsOneWidget); // third Actions tab
+      expect(find.text('All'), findsOneWidget); // fourth Actions tab
       expect(find.text('Growth directions'), findsOneWidget);
       expect(find.text('Templates'), findsOneWidget);
 

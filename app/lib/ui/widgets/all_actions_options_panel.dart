@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import '../saved_view_hooks.dart';
 import '../saved_views_bar.dart';
 import 'package:flutter/material.dart';
@@ -577,7 +578,7 @@ class _ActionFilterPickerDialogState
         height: 460,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               autofocus: true,
               decoration: const InputDecoration(
                 labelText: 'Search',

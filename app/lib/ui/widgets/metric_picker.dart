@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import '../../domain/search_match.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -251,7 +252,7 @@ class _MetricSearchDialogState extends State<_MetricSearchDialog> {
         height: 460,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               autofocus: true,
               decoration: const InputDecoration(
                 labelText: 'Search',

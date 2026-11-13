@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import '../search_targets.dart';
 import 'dart:async';
 
@@ -2163,8 +2164,9 @@ class _PlanItemsDialogState extends ConsumerState<PlanItemsDialog>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
+                    AppSearchField(
                       key: const ValueKey('plan-items-search'),
+                      clearKey: const ValueKey('plan-items-search-clear'),
                       controller: _searchText,
                       focusNode: _searchFocus,
                       decoration: const InputDecoration(

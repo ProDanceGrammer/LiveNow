@@ -481,6 +481,29 @@ Future<String> runUndoableDuplicateMetric(
   return copyId;
 }
 
+/// Duplicates a template and offers Undo, which deletes the copy again.
+/// Reads `ref`/`context` before the first await. Null when [id] is gone.
+Future<String?> runUndoableDuplicateTemplate(
+  BuildContext context,
+  WidgetRef ref, {
+  required String id,
+  required String name,
+}) async {
+  final service = ref.read(actionServiceProvider);
+  final overlay = rootOverlayOf(context);
+  final lastUndo = ref.read(undoHistoryProvider.notifier);
+
+  final copyId = await service.duplicateTemplate(id);
+  if (copyId == null) return null;
+  _offerUndo(
+    overlay,
+    lastUndo,
+    'Duplicated "$name"',
+    () => service.deleteTemplate(copyId),
+  );
+  return copyId;
+}
+
 /// Runs a Mindmap layout ([apply]) and offers Undo, which writes [previous]
 /// (the positions as stored before, nulls included) back. [afterUndo] lets the
 /// view refit itself; it may run after the view is gone, so it must check.

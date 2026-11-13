@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import '../search_targets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -94,8 +95,9 @@ class _GrowthFiltersBarState extends ConsumerState<GrowthFiltersBar>
     final phone = usePhoneLayout(context);
     return growthFilterFlow(phone, [
       Expanded(
-        child: TextField(
+        child: AppSearchField(
           key: const ValueKey('growth-search'),
+          clearKey: const ValueKey('growth-search-clear'),
           controller: _search,
           focusNode: _searchFocus,
           decoration: const InputDecoration(

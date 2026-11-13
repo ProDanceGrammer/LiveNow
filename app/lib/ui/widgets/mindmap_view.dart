@@ -27,6 +27,7 @@ import '../theme/glass_theme.dart';
 import '../touchpad.dart';
 import '../undo.dart';
 import '../urgency_colors.dart';
+import 'app_search_field.dart';
 import 'direction_menu.dart';
 import 'glass.dart';
 import 'growth_direction_dialog.dart';
@@ -467,22 +468,19 @@ class _MindmapViewState extends ConsumerState<MindmapView>
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 6, 4, 0),
-                child: TextField(
+                child: AppSearchField(
                   key: const ValueKey('mindmap-search-field'),
+                  clearKey: const ValueKey('mindmap-search-close'),
                   controller: _searchText,
                   focusNode: _searchFocus,
                   autofocus: true,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     hintText: 'Find a direction',
-                    prefixIcon: const Icon(Icons.search),
+                    prefixIcon: Icon(Icons.search),
                     isDense: true,
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.close),
-                      tooltip: 'Close search',
-                      onPressed: _toggleSearch,
-                    ),
                   ),
                   onChanged: (_) => setState(() {}),
+                  onClose: _toggleSearch,
                 ),
               ),
               if (_searchText.text.trim().isNotEmpty)

@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -330,7 +331,7 @@ class _CategoriesMultiPickerState extends State<_CategoriesMultiPicker> {
         height: 380,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('tx-categories-search'),
               decoration: const InputDecoration(
                 hintText: 'Search',
@@ -470,7 +471,7 @@ class _ActionsMultiPickerState extends State<_ActionsMultiPicker> {
         height: 380,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('tx-actions-search'),
               decoration: const InputDecoration(
                 hintText: 'Search',

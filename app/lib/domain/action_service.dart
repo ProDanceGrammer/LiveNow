@@ -1,4 +1,6 @@
 
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:timezone/timezone.dart' as tz;
 
@@ -1453,6 +1455,36 @@ class ActionService {
       return id;
     });
   }
+
+  /// Copies the template [id] as "name (copy)" with the same payload (its name
+  /// field renamed too). Returns the new id, or null when [id] does not exist.
+  /// Undo with [deleteTemplate].
+  Future<String?> duplicateTemplate(String id) async {
+    final src = await (db.select(db.actionTemplatesTable)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    if (src == null) return null;
+    const suffix = ' (copy)';
+    final runes = src.name.runes.toList();
+    final room = kMaxNameLength - suffix.length;
+    final base = runes.length > room ? String.fromCharCodes(runes.take(room)).trimRight() : src.name;
+    final name = '$base$suffix';
+    var payload = src.payload;
+    try {
+      final j = jsonDecode(payload);
+      if (j is Map) payload = jsonEncode({...j, 'name': name});
+    } on FormatException {
+      // Unreadable payload: copied as it is (the row's name still changes).
+    }
+    final copyId = newId();
+    await db.into(db.actionTemplatesTable).insert(
+          ActionTemplatesTableCompanion.insert(id: copyId, name: name, payload: payload),
+        );
+    return copyId;
+  }
+
+  /// Deletes the template [id] (Undo of [duplicateTemplate]).
+  Future<void> deleteTemplate(String id) =>
+      (db.delete(db.actionTemplatesTable)..where((t) => t.id.equals(id))).go();
 
   /// How long a template's action lasts: its manual minutes or the 30-day
   /// average of its finished runs - whichever the template's switch prefers,

@@ -174,6 +174,8 @@ void main() {
     tester,
   ) async {
     await pumpPhone(tester);
+    await tester.ensureVisible(find.text('Calendar'));
+    await tester.pump();
     await tester.tap(find.text('Calendar'));
     await settle(tester, 300);
     final container = ProviderScope.containerOf(
@@ -202,6 +204,8 @@ void main() {
     tester,
   ) async {
     await pumpPhone(tester);
+    await tester.ensureVisible(find.text('Calendar'));
+    await tester.pump();
     await tester.tap(find.text('Calendar'));
     await settle(tester, 300);
     expect(find.text('New action'), findsNothing);
@@ -217,6 +221,8 @@ void main() {
     tester,
   ) async {
     await pumpPhone(tester);
+    await tester.ensureVisible(find.text('Calendar'));
+    await tester.pump();
     await tester.tap(find.text('Calendar'));
     await settle(tester, 300);
     final grid = find.byType(SingleChildScrollView).last;

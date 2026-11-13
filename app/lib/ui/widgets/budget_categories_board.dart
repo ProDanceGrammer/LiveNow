@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import '../search_targets.dart';
 import 'dart:async';
 
@@ -344,8 +345,9 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard>
                   // levels) to give the list the room.
                   if (!toolbarHidden)
                     Expanded(
-                      child: TextField(
+                      child: AppSearchField(
                         key: const ValueKey('budget-categories-search'),
+                        clearKey: const ValueKey('budget-categories-search-clear'),
                         controller: _search,
                         focusNode: _searchFocus,
                         onChanged: _onSearch,

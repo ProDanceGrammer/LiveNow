@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_search_field.dart';
 import '../../data/database.dart';
 import '../../domain/ai/ai_draft.dart';
 import '../../domain/ai/category_resolver.dart';
@@ -140,7 +141,7 @@ class _ChooserState extends ConsumerState<_Chooser> {
         height: 420,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('ai-chooser-search'),
               controller: _query,
               autofocus: true,

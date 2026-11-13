@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 /// can run a platform variant.
 bool get isMacPlatform => defaultTargetPlatform == TargetPlatform.macOS;
 
+/// True on iOS (iPhone / iPad); test-overridable like [isMacPlatform].
+bool get isIOSPlatform => defaultTargetPlatform == TargetPlatform.iOS;
+
 /// A desktop OS with a keyboard and a mouse (not iOS / Android).
 bool get isDesktopPlatform =>
     defaultTargetPlatform == TargetPlatform.windows ||

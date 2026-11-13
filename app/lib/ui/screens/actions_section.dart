@@ -14,6 +14,7 @@ import '../views/all_actions_view.dart';
 import '../views/calendar_view.dart';
 import '../views/current_actions_view.dart';
 import '../search_targets.dart';
+import '../widgets/app_search_field.dart';
 import '../widgets/glass.dart';
 import 'forms_screen.dart';
 import 'templates_screen.dart';
@@ -48,9 +49,9 @@ final actionImportServiceProvider = Provider<ActionImportService>(
 /// The views inside the Actions section, in switch order.
 enum ActionsSub {
   current('Current Actions', 'Current Actions', Icons.bolt_rounded),
+  templates('Templates', 'Templates', Icons.dashboard_customize),
   calendar('Calendar', 'Calendar', Icons.event),
   all('All', 'All Actions', Icons.list_alt_rounded),
-  templates('Templates', 'Templates', Icons.dashboard_customize),
   forms('Forms', 'Forms', Icons.fact_check_outlined);
 
   const ActionsSub(this.label, this.title, this.icon);
@@ -277,25 +278,20 @@ class _ActionsSectionState extends ConsumerState<ActionsSection>
         if (_searchOpen && widget.sub == ActionsSub.current)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-            child: TextField(
+            child: AppSearchField(
               key: const ValueKey('current-search-field'),
+              clearKey: const ValueKey('current-search-close'),
               controller: _searchText,
               focusNode: _searchFocus,
               autofocus: true,
               textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 hintText: 'Search by name',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Clear',
-                  onPressed: () {
-                    _searchText.clear();
-                    _applySearch('');
-                  },
-                ),
+                prefixIcon: Icon(Icons.search),
               ),
-              onChanged: _onSearchChanged,
+              onChanged: (t) => t.isEmpty ? _applySearch('') : _onSearchChanged(t),
+              // The X clears and closes, like the search-off toggle.
+              onClose: _toggleSearch,
             ),
           ),
         Expanded(

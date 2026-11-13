@@ -354,6 +354,8 @@ void main() {
     );
     expect(find.text('Run'), findsOneWidget);
     expect(find.text('Read'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('templates-search-toggle')));
+    await tester.pump();
     await tester.enterText(
       find.byKey(const ValueKey('templates-search')),
       'HEALTH',

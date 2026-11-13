@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -95,7 +96,7 @@ class _ActivityPickerDialogState extends State<ActivityPickerDialog> {
         height: 400,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               autofocus: true,
               decoration: const InputDecoration(labelText: 'Search'),
               onChanged: (v) => setState(() => _query = v.toLowerCase()),

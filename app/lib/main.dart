@@ -16,6 +16,7 @@ import 'data/time_zone_setup.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/theme/app_theme.dart';
 import 'ui/widgets/glass.dart';
+import 'ui/widgets/keyboard_hide_button.dart';
 import 'ui/theme_mode.dart';
 import 'ui/undo.dart';
 
@@ -83,8 +84,9 @@ class LiveNowApp extends ConsumerWidget {
           themeMode: ref.watch(themeModeProvider),
           // The window background (gradient + clouds + its blurred snapshot)
           // sits once under every page and dialog; pages are transparent.
-          builder: (context, child) =>
-              GlassBackground(child: child ?? const SizedBox.shrink()),
+          builder: (context, child) => KeyboardHideLayer(
+            child: GlassBackground(child: child ?? const SizedBox.shrink()),
+          ),
           home: const HomeShell(),
         ),
       ),

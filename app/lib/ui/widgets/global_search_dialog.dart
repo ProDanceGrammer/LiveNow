@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import 'dart:async';
 
 import 'package:drift/drift.dart' show Variable;
@@ -182,23 +183,17 @@ class _GlobalSearchDialogState extends ConsumerState<GlobalSearchDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
+                AppSearchField(
                   key: const ValueKey('global-search-field'),
+                  clearKey: const ValueKey('global-search-clear'),
                   controller: _text,
                   focusNode: _focus,
                   autofocus: true,
                   textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     hintText: 'Search everything',
-                    prefixIcon: const Icon(Icons.search),
+                    prefixIcon: Icon(Icons.search),
                     isDense: true,
-                    suffixIcon: _text.text.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Clear',
-                            icon: const Icon(Icons.close, size: 18),
-                            onPressed: () => setState(_text.clear),
-                          ),
                   ),
                   onChanged: (_) => setState(() => _selected = 0),
                   onSubmitted: (_) {

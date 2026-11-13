@@ -12,6 +12,7 @@ import '../../data/accounts/profile_paths.dart';
 import '../theme/app_theme.dart';
 import '../theme_mode.dart';
 import '../widgets/glass.dart';
+import '../widgets/keyboard_hide_button.dart';
 import 'account_picker.dart';
 import 'account_providers.dart';
 import 'idle_lock.dart';
@@ -224,7 +225,8 @@ class _GateApp extends StatelessWidget {
     theme: buildAppTheme(Brightness.light),
     darkTheme: buildAppTheme(Brightness.dark),
     themeMode: theme,
-    builder: (context, c) => GlassBackground(child: c ?? const SizedBox.shrink()),
+    builder: (context, c) =>
+        KeyboardHideLayer(child: GlassBackground(child: c ?? const SizedBox.shrink())),
     home: child,
   );
 }

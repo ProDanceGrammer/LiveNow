@@ -1,3 +1,4 @@
+import '../widgets/app_search_field.dart';
 import '../search_targets.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
@@ -897,8 +898,9 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
             child: Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: AppSearchField(
                     key: const ValueKey('budget-transactions-search'),
+                    clearKey: const ValueKey('budget-transactions-search-clear'),
                     controller: _searchText,
                     focusNode: _searchFocus,
                     decoration: const InputDecoration(

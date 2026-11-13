@@ -1,3 +1,4 @@
+import '../widgets/app_search_field.dart';
 import '../search_targets.dart';
 import '../../domain/search_match.dart';
 import 'package:flutter/material.dart';
@@ -74,8 +75,9 @@ class _FormsScreenState extends ConsumerState<FormsScreen>
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: TextField(
+            child: AppSearchField(
               key: const ValueKey('forms-search'),
+              clearKey: const ValueKey('forms-search-clear'),
               controller: _searchText,
               focusNode: _searchFocus,
               decoration: const InputDecoration(

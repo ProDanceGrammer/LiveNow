@@ -270,6 +270,10 @@ void main() {
     await seedTemplate(tester, 'Заняття СПОРТОМ');
     await seedTemplate(tester, 'Walk');
     await refresh(tester);
+    // The search is hidden behind its icon, like the Current board's.
+    expect(find.byKey(const ValueKey('templates-search')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('templates-search-toggle')));
+    await tester.pump();
     await tester.enterText(
       find.byKey(const ValueKey('templates-search')),
       'спортом',
@@ -284,6 +288,41 @@ void main() {
     await tester.pump();
     expect(find.text('No matches'), findsOneWidget);
     expect(find.text('No templates yet.'), findsNothing);
+    // The X clears the filter and closes the search.
+    await tester.tap(find.byKey(const ValueKey('templates-search-close')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('templates-search')), findsNothing);
+    expect(find.text('Walk'), findsOneWidget);
+    expect(find.text('Заняття СПОРТОМ'), findsOneWidget);
+    await settleAndUnmount(tester);
+  });
+
+  testWidgets('Duplicate in the editor copies the template and opens the copy', (
+    tester,
+  ) async {
+    await pump(tester);
+    await seedTemplate(tester, 'Walk', extra: {'isAllDay': true});
+    await refresh(tester);
+    await tester.tap(find.text('Walk'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('template-duplicate')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('template-duplicate')));
+    await refresh(tester);
+    await tester.pumpAndSettle();
+
+    final rows = (await tester.runAsync(
+      () => db.select(db.actionTemplatesTable).get(),
+    ))!;
+    expect(rows.map((r) => r.name).toSet(), {'Walk', 'Walk (copy)'});
+    final copy = rows.firstWhere((r) => r.name == 'Walk (copy)');
+    final payload = jsonDecode(copy.payload) as Map<String, dynamic>;
+    expect(payload['name'], 'Walk (copy)');
+    expect(payload['isAllDay'], isTrue);
+    // The copy's editor is open now (its name in the field).
+    expect(
+      find.byWidgetPredicate((w) => w is EditableText && w.controller.text == 'Walk (copy)'),
+      findsOneWidget,
+    );
     await settleAndUnmount(tester);
   });
 

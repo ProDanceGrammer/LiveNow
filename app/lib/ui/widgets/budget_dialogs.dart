@@ -1,3 +1,4 @@
+import 'app_search_field.dart';
 import 'dart:io' show Platform;
 
 import 'package:drift/drift.dart' show Value;
@@ -134,7 +135,7 @@ class _CategoryPickerDialogState extends ConsumerState<_CategoryPickerDialog> {
         height: 380,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('budget-category-search'),
               autofocus: true,
               decoration: const InputDecoration(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import 'app_search_field.dart';
 import '../../core/zone_info.dart';
 import '../dialog_stack.dart';
 import 'direction_badge.dart' show emojiLabelStyle;
@@ -72,7 +73,7 @@ class _TimeZoneDialogState extends State<_TimeZoneDialog> {
         height: 460,
         child: Column(
           children: [
-            TextField(
+            AppSearchField(
               key: const ValueKey('zone-search'),
               autofocus: true,
               decoration: const InputDecoration(
