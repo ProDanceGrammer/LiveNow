@@ -6,6 +6,7 @@ import '../../core/settings.dart';
 import '../../core/time_codec.dart';
 import '../../data/database.dart';
 import '../sequence_naming.dart';
+import 'extracted_receipt.dart' show normalizeLocalDatetime;
 
 /// How a receipt was tied to an action.
 enum ActionMatchKind { contained, nearest, hint, bazaar, allDay }
@@ -22,7 +23,7 @@ const kActionMatchWindow = Duration(hours: 2);
 /// UTC instant in [AppSettings.timeZoneName] (the tz database must be
 /// initialised). Text with `Z` or an offset is taken as the instant it names.
 DateTime receiptLocalToUtc(String isoLocal) {
-  final text = isoLocal.trim().replaceFirst(' ', 'T');
+  final text = (normalizeLocalDatetime(isoLocal) ?? isoLocal).trim().replaceFirst(' ', 'T');
   if (RegExp(r'(Z|[+-]\d\d:?\d\d)$').hasMatch(text)) {
     return DateTime.parse(text).toUtc();
   }

@@ -2,8 +2,46 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/domain/ai/ai_job_runner.dart' show parseWeightAnswer;
 import 'package:livenow/domain/ai/ai_screenshot_text.dart';
 import 'package:livenow/domain/ai/ai_transfer_text.dart';
+import 'package:livenow/domain/ai/extracted_receipt.dart';
+import 'package:livenow/domain/ai/model_prompts.dart';
 
 void main() {
+  group('bug 2026-11-18 readings', () {
+    test('a date the model wrote as dd.MM.yyyy HH:mm becomes ISO local text', () {
+      expect(normalizeLocalDatetime('16.11.2026 11:03'), '2026-11-16T11:03:00');
+      expect(normalizeLocalDatetime('16/11/2026'), '2026-11-16T00:00:00');
+      expect(normalizeLocalDatetime('2026-11-16T11:03:00'), '2026-11-16T11:03:00');
+      final r = ExtractedReceipt.fromJson({'invoice_datetime_local': '16.11.2026 11:03', 'lines': []});
+      expect(r.invoiceDatetimeLocal, '2026-11-16T11:03:00');
+    });
+
+    test('a name that is only an amount is no name', () {
+      expect(isAmountOnlyName('1.000,00 TL'), isTrue);
+      expect(isAmountOnlyName('*1.000,00'), isTrue);
+      expect(isAmountOnlyName('  '), isTrue);
+      expect(isAmountOnlyName('EKMEK 600G'), isFalse);
+      expect(isAmountOnlyName('7UP'), isFalse);
+    });
+
+    test('the message plan reply is validated', () {
+      final p = parseMessagePlan({
+        'category': 'подарунки (для рідних)',
+        'recipient': ' Маришки ',
+        'receipts': [
+          {'n': 1, 'item': 'засоби для догляду'},
+          {'n': 7, 'item': 'out of range'},
+          {'n': 2, 'item': 'null'},
+          {'n': 'x', 'item': 'junk'},
+        ],
+      }, receiptCount: 3);
+      expect(p.category, 'Подарунки (для рідних)');
+      expect(p.recipient, 'Маришки');
+      expect(p.items, {1: 'засоби для догляду'});
+      expect(parseMessagePlan({'category': 12, 'receipts': 'x'}, receiptCount: 1).isEmpty, isTrue);
+      expect(parseMessagePlan({'category': 'null', 'recipient': ''}, receiptCount: 1).isEmpty, isTrue);
+    });
+  });
+
   group('A7 transfer text', () {
     test('Ukrainian', () {
       final r = parseTransferText('перевів 12582.50 з ФОП на Monobank')!;

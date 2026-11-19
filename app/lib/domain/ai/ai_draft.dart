@@ -98,6 +98,7 @@ class DraftLine {
     this.rateInteract,
     this.snacks = false,
     this.oneOffGroupId,
+    this.oneOffName,
     this.uaName,
     this.confidence,
     this.committed = false,
@@ -136,6 +137,11 @@ class DraftLine {
 
   /// C7: the group a one-off item gets its own leaf under.
   String? oneOffGroupId;
+
+  /// The message named a category that does not exist yet: every line of the
+  /// receipt shares ONE new leaf of this name, under [oneOffGroupId] or (null)
+  /// at the top level. The transaction keeps the line's own name.
+  String? oneOffName;
 
   /// The product in the user's language, when the assistant translated it (also
   /// the name of a new category).
@@ -176,6 +182,7 @@ class DraftLine {
     'rate_interact': rateInteract,
     'snacks': snacks,
     'one_off_group_id': oneOffGroupId,
+    'one_off_name': oneOffName,
     'ua_name': uaName,
     'confidence': confidence,
     'committed': committed,
@@ -207,6 +214,7 @@ class DraftLine {
     rateInteract: _d(j['rate_interact']),
     snacks: j['snacks'] == true,
     oneOffGroupId: _s(j['one_off_group_id']),
+    oneOffName: _s(j['one_off_name']),
     uaName: _s(j['ua_name']),
     confidence: _d(j['confidence']),
     committed: j['committed'] == true,

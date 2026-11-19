@@ -55,6 +55,7 @@ import 'model_prompts.dart';
 import 'price_planner.dart';
 import 'job_progress.dart';
 import 'receipt_extractor.dart';
+import 'receipt_row_builder.dart' show rebuildReceipt;
 import 'receipt_fx_rules.dart';
 import 'sum_verifier.dart' show tenderFromAnswer;
 import 'transfer_builder.dart';
@@ -471,9 +472,14 @@ class AiJobRunner {
   }
 
   /// The user's message named a group for this line: the pick is not learned.
+  /// So is the category the message named for the receipt (until the user picks
+  /// another one for the line).
   static bool _askedInGroup(DraftCard d, int index) {
     final m = d.overrides['in_group'];
-    return m is Map && m['$index'] != null;
+    if (m is Map && m['$index'] != null) return true;
+    final lines = d.overrides['lines'];
+    final own = lines is Map && lines['$index'] is Map && (lines['$index'] as Map)['category_id'] != null;
+    return !own && messagePlanOf(d.overrides)?['category'] != null;
   }
 
   static String _clip(String s) => s.length <= 300 ? s : '${s.substring(0, 300)}...';
@@ -516,6 +522,7 @@ class AiJobRunner {
     List<ScreenshotReading>? shots,
     bool solo = false,
     List<AiBlob> release = const [],
+    JobPayload? plan,
   }) async {
     final existing = await _draftOf(job);
     if (existing != null) {
@@ -555,6 +562,9 @@ class AiJobRunner {
       );
     }
     await _step(job, JobSteps.lines);
+    // What the user's message said about this receipt ([plan] on the solo path,
+    // else the parent's reading stored in this job's payload).
+    final said = plan ?? payload;
     final b = await _builder.build(
       job: job,
       kind: job.kind,
@@ -563,6 +573,13 @@ class AiJobRunner {
       overrides: {
         if (screenshot != null && screenshot.hasAnything) 'screenshot': screenshot.toJson(),
         if (photoSha.isNotEmpty) 'photo_sha': photoSha,
+        if (job.kind != AiJobKind.bazaar &&
+            (said.planCategory != null || said.planItem != null || said.planRecipient != null))
+          'message_plan': {
+            'category': said.planCategory,
+            'item': said.planItem,
+            'recipient': said.planRecipient,
+          },
       },
       messageTime: messageTime,
     );
@@ -1047,8 +1064,10 @@ class AiJobRunner {
         String? target = l.categoryId;
         var twin = false;
         if (plan != null && plan.kind != PlanKind.reuseLeaf) {
-          final k =
-              '${DraftBuilder.twinKey(l.name)}|${(l.unitPrice ?? 0).toStringAsFixed(4)}|${l.categoryId}|${l.oneOffGroupId}';
+          // Lines sharing the new leaf the message named create it once.
+          final k = l.oneOffName != null
+              ? 'shared|${l.oneOffName}|${l.oneOffGroupId}'
+              : '${DraftBuilder.twinKey(l.name)}|${(l.unitPrice ?? 0).toStringAsFixed(4)}|${l.categoryId}|${l.oneOffGroupId}';
           final first = createdBy[k];
           if (first != null) {
             twinOf[l.index] = first;
@@ -1086,7 +1105,7 @@ class AiJobRunner {
         }
         planned.add(
           PlannedTransaction(
-            name: txNameFor(d.merchant, l.displayName),
+            name: txNameOfLine(d.merchant, l, d.overrides, d.lines.length),
             categoryId: target,
             quantity: l.quantity ?? 0,
             amount: l.amount,
@@ -1126,7 +1145,7 @@ class AiJobRunner {
       for (final l in lines) {
         final base = 10 + l.index * 10;
         final plan = plans[l.index];
-        var leafId = l.categoryId!;
+        var leafId = l.categoryId ?? '';
         if (twinOf.containsKey(l.index) && leafOf.containsKey(twinOf[l.index])) {
           leafId = leafOf[twinOf[l.index]]!;
         } else if (plan != null) {
@@ -1165,7 +1184,7 @@ class AiJobRunner {
         final txId = await _budget.createTransaction(
           id: deriveId(job.id, 'tx', l.index),
           categoryId: leafId,
-          name: txNameFor(d.merchant, l.displayName),
+          name: txNameOfLine(d.merchant, l, d.overrides, d.lines.length),
           actionId: actionId,
           date: d.at,
           quantity: l.quantity,
@@ -1255,13 +1274,14 @@ class AiJobRunner {
     if (l.snacks || l.unit == 'month' || l.unit == 'percent') return null;
     final price = l.unitPrice;
     if (price == null || !(price > 0)) return null;
-    if (l.oneOffGroupId != null) {
+    if (l.oneOffGroupId != null || l.oneOffName != null) {
       return _planner.planOneOff(
-        name: l.displayName,
-        groupId: l.oneOffGroupId!,
+        name: l.oneOffName ?? l.displayName,
+        groupId: l.oneOffGroupId,
         cost: price,
         accountCountId: l.countAccountId,
         accountUseId: d.useAccountId,
+        anyPrice: l.oneOffName != null,
       );
     }
     return _planner.plan(
@@ -1645,12 +1665,35 @@ class AiJobRunner {
   /// What a photo says when it is a bank screenshot (the amount charged in ₴
   /// and/or the bank's rate); null for a receipt. Without an OCR service the
   /// photos cannot be told apart, so each one counts as a receipt.
-  Future<ScreenshotReading?> _screenshotReading(AiBlob b, {required DateTime now}) async {
+  Future<({ScreenshotReading? reading, String rows})> _screenshotReading(
+    AiBlob b, {
+    required DateTime now,
+  }) async {
     try {
-      final text = await _ocrText(base64Decode(b.data!), b.mime);
-      final reading = parseBankScreenshot(text, now: now.toLocal());
-      return reading.hasAnything ? reading : null;
+      final read = await _ocrRead(base64Decode(b.data!), b.mime);
+      final reading = parseBankScreenshot(read.text, now: now.toLocal());
+      return (reading: reading.hasAnything ? reading : null, rows: read.rows);
     } on AiJobFailure {
+      return (reading: null, rows: '');
+    }
+  }
+
+  /// One model call: what the message says about the receipts sent with it (the
+  /// category for all of them, whom it is for, what each receipt was). Null when
+  /// there is no text or the reply is unusable: the receipts then go their usual
+  /// way. A model server that is down is the job's problem (it is restarted).
+  Future<MessagePlan?> _messagePlan(String? text, List<String> receiptRows) async {
+    final client = llm;
+    final message = text?.trim() ?? '';
+    if (client == null || message.isEmpty || receiptRows.isEmpty) return null;
+    try {
+      final reply = await client.runPrompt(
+        messagePlanPrompt(text: message, receipts: receiptRows),
+      );
+      final plan = parseMessagePlan(reply, receiptCount: receiptRows.length);
+      return plan.isEmpty ? null : plan;
+    } on Object catch (e) {
+      if (e is AiUnreachableException || e is AiCancelledException) rethrow;
       return null;
     }
   }
@@ -1669,18 +1712,28 @@ class AiJobRunner {
       throw const AiJobFailure('Фото не знайдено: надішліть їх ще раз.');
     }
     final receipts = <AiBlob>[];
+    final receiptRows = <String>[];
     final shotBlobs = <AiBlob>[];
     final shots = <ScreenshotReading>[];
     for (var i = 0; i < blobs.length; i++) {
       final b = blobs[i];
       await _step(job, JobSteps.ocr, detail: blobs.length > 1 ? 'photo ${i + 1} of ${blobs.length}' : null);
-      final reading = await _screenshotReading(b, now: await _messageTime(job, payload));
+      final read = await _screenshotReading(b, now: await _messageTime(job, payload));
+      final reading = read.reading;
       if (reading == null) {
         receipts.add(b);
+        receiptRows.add(read.rows);
       } else {
         shotBlobs.add(b);
         shots.add(reading);
       }
+    }
+    // The message may say where the receipts go (category), for whom and what
+    // each one was: read once here, carried into each receipt's job.
+    MessagePlan? plan;
+    if (receipts.isNotEmpty && (payload.text ?? '').trim().isNotEmpty) {
+      await _step(job, JobSteps.message);
+      plan = await _messagePlan(payload.text, receiptRows);
     }
     if (receipts.length == 1) {
       await _startDraftJob(
@@ -1689,6 +1742,13 @@ class AiJobRunner {
         shots: shots,
         solo: true,
         release: blobs,
+        plan: plan == null
+            ? null
+            : JobPayload(
+                planCategory: plan.category,
+                planItem: plan.items[1],
+                planRecipient: plan.recipient,
+              ),
       );
       return;
     }
@@ -1706,14 +1766,17 @@ class AiJobRunner {
     // screenshots and takes the one whose amount fits its total.
     final kids = <({String kind, JobPayload payload})>[
       if (receipts.isNotEmpty)
-        for (final r in receipts)
+        for (var i = 0; i < receipts.length; i++)
           (
             kind: AiJobKind.receipt,
             payload: JobPayload(
               messageId: payload.messageId,
-              blobIds: [r.id],
+              blobIds: [receipts[i].id],
               screenshots: [for (final s in shots) s.toJson()],
               receiptCount: receipts.length,
+              planCategory: plan?.category,
+              planItem: plan?.items[i + 1],
+              planRecipient: plan?.recipient,
             ),
           )
       else
@@ -2003,15 +2066,31 @@ class AiJobRunner {
     await _releasePhotos(blobs);
   }
 
-  Future<String> _ocrText(Uint8List bytes, String mime) async {
+  Future<String> _ocrText(Uint8List bytes, String mime) async =>
+      (await _ocrRead(bytes, mime)).text;
+
+  /// The OCR text of a photo and its printed rows (tilt-corrected when the
+  /// service gave word boxes), the latter for the model that reads the message.
+  Future<({String text, String rows})> _ocrRead(Uint8List bytes, String mime) async {
     final client = ocr;
-    if (client != null) return (await client.ocr(bytes, mime: mime)).text;
+    if (client != null) {
+      final r = await client.ocr(bytes, mime: mime);
+      final rebuilt = r.words.isEmpty ? null : rebuildReceipt(r.words);
+      return (text: r.text, rows: _headRows(rebuilt?.text ?? r.text));
+    }
     final ex = extractor;
     if (ex is OcrLlmExtractor) {
-      return (await ex.extractWithText(bytes, mime: mime)).ocrText;
+      final text = (await ex.extractWithText(bytes, mime: mime)).ocrText;
+      return (text: text, rows: _headRows(text));
     }
     throw const AiJobFailure('Немає служби OCR для скріншота.');
   }
+
+  /// The first printed rows of a receipt (shop and items), each cut short.
+  static String _headRows(String text) => [
+    for (final l in text.split('\n'))
+      if (l.trim().isNotEmpty) l.trim().length <= 60 ? l.trim() : l.trim().substring(0, 60),
+  ].take(14).join('\n');
 
   /// The newest committed, not undone receipt batch of the thread whose total
   /// matches the screenshot's shop amount (any newest one when it has none).

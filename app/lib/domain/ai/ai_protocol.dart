@@ -262,7 +262,17 @@ class JobPayload {
     this.text,
     this.screenshots = const [],
     this.receiptCount = 0,
+    this.planCategory,
+    this.planItem,
+    this.planRecipient,
   });
+
+  /// What the user's message said about this receipt (read once by the parent
+  /// job, see `MessagePlan`): the category every line goes in, what was bought,
+  /// and for whom. Stored, so a re-run of the child is deterministic.
+  final String? planCategory;
+  final String? planItem;
+  final String? planRecipient;
 
   /// Bank-screenshot readings (`rate` / `use` / `count`) found in the same
   /// message as this receipt; the receipt job picks the one that fits its
@@ -288,6 +298,9 @@ class JobPayload {
     'text': text,
     if (screenshots.isNotEmpty) 'screenshots': screenshots,
     if (receiptCount > 0) 'receipt_count': receiptCount,
+    if (planCategory != null) 'plan_category': planCategory,
+    if (planItem != null) 'plan_item': planItem,
+    if (planRecipient != null) 'plan_recipient': planRecipient,
   });
 
   factory JobPayload.decode(String json) {
@@ -307,6 +320,9 @@ class JobPayload {
               if (s is Map) Map<String, dynamic>.from(s),
         ],
         receiptCount: (j['receipt_count'] as num?)?.toInt() ?? 0,
+        planCategory: j['plan_category']?.toString(),
+        planItem: j['plan_item']?.toString(),
+        planRecipient: j['plan_recipient']?.toString(),
       );
     } catch (_) {
       return const JobPayload();

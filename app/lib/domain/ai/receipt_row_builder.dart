@@ -232,7 +232,9 @@ final _qtyRow = RegExp(
   r'^(\d+(?:[.,]\d+)?)(kg|gr|g|adet|ad)[x×*](\d+(?:[.,]\d+)?)(?:tl(?:/(?:kg|ad|adet))?)?$',
 );
 // The masked card number: `******6141`, with a glyph OCR put between the stars.
-final _last4 = RegExp('[*•·$_glyphs]{2,}[*•·$_glyphs\\s]*(\\d{4})');
+// At least four real mask characters (a glyph or a space may follow each), then
+// the four digits: glyph noise before a number is no card.
+final _last4 = RegExp('(?:[*•·xX×][\\s$_glyphs]?){4,}\\s*(\\d{4})(?!\\d)');
 final _date = RegExp(r'(\d{2})[/.\-](\d{2})[/.\-](20\d{2})');
 final _time = RegExp(r'saat\W*(\d{1,2}):(\d{2})');
 

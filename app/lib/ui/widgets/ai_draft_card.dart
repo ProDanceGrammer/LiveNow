@@ -478,7 +478,7 @@ class _LineRow extends StatelessWidget {
     final qty = edit?.quantity ?? line.quantity;
     final price = edit?.unitPrice ?? line.unitPrice;
     final unit = edit?.unit ?? line.unit;
-    final hasCategory = edit?.categoryId != null || line.categoryId != null;
+    final hasCategory = edit?.categoryId != null || line.categoryId != null || line.oneOffName != null;
     final cat = categoryName ?? line.categoryName ?? '?';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),

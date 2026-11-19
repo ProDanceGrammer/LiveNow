@@ -19,6 +19,31 @@ String? _str(Object? v) {
   return s.isEmpty ? null : s;
 }
 
+final _dmyDateTime = RegExp(
+  r'^(\d{1,2})[./](\d{1,2})[./](\d{4})(?:[\sT,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$',
+);
+
+/// A receipt date the model wrote as `dd.MM.yyyy[ HH:mm[:ss]]` (or with `/`) as
+/// the ISO local text the rest of the code reads (`2026-11-16T11:03:00`; no time
+/// reads as midnight). Anything else is returned as it came.
+String? normalizeLocalDatetime(String? text) {
+  final m = text == null ? null : _dmyDateTime.firstMatch(text.trim());
+  if (m == null) return text;
+  String two(String? s) => (s ?? '0').padLeft(2, '0');
+  return '${m.group(3)}-${two(m.group(2))}-${two(m.group(1))}'
+      'T${two(m.group(4))}:${two(m.group(5))}:${two(m.group(6))}';
+}
+
+final _amountOnlyName = RegExp(
+  r'^[\s*×xX]*[\d.,\s]+\s*(?:tl|try|₺|uah|грн|eur|usd|€|\$)?\s*$',
+  caseSensitive: false,
+);
+
+/// A line name that is only an amount and a currency ("1.000,00 TL"): the OCR
+/// took the price for the name, so it is no name at all.
+bool isAmountOnlyName(String? name) =>
+    name == null || name.trim().isEmpty || _amountOnlyName.hasMatch(name.trim());
+
 /// "2 ad X 16.50" / "0.716 kg X 319.00": the quantity line printed ABOVE the
 /// item it belongs to (rule U6).
 class QtyLine {
@@ -72,6 +97,18 @@ class ReceiptLine {
 
   /// The printed text of the line, exactly as read.
   final String raw;
+
+  /// The same line under another name.
+  ReceiptLine withName(String name) => ReceiptLine(
+    raw: raw,
+    name: name,
+    lineTotal: lineTotal,
+    qtyLine: qtyLine,
+    pack: pack,
+    discount: discount,
+    vatPct: vatPct,
+    flags: flags,
+  );
 
   /// The product name as the extractor cleaned it (may equal [raw]).
   final String? name;
@@ -165,14 +202,31 @@ class ExtractedReceipt {
   final double? overallConfidence;
   final List<String> lowConfidenceFields;
 
+  /// The same receipt with [merchant] and [lines] replaced.
+  ExtractedReceipt copyWith({
+    String? merchant,
+    List<ReceiptLine>? lines,
+    List<Tender>? tenders,
+  }) => ExtractedReceipt(
+    merchant: merchant ?? this.merchant,
+    invoiceDatetimeLocal: invoiceDatetimeLocal,
+    terminalDatetimeLocal: terminalDatetimeLocal,
+    currency: currency,
+    total: total,
+    tenders: tenders ?? this.tenders,
+    lines: lines ?? this.lines,
+    overallConfidence: overallConfidence,
+    lowConfidenceFields: lowConfidenceFields,
+  );
+
   factory ExtractedReceipt.fromJson(Map<String, dynamic> j) {
     final conf = j['confidence'] is Map
         ? Map<String, dynamic>.from(j['confidence'] as Map)
         : const <String, dynamic>{};
     return ExtractedReceipt(
       merchant: _str(j['merchant']),
-      invoiceDatetimeLocal: _str(j['invoice_datetime_local']),
-      terminalDatetimeLocal: _str(j['terminal_datetime_local']),
+      invoiceDatetimeLocal: normalizeLocalDatetime(_str(j['invoice_datetime_local'])),
+      terminalDatetimeLocal: normalizeLocalDatetime(_str(j['terminal_datetime_local'])),
       currency: (_str(j['currency']) ?? 'TRY').toUpperCase(),
       total: _num(j['total']),
       tenders: [

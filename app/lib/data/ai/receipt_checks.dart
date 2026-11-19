@@ -109,6 +109,50 @@ ExtractedReceipt repairArithmetic(ExtractedReceipt r, {String? ocrText}) {
   return copyReceipt(r, lines: lines, lowConfidenceFields: low);
 }
 
+/// A card's last four digits the model read out of a longer number (the
+/// merchant id `000002602325239` read as `0260`): when the digits appear in the
+/// OCR text ONLY inside longer digit runs, they are no card mask and are dropped.
+/// A last4 the text does not contain at all cannot be checked and stays.
+ExtractedReceipt dropEmbeddedLast4(ExtractedReceipt r, String ocrText) {
+  var changed = false;
+  final tenders = <Tender>[];
+  for (final t in r.tenders) {
+    final d = t.last4;
+    final embedded = d != null &&
+        ocrText.contains(d) &&
+        !RegExp('(?<!\\d)$d(?!\\d)').hasMatch(ocrText);
+    if (embedded) changed = true;
+    tenders.add(embedded ? Tender(method: t.method, amount: t.amount) : t);
+  }
+  return changed ? r.copyWith(tenders: tenders) : r;
+}
+
+/// A receipt with ONE line whose printed total is in the OCR text while the
+/// line's own amount (after its discount) is not: the model made the amount up
+/// (906.67 for a printed 1.000,00), the printed total is the line's amount.
+ExtractedReceipt soleLineTakesTotal(ExtractedReceipt r, String ocrText) {
+  final total = r.total;
+  if (r.lines.length != 1 || total == null) return r;
+  final l = r.lines.single;
+  final amount = l.lineTotal;
+  if (amount == null || cents(amount - l.discount) == cents(total)) return r;
+  final seen = numberTokens(ocrText);
+  if (!seen.contains(cents(total)) || seen.contains(cents(amount))) return r;
+  return r.copyWith(
+    lines: [
+      ReceiptLine(
+        raw: l.raw,
+        name: l.name,
+        lineTotal: total,
+        qtyLine: l.qtyLine,
+        pack: l.pack,
+        vatPct: l.vatPct,
+        flags: [...l.flags, 'repaired_line_total'],
+      ),
+    ],
+  );
+}
+
 /// A product name without what the receipt prints around it: the `*32,95` /
 /// `x75.5` amount, the `%1` VAT mark and a leading `x` / `*`.
 String cleanItemName(String name) {

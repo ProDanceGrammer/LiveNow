@@ -208,4 +208,32 @@ void main() {
     expect(withSafeIcon('Щось', preferred: '🎁'), '🎁 Щось');
     expect(isSafeIcon('🫠'), isFalse);
   });
+
+  test('a one-off at the TOP level, any price reused, and the same request twice creates it once', () async {
+    final first = await planner.planOneOff(
+      name: 'Подарунки (для рідних)',
+      groupId: null,
+      cost: 139,
+      anyPrice: true,
+    );
+    expect(first.kind, PlanKind.oneOffLeaf);
+    expect(first.newLeaf!.parentId, isNull);
+    final a = await planner.apply(first);
+    expect(a.createdIds, hasLength(1));
+    // Another line of another price takes the same leaf: no wrapper, no new leaf.
+    final second = await planner.planOneOff(
+      name: 'Подарунки (для рідних)',
+      groupId: null,
+      cost: 259,
+      anyPrice: true,
+    );
+    expect(second.kind, PlanKind.reuseLeaf);
+    expect(second.leafId, a.leafId);
+    final again = await planner.apply(first); // a re-run of the first plan
+    expect(again.leafId, a.leafId);
+    expect(again.createdIds, isEmpty);
+    final top = await (db.select(db.budgetCategoriesTable)..where((t) => t.parentId.isNull())).get();
+    expect(top, hasLength(1));
+    expect(top.single.parentId, isNull);
+  });
 }

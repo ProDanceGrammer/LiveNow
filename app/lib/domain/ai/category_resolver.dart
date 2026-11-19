@@ -231,9 +231,13 @@ class CategoryResolver {
   static final _split = RegExp(r'[^\p{L}\p{N}]+', unicode: true);
   static final _number = RegExp(r'^\p{N}+$', unicode: true);
 
+  /// A currency word is no part of a name: `1.000,00 TL` must not find
+  /// `(TL) Повернути борг`.
+  static const _currencyWords = {'tl', 'try', 'uah', 'usd', 'eur', 'грн', 'лір', 'ліра'};
+
   static List<String> _tokens(String text) => [
     for (final t in nameKey(text).split(_split))
-      if (t.length >= 2 && !_number.hasMatch(t)) t,
+      if (t.length >= 2 && !_number.hasMatch(t) && !_currencyWords.contains(t)) t,
   ];
 
   /// Every query word is found in the name's words.

@@ -9,6 +9,8 @@
 /// crash. Pure Dart: no I/O (spec 10.3 adapted).
 library;
 
+import '../../core/text_rules.dart' show stripUnsafeText;
+
 /// System prompt shared by the three tasks (adapted from spec 10.3: the model
 /// has NO tools and does NO arithmetic here, the code does).
 String modelSystemPrompt({String language = 'Ukrainian'}) =>
@@ -589,4 +591,116 @@ CorrectionIntent parseCorrectionIntent(
     _ => true,
   };
   return complete ? intent : CorrectionIntent.unknown;
+}
+
+// ---------------------------------------------------------------------------
+// (d) what a message says about the receipts sent with it
+// ---------------------------------------------------------------------------
+
+/// What the user's message says about the receipts that came with it. The model
+/// only READS this; the program applies it (category lookup, names, units).
+class MessagePlan {
+  const MessagePlan({this.category, this.recipient, this.items = const {}});
+
+  /// The budget category the user named for the receipts, as written (first
+  /// letter capitalised), else null.
+  final String? category;
+
+  /// Whom the purchase is for, as written ("Маришки"), else null.
+  final String? recipient;
+
+  /// Receipt number (1-based) -> what was bought on it.
+  final Map<int, String> items;
+
+  bool get isEmpty => category == null && recipient == null && items.isEmpty;
+}
+
+/// [rows] of each receipt: the printed rows (header and items), one string per
+/// receipt. The message may name one category for all of them, whom they are
+/// for, and what each receipt was.
+ModelPrompt messagePlanPrompt({
+  required String text,
+  required List<String> receipts,
+  String language = 'Ukrainian',
+}) {
+  final list = StringBuffer();
+  for (var i = 0; i < receipts.length; i++) {
+    list.writeln('Receipt ${i + 1}:\n${receipts[i]}');
+  }
+  return ModelPrompt(
+    system: modelSystemPrompt(language: language),
+    user:
+        'Task: the user sent shop receipts with a message. Read what the message '
+        'says about them. Do not invent anything the message does not say.\n'
+        'Message: $text\n$list'
+        '- "category": the budget category the message names for the receipts, '
+        'copied as written (without words like "занеси в"), else null.\n'
+        '- "recipient": whom the purchase is for, as written ("Маришки"), else null.\n'
+        '- "receipts": for each receipt number, SHORT what was bought on THAT '
+        'receipt according to the message (match it by the shop and the printed '
+        'items), else null.\n'
+        'Reply {"category", "recipient", "receipts": [{"n", "item"}]}.',
+    schemaName: 'message_plan',
+    schema: {
+      'type': 'object',
+      'additionalProperties': false,
+      'required': ['category', 'recipient', 'receipts'],
+      'properties': {
+        'category': {
+          'type': ['string', 'null'],
+        },
+        'recipient': {
+          'type': ['string', 'null'],
+        },
+        'receipts': {
+          'type': 'array',
+          'items': {
+            'type': 'object',
+            'additionalProperties': false,
+            'required': ['n', 'item'],
+            'properties': {
+              'n': {'type': 'integer'},
+              'item': {
+                'type': ['string', 'null'],
+              },
+            },
+          },
+        },
+      },
+    },
+  );
+}
+
+/// A name from the model: unsafe characters and runs of spaces removed, at most
+/// 80 characters, with a letter in it; else null ("null", "none" count as null).
+String? _planText(Object? v) {
+  final raw = v == null ? null : _tidyName(stripUnsafeText(v.toString()));
+  if (raw == null || !RegExp(r'\p{L}', unicode: true).hasMatch(raw)) return null;
+  final lower = raw.toLowerCase();
+  if (lower == 'null' || lower == 'none' || lower == 'unknown') return null;
+  return raw.length <= 80 ? raw : raw.substring(0, 80).trim();
+}
+
+/// Tolerant: whatever is not a usable string, or points at a receipt that does
+/// not exist (outside 1..[receiptCount]), is dropped.
+MessagePlan parseMessagePlan(Map<String, dynamic> json, {required int receiptCount}) {
+  var category = _planText(json['category']);
+  if (category != null) {
+    category = category[0].toUpperCase() + category.substring(1);
+  }
+  final items = <int, String>{};
+  final list = json['receipts'];
+  if (list is List) {
+    for (final e in list) {
+      if (e is! Map) continue;
+      final n = e['n'] is num ? (e['n'] as num).round() : int.tryParse('${e['n']}');
+      final item = _planText(e['item']);
+      if (n != null && n >= 1 && n <= receiptCount && item != null) items[n] = item;
+    }
+  }
+  return MessagePlan(
+    category: category,
+    recipient: _planText(json['recipient']),
+    items: items,
+  );
 }

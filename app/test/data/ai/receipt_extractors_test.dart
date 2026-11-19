@@ -80,6 +80,79 @@ void main() {
   );
   OcrLlmExtractor ocrLlm() => OcrLlmExtractor(ocr: OcrClient(baseUrl: ocrServer.url), llm: llm());
 
+  // The real flower receipt (git-ignored fixture): its item row lost the name
+  // (`%20 *1.000,00`), so the program's own rows are empty and the model reads
+  // the raw OCR text. The model's 906.67 is nowhere in that text, and its card
+  // `0260` is the middle of the merchant id `000002602325239`.
+  final cicek = File('../claude_dev/ai/fixtures/cicek_ocr.json');
+  Map<String, dynamic> flowerReading() => {
+    'merchant': null,
+    'invoice_datetime_local': '16.11.2026 11:03',
+    'terminal_datetime_local': null,
+    'currency': 'TRY',
+    'total': 1000.0,
+    'tenders': [
+      {'method': 'card', 'last4': '0260', 'amount': 1000.0},
+    ],
+    'lines': [
+      {
+        'raw': '1.000,00 TL',
+        'name': '1.000,00 TL',
+        'line_total': 906.67,
+        'qty_line': null,
+        'pack': null,
+        'discount': 0,
+        'vat_pct': null,
+        'flags': <String>[],
+      },
+    ],
+    'confidence': {'overall': 0.5, 'low_confidence_fields': <String>[]},
+  };
+
+  test(
+    'bug 2026-11-18: the real flower photo: printed total kept, merchant id is no card, date read',
+    () async {
+      ocrServer.reply = jsonDecode(cicek.readAsStringSync()) as Object;
+      llmServer.enqueueJson(flowerReading());
+      final r = await ocrLlm().extract(image, mime: 'image/jpeg');
+      expect(r.lines.single.lineTotal, 1000.0, reason: 'the line takes the printed total');
+      expect(r.tenders.single.last4, isNull, reason: '0260 only occurs inside 000002602325239');
+      expect(r.invoiceDatetimeLocal, '2026-11-16T11:03:00');
+      expect(llmServer.chatRequests, hasLength(1), reason: 'a repaired reading needs no retry');
+    },
+    skip: cicek.existsSync() ? false : 'private OCR fixture not present',
+  );
+
+  test('a lone line whose amount is not printed takes the printed total (no fixture)', () async {
+    final r = soleLineTakesTotal(
+      ExtractedReceipt.fromJson(flowerReading()),
+      'TOPLAM *166,67\n*1.000,00\nAMOUNT 1.000,00 TL',
+    );
+    expect(r.lines.single.lineTotal, 1000.0);
+    // An amount that IS printed stays.
+    final kept = soleLineTakesTotal(
+      ExtractedReceipt.fromJson(flowerReading()),
+      '906,67\n1.000,00',
+    );
+    expect(kept.lines.single.lineTotal, 906.67);
+  });
+
+  test('a last4 read from inside a longer number is dropped, a plain mask or an unseen one stays', () {
+    ExtractedReceipt withLast4() => ExtractedReceipt.fromJson(flowerReading());
+    expect(dropEmbeddedLast4(withLast4(), 'ISYERI:000002602325239').tenders.single.last4, isNull);
+    expect(dropEmbeddedLast4(withLast4(), '**** **** **** 0260').tenders.single.last4, '0260');
+    expect(dropEmbeddedLast4(withLast4(), 'nothing like it').tenders.single.last4, '0260');
+  });
+
+  test('the winning reading is filled from the other one: date, total, payments', () {
+    const win = ExtractedReceipt(merchant: null, total: null, lines: []);
+    final other = ExtractedReceipt.fromJson(flowerReading());
+    final r = fillGaps(win, other);
+    expect(r.invoiceDatetimeLocal, '2026-11-16T11:03:00');
+    expect(r.total, 1000.0);
+    expect(r.tenders, hasLength(1));
+  });
+
   test('OCR + LLM end to end: OCR text reaches the model, result parsed', () async {
     llmServer.enqueueJson(_receipt());
     final r = await ocrLlm().extract(image, mime: 'image/jpeg');

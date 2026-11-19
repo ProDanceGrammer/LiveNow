@@ -52,6 +52,36 @@ List<ReceiptWord> receipt({double slope = 0.045}) {
 }
 
 void main() {
+  group('bug 2026-11-18 card mask', () {
+    String? last4Of(String cell) {
+      final words = receipt();
+      final at = words.indexWhere((w) => w.text == '#444111******6141');
+      final w = words[at];
+      words[at] = ReceiptWord(
+        text: cell,
+        x0: w.x0,
+        y0: w.y0,
+        x1: w.x1,
+        y1: w.y1,
+        slope: w.slope,
+        boxHeight: w.boxHeight,
+      );
+      return rebuildReceipt(words)!.receipt.tenders.firstOrNull?.last4;
+    }
+
+    test('a real mask gives the last four digits', () {
+      expect(last4Of('#444111******6141'), '6141');
+      expect(last4Of('**** **** **** 6141'), '6141');
+      expect(last4Of('****6141'), '6141');
+    });
+
+    test('glyph noise or a plain number before four digits is no card', () {
+      expect(last4Of(r'$$ 0260'), isNull);
+      expect(last4Of('ISYERI 0260'), isNull);
+      expect(last4Of('**0260'), isNull);
+    });
+  });
+
   group('rows of a tilted receipt photo', () {
     test('every row keeps its own amount, vat and name', () {
       final r = rebuildReceipt(receipt())!;

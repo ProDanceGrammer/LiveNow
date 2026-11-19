@@ -41,6 +41,8 @@ class PlanRequest {
     this.accountCountId,
     this.accountUseId,
     this.oneOffName,
+    this.topLevel = false,
+    this.anyPrice = false,
   });
 
   /// The product's category (leaf or aggregate), or the GROUP for a one-off.
@@ -53,6 +55,13 @@ class PlanRequest {
 
   /// Set for a C7 one-off item.
   final String? oneOffName;
+
+  /// One-off only: the leaf goes at the top level ([categoryId] is empty).
+  final bool topLevel;
+
+  /// One-off only: an existing leaf of that name is used whatever its price (a
+  /// category the user's message named, shared by lines of different prices).
+  final bool anyPrice;
 }
 
 /// A typed, write-free plan. [leafId] is the category the transaction goes
@@ -257,30 +266,51 @@ class PricePlanner {
   /// C7: a one-off household/hygiene item bought for [cost] that belongs under
   /// [groupId]. An existing leaf of that name is handled like any product
   /// ([plan]); otherwise a new `piece` leaf with price = cost. Never targets
-  /// the group itself.
+  /// the group itself. A null [groupId] puts the leaf at the top level;
+  /// [anyPrice] reuses an existing leaf of that name at any price.
   Future<PricePlan> planOneOff({
     required String name,
-    required String groupId,
+    required String? groupId,
     required double cost,
     String? accountCountId,
     String? accountUseId,
     String? preferredIcon,
+    bool anyPrice = false,
   }) async {
     if (!(cost > 0) || cost.isInfinite) {
       throw ArgumentError.value(cost, 'cost', 'must be positive');
     }
-    final group = await (db.select(
-      db.budgetCategoriesTable,
-    )..where((t) => t.id.equals(groupId))).getSingleOrNull();
-    if (group == null) {
+    final group = groupId == null
+        ? null
+        : await (db.select(
+            db.budgetCategoriesTable,
+          )..where((t) => t.id.equals(groupId))).getSingleOrNull();
+    if (groupId != null && group == null) {
       throw const MissingRowException('That category no longer exists.');
     }
     final key = normalizeReceiptText(name);
-    final siblings = await (db.select(
-      db.budgetCategoriesTable,
-    )..where((t) => t.parentId.equals(groupId))).get();
+    final siblings = await (db.select(db.budgetCategoriesTable)
+          ..where((t) => groupId == null ? t.parentId.isNull() : t.parentId.equals(groupId)))
+        .get();
+    final parents = {for (final c in await db.select(db.budgetCategoriesTable).get()) c.parentId};
     for (final s in siblings) {
       if (normalizeReceiptText(s.name) == key) {
+        if (anyPrice && !parents.contains(s.id)) {
+          return PricePlan(
+            kind: PlanKind.reuseLeaf,
+            reason: PlanReason.samePrice,
+            request: PlanRequest(
+              categoryId: groupId ?? '',
+              newPrice: cost,
+              accountCountId: accountCountId,
+              accountUseId: accountUseId,
+              oneOffName: name,
+              topLevel: groupId == null,
+              anyPrice: true,
+            ),
+            leafId: s.id,
+          );
+        }
         return plan(
           categoryId: s.id,
           newPrice: cost,
@@ -293,19 +323,21 @@ class PricePlanner {
       kind: PlanKind.oneOffLeaf,
       reason: PlanReason.oneOff,
       request: PlanRequest(
-        categoryId: groupId,
+        categoryId: groupId ?? '',
         newPrice: cost,
         accountCountId: accountCountId,
         accountUseId: accountUseId,
         oneOffName: name,
+        topLevel: groupId == null,
+        anyPrice: anyPrice,
       ),
       newLeaf: CategoryInput(
         name: withSafeIcon(name, preferred: preferredIcon),
         unit: BudgetUnit.piece,
         price: cost,
         parentId: groupId,
-        accountCountId: accountCountId ?? group.accountCountId,
-        accountUseId: accountUseId ?? group.accountUseId,
+        accountCountId: accountCountId ?? group?.accountCountId,
+        accountUseId: accountUseId ?? group?.accountUseId,
       ),
     );
   }
@@ -325,10 +357,11 @@ class PricePlanner {
       final fresh = r.oneOffName != null
           ? await planOneOff(
               name: r.oneOffName!,
-              groupId: r.categoryId,
+              groupId: r.topLevel ? null : r.categoryId,
               cost: r.newPrice,
               accountCountId: r.accountCountId,
               accountUseId: r.accountUseId,
+              anyPrice: r.anyPrice,
               // The icon was already chosen into the plan's name.
               preferredIcon: plan.newLeaf == null
                   ? null
@@ -455,7 +488,7 @@ const _fallbackIcon = '🛒';
 
 const _iconKeywords = <String, String>{
   'яблук': '🍎', 'банан': '🍌', 'морк': '🥕', 'карто': '🥔', 'хліб': '🍞',
-  'сир': '🧀', 'яйц': '🥚', 'молок': '🥛', "м'яс": '🥩', 'риб': '🐟',
+  'подар': '🎁', 'сир': '🧀', 'яйц': '🥚', 'молок': '🥛', "м'яс": '🥩', 'риб': '🐟',
   'макарон': '🍝', 'кав': '☕', 'чай': '🍵', 'мило': '🧼', 'дезодорант': '🧴',
   'зубн': '🪥', 'папір': '🧻', 'ліки': '💊', 'зелен': '🌿', 'гриб': '🍄',
 };

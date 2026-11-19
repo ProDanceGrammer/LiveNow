@@ -91,9 +91,55 @@ String _stripStars(String s) => s.replaceFirst(RegExp(r'^[\s*]+'), '').trim();
 String createOptionLabel(String name, String group) => 'Створити «$name» у «$group»';
 final kCreateOption = RegExp(r'^Створити «(.+)» у «(.+)»$');
 
-/// The transaction name of a line: shop + product.
-String txNameFor(String? merchant, String product) =>
-    merchant == null || merchant.trim().isEmpty ? product : '$merchant $product';
+/// The transaction name of a line: shop + product. A message that said what the
+/// receipt was ([item]) and for whom ([recipient]) gives
+/// `shop item для recipient: product`; a one-line receipt ([single]) drops the
+/// `: product` part. Without an item the product stays in the name.
+String txNameFor(
+  String? merchant,
+  String product, {
+  String? item,
+  String? recipient,
+  bool single = false,
+}) {
+  final String what;
+  if (item == null && recipient == null) {
+    what = product;
+  } else if (item == null) {
+    what = '$product для $recipient';
+  } else {
+    final head = recipient == null ? item : '$item для $recipient';
+    what = single ? head : '$head: $product';
+  }
+  if (merchant == null || merchant.trim().isEmpty) return what;
+  // A line that IS the shop (no readable name) is not said twice.
+  return what.trim().toLowerCase() == merchant.trim().toLowerCase() ? what : '$merchant $what';
+}
+
+/// What the user's message said about a photographed receipt (the draft's
+/// `overrides['message_plan']`: category / item / recipient), or null.
+Map<String, String>? messagePlanOf(Map<String, dynamic> overrides) {
+  final m = overrides['message_plan'];
+  if (m is! Map) return null;
+  final out = <String, String>{
+    for (final e in m.entries)
+      if (e.value != null && e.value.toString().trim().isNotEmpty) '${e.key}': e.value.toString(),
+  };
+  return out.isEmpty ? null : out;
+}
+
+/// The transaction name of draft line [l] (see [txNameFor]); [lineCount] is the
+/// number of lines of the draft.
+String txNameOfLine(String? merchant, DraftLine l, Map<String, dynamic> overrides, int lineCount) {
+  final plan = messagePlanOf(overrides);
+  return txNameFor(
+    merchant,
+    l.displayName,
+    item: plan?['item'],
+    recipient: plan?['recipient'],
+    single: lineCount == 1,
+  );
+}
 
 String fmtMoney(double v) => v.toStringAsFixed(2);
 
@@ -150,6 +196,9 @@ class _Ctx {
 
   /// That payment's line is named by the user's message (not the merchant).
   bool named = false;
+
+  /// The category the user's message named for a photographed receipt.
+  _MsgCat? msgCat;
   final _fx = <String, ReceiptFx>{};
 
   BudgetAccount? account(String? id) {
@@ -245,6 +294,20 @@ class _Ctx {
       baseCurrency: base,
     ),
   );
+}
+
+/// The category a message named for a photographed receipt, resolved against
+/// the budget: an existing group ([existing] and [isGroup]: each line gets its
+/// own leaf in it), a same-name wrapper ([existing]: the usual price rules), or
+/// ONE leaf [newName] shared by every line, under [parent] or at the top level
+/// (an existing leaf is found again by its name, a missing one is created).
+class _MsgCat {
+  const _MsgCat({this.existing, this.isGroup = false, this.newName, this.parent});
+  final BudgetCategory? existing;
+  final bool isGroup;
+  final String? newName;
+  final BudgetCategory? parent;
+  bool get isNew => newName != null;
 }
 
 /// The outcome of [DraftBuilder._lookup].
@@ -348,7 +411,7 @@ class DraftBuilder {
         : null;
     final pay = typed == null ? null : await _typedPay(typed, overrides, accounts);
     if (pay != null) receiptJson['currency'] = pay.currency;
-    final ex = ExtractedReceipt.fromJson(receiptJson);
+    final ex = _nameTheNameless(ExtractedReceipt.fromJson(receiptJson), overrides['screenshot']);
     final ctx = _Ctx(
       accounts: accounts,
       cats: cats,
@@ -360,6 +423,10 @@ class DraftBuilder {
     ctx.snacksId = await planner.findSnacksCategory();
     ctx.payment = source['payment'] == true;
     ctx.named = ctx.payment && source['named'] == true;
+    final planned = messagePlanOf(overrides);
+    if (typed == null && !ctx.payment && planned?['category'] != null) {
+      ctx.msgCat = await _messageCategory(ctx, planned!['category']!);
+    }
     if (typed != null) {
       ctx.wantIncome = typed['income'] == true;
       if (typed['unparsed'] is List) {
@@ -506,7 +573,14 @@ class DraftBuilder {
     } else {
       await _receiptAccounts(ctx, ex, mine, cardRules);
     }
-    String txNameOf(String n) => txNameFor(ex.merchant, n);
+    final planNames = messagePlanOf(overrides);
+    String txNameOf(String n) => txNameFor(
+      ex.merchant,
+      n,
+      item: planNames?['item'],
+      recipient: planNames?['recipient'],
+      single: parsed.lines.length == 1,
+    );
 
     // Lines.
     final prevCommitted = {
@@ -529,7 +603,10 @@ class DraftBuilder {
           p.net <= 0) {
         continue;
       }
-      if (await _namedGroup(ctx, p.name) == null && !(await _lookup(ctx, p.name)).decided) {
+      // The message already named the category: nothing to look up or ask.
+      if (ctx.msgCat == null &&
+          await _namedGroup(ctx, p.name) == null &&
+          !(await _lookup(ctx, p.name)).decided) {
         wanted.add((index: i, printed: _stripStars(p.name)));
       }
     }
@@ -689,6 +766,26 @@ class DraftBuilder {
       seen: seen?.toJson(),
     );
     return DraftBuild(card, ctx.questions);
+  }
+
+  /// A line whose name is only an amount ("1.000,00 TL": the OCR took the price
+  /// for the name) is named after the shop (the receipt's, else the one on the
+  /// paired bank screenshot), and a receipt with no shop takes the screenshot's.
+  static ExtractedReceipt _nameTheNameless(ExtractedReceipt ex, Object? screenshot) {
+    final shot = screenshot is Map ? screenshot['merchant']?.toString().trim() : null;
+    final shop = ex.merchant ?? (shot == null || shot.isEmpty ? null : shot);
+    if (!ex.lines.any((l) => isAmountOnlyName(l.name) && isAmountOnlyName(_stripStars(l.raw)))) {
+      return shop == ex.merchant ? ex : ex.copyWith(merchant: shop);
+    }
+    return ex.copyWith(
+      merchant: shop,
+      lines: [
+        for (final l in ex.lines)
+          isAmountOnlyName(l.name) && isAmountOnlyName(_stripStars(l.raw))
+              ? l.withName(shop ?? 'Покупка')
+              : l,
+      ],
+    );
   }
 
   /// Lines with the same printed name are the same product.
@@ -993,6 +1090,23 @@ class DraftBuilder {
     final unitEdit = ov['unit'];
     if (unitEdit == 'piece' || unitEdit == 'kilogram') line.unit = unitEdit as String;
 
+    // A category named by the message: pieces (the OCR quantity, else 1) at the
+    // line's amount, never a weight question.
+    final msg = ctx.msgCat;
+    if (msg != null && ov['category_id'] == null) {
+      unknownWeight = false;
+      if (!(q != null && q > 0)) {
+        final pieces = line.unit == 'piece' && (line.quantity ?? 0) > 0 ? line.quantity! : 1.0;
+        line.quantity = pieces;
+        if (price == null) line.unitPrice = line.amount / pieces;
+      }
+      if (unitEdit != 'kilogram') line.unit = 'piece';
+      if (msg.isNew) {
+        await _finishInNewMessageLeaf(ctx, line, msg);
+        return;
+      }
+    }
+
     final chosen = await _chooseCategory(ctx, line, ov);
     if (chosen == null) return; // a category question is open
     line.categoryId = chosen.id;
@@ -1104,6 +1218,57 @@ class DraftBuilder {
     }
   }
 
+  /// Every line of a receipt whose message named a leaf (or a category that does
+  /// not exist yet) shares ONE leaf of that name; a missing one is created at
+  /// Confirm.
+  Future<void> _finishInNewMessageLeaf(_Ctx ctx, DraftLine line, _MsgCat msg) async {
+    final count = ctx.defaultCount!;
+    final fx = ctx.fx(count, ctx.useAccount ?? count);
+    line.countAccountId = count.id;
+    line.rateCount = fx.rateCount;
+    line.rateInteract = fx.rateInteract;
+    line.oneOffGroupId = msg.parent?.id;
+    line.oneOffName = msg.newName;
+    final plan = await planner.planOneOff(
+      name: msg.newName!,
+      groupId: msg.parent?.id,
+      cost: line.unitPrice!,
+      accountCountId: count.id,
+      accountUseId: ctx.useAccount?.id,
+      anyPrice: true,
+    );
+    _applyPlanFlags(line, plan);
+    if (plan.kind == PlanKind.reuseLeaf) {
+      line.categoryId = plan.leafId;
+      line.categoryName = ctx.byId[plan.leafId]?.name ?? line.categoryName;
+    } else {
+      line.categoryId = msg.parent?.id;
+      line.categoryName = plan.newLeaf?.name ?? msg.newName;
+    }
+  }
+
+  /// The message's category wording against the budget: an existing leaf or
+  /// group (a close name), else a new leaf under the group the words point at
+  /// ("Подарунки (для рідних)" -> the group "Подарунки"), else a top-level one.
+  Future<_MsgCat> _messageCategory(_Ctx ctx, String text) async {
+    final r = await resolver.resolve(text, limit: 8);
+    for (final c in r.candidates) {
+      final cat = ctx.byId[c.id];
+      if (cat == null || c.score < 0.8) continue;
+      // A leaf is shared by every line whatever its price (a price variant is a
+      // different product, not a different amount of the gift category).
+      if (!c.isAggregate) return _MsgCat(newName: cat.name, parent: ctx.byId[cat.parentId]);
+      return _MsgCat(existing: cat, isGroup: !ctx.isWrapper(cat));
+    }
+    for (final c in r.candidates) {
+      final cat = ctx.byId[c.id];
+      if (cat != null && c.score >= 0.6 && c.isAggregate && !ctx.isWrapper(cat)) {
+        return _MsgCat(newName: text, parent: cat);
+      }
+    }
+    return _MsgCat(newName: text);
+  }
+
   void _applyPlanFlags(DraftLine line, PricePlan plan) {
     line.newCategory = plan.createsCategories;
     line.priceChange = plan.reason == PlanReason.priceChanged;
@@ -1154,6 +1319,9 @@ class DraftBuilder {
       }
       return forced;
     }
+
+    final msgCat = ctx.msgCat;
+    if (msgCat != null && msgCat.existing != null) return msgCat.existing;
 
     final named = await _namedGroup(ctx, line.name);
     if (named != null) return _askInGroup(ctx, line, named);

@@ -135,6 +135,7 @@ const String receiptExtractionSystemPrompt = '''
 You read shop receipts (mostly Turkish: BIM, SOK, Migros, A101) and return ONE JSON object that matches the given schema. Copy what is printed; never invent a line or a number. Use null for what you cannot read.
 Rules:
 - Money is a plain number with a dot (1.234,50 -> 1234.50). Currency TRY unless printed otherwise.
+- Dates: "invoice_datetime_local" / "terminal_datetime_local" are YYYY-MM-DDTHH:MM (24-hour, as printed: 16.11.2026 11:03 -> 2026-11-16T11:03), never dd.MM.yyyy.
 - One entry in "lines" per purchased item, in printed order. "raw" is the printed text of the item, "name" a cleaned product name, "line_total" the amount printed on the item row.
 - A quantity row such as "2 AD X 16,50" or "0,716 KG X 319,00" is printed ABOVE the item it belongs to: put it in that item's "qty_line" (qty, unit, unit_price), not as its own line.
 - A discount row (INDIRIM) belongs to the item above it: put the positive amount in its "discount".

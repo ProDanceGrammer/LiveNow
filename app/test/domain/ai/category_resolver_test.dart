@@ -18,6 +18,14 @@ void main() {
   });
   tearDown(() => db.close());
 
+  test('bug 2026-11-18: a currency word in the name finds no category named after a currency', () async {
+    await seed.group('💰 (TL) Повернути борг');
+    final r = await CategoryResolver(db).resolve('1.000,00 TL');
+    expect(r.candidates, isEmpty);
+    final also = await CategoryResolver(db).resolve('Повернути борг');
+    expect(also.best, isNotNull, reason: 'the real words still match');
+  });
+
   test('a singular finds its plural: огірок ~ Огірки, but молоко is not Молочне', () async {
     final veg = await seed.group('🛒 Продукти');
     await seed.leaf('🥒 Огірки', price: 39, parentId: veg);

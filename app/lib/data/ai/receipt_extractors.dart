@@ -62,25 +62,39 @@ class OcrLlmExtractor implements ReceiptExtractor {
       LlmMessage.user(receiptExtractionUserPrompt(text)),
     ];
     var receipt = await _ask(llm, messages, cancel);
-    receipt = repairArithmetic(receipt, ocrText: text);
+    receipt = soleLineTakesTotal(repairArithmetic(receipt, ocrText: text), text);
     if (sumMismatch(receipt)) {
       receipt = await _retryOnce(llm, messages, receipt, cancel, ocrText: text);
     }
-    receipt = cleanReceiptNames(receipt);
+    receipt = dropEmbeddedLast4(cleanReceiptNames(receipt), text);
     // Deterministic first: the model never makes a reading worse. When the
     // program's own rows are at least as close to the printed total, keep them.
     if (rebuilt != null) {
       final total = rebuilt.receipt.total ?? receipt.total;
       double gap(ExtractedReceipt r) =>
           total == null ? double.infinity : ((linesSum(r) ?? 0) - total).abs();
-      if (gap(rebuilt.receipt) <= gap(receipt)) {
-        receipt = copyReceipt(rebuilt.receipt, total: total);
-      }
+      receipt = gap(rebuilt.receipt) <= gap(receipt)
+          ? fillGaps(copyReceipt(rebuilt.receipt, total: total), receipt)
+          : fillGaps(receipt, rebuilt.receipt);
     }
     if (sumMismatch(receipt)) await onUnbalanced?.call(read.words, text, receipt);
     return (receipt: receipt, ocrText: text);
   }
 }
+
+/// [win] with what it lacks (shop, date and time, total, payments) taken from
+/// the reading that lost: each reading often has what the other missed.
+ExtractedReceipt fillGaps(ExtractedReceipt win, ExtractedReceipt other) => ExtractedReceipt(
+  merchant: win.merchant ?? other.merchant,
+  invoiceDatetimeLocal: win.invoiceDatetimeLocal ?? other.invoiceDatetimeLocal,
+  terminalDatetimeLocal: win.terminalDatetimeLocal ?? other.terminalDatetimeLocal,
+  currency: win.currency,
+  total: win.total ?? other.total,
+  tenders: win.tenders.isEmpty ? other.tenders : win.tenders,
+  lines: win.lines,
+  overallConfidence: win.overallConfidence,
+  lowConfidenceFields: win.lowConfidenceFields,
+);
 
 /// A vision model reads the picture directly (image as a base64 `image_url`).
 class VlmExtractor implements ReceiptExtractor {

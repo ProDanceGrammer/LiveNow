@@ -8,6 +8,7 @@ import 'package:livenow/data/ai/llm_client.dart';
 import 'package:livenow/data/ai/ocr_client.dart';
 import 'package:livenow/domain/ai/ai_job_runner.dart' show kModelProcessingLimit;
 import 'package:livenow/data/ai/receipt_extractors.dart';
+import 'package:livenow/data/database.dart' show BudgetCategory;
 import 'package:livenow/domain/ai/ai_batch_service.dart';
 import 'package:livenow/domain/ai/ai_protocol.dart';
 import 'package:livenow/domain/ai/extracted_receipt.dart';
@@ -1187,6 +1188,146 @@ void main() {
       await env.confirm(job);
       expect((await env.job(job)).state, AiJobState.done);
       expect(await env.count('budget_transactions'), 5);
+    });
+  });
+
+  group('A3. the message steers photographed receipts (bug 2026-11-18)', () {
+    const said = 'занеси тут все в подарунки (для рідних). в транзакціях вкажи що '
+        '(квіти/пакет/засоби для догляду) та що це для Маришки';
+    Map<String, dynamic> planReply({String? category = 'подарунки (для рідних)'}) => {
+      'category': category,
+      'recipient': 'Маришки',
+      'receipts': [
+        {'n': 1, 'item': 'засоби для догляду'},
+        {'n': 2, 'item': 'пакет'},
+      ],
+    };
+
+    Future<void> setUpTwoReceipts({bool withGroup = true}) async {
+      await env.init(llm: llmClient(), ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = (_) => ocrReply(['ROSSMANN', 'EL VE 139,00', 'TOPLAM 139,00']);
+      if (withGroup) {
+        // A real group has categories in it.
+        final seed = Seed(env.db);
+        final gifts = await seed.group('🎁 Подарунки');
+        await seed.leaf('🧸 Іграшки', price: 300, parentId: gifts, unit: BudgetUnit.piece);
+      }
+      env.extractor.queue
+        ..add(receiptOf([rl('EL VE', 139.0), rl('VUCUT SC', 259.0), rl('SPREY', 189.0)], merchant: 'ROSSMANN'))
+        ..add(receiptOf([rl('POSET', 1.0)], merchant: 'ROSSMANN'));
+    }
+
+    Future<List<BudgetCategory>> newLeaves() async => [
+      for (final c in await env.db.select(env.db.budgetCategoriesTable).get())
+        if (c.name.contains('Подарунки (для рідних)')) c,
+    ];
+
+    test('a missing category goes in the matching group: one shared leaf, no questions, named lines', () async {
+      await setUpTwoReceipts();
+      llmServer.enqueueJson(planReply());
+      final parent = await env.sendPhotos([1, 3], caption: said);
+      await env.drain();
+      final first = deriveId(parent, 'job', 0);
+      final second = deriveId(parent, 'job', 1);
+      for (final id in [first, second]) {
+        expect(await env.messages(id, AiMessageKind.question), isEmpty, reason: 'no cat: / weight: questions');
+        final d = await env.draft(id);
+        for (final l in d.lines) {
+          expect(l['category_name'], contains('Подарунки (для рідних)'));
+          expect(l['unit'], 'piece');
+          expect(l['quantity'], 1);
+          expect(l['new_category'], isTrue);
+          expect(l['questions'], isEmpty);
+        }
+      }
+      expect(await env.count('budget_transactions'), 0, reason: 'nothing before Confirm');
+      await env.confirm(first);
+      await env.confirm(second);
+      expect((await env.job(first)).state, AiJobState.done, reason: (await env.job(first)).error);
+      expect((await env.job(second)).state, AiJobState.done, reason: (await env.job(second)).error);
+
+      final leaves = await newLeaves();
+      expect(leaves, hasLength(1), reason: 'both receipts share the one new leaf');
+      final group = (await env.db.select(env.db.budgetCategoriesTable).get()).firstWhere((c) => c.name.contains('Подарунки') && !c.name.contains('для рідних'));
+      expect(leaves.single.parentId, group.id);
+      final txs = await env.transactions();
+      expect(txs, hasLength(4));
+      expect(txs.every((t) => t.categoryId == leaves.single.id), isTrue);
+      final names = txs.map((t) => t.name).toList();
+      expect(names.where((n) => n.startsWith('ROSSMANN засоби для догляду для Маришки: ')), hasLength(3));
+      expect(names, contains('ROSSMANN пакет для Маришки'), reason: 'a one-line receipt drops ": line name"');
+    });
+
+    test('no matching group: a top-level leaf', () async {
+      await setUpTwoReceipts(withGroup: false);
+      llmServer.enqueueJson(planReply());
+      final parent = await env.sendPhotos([1, 3], caption: said);
+      await env.drain();
+      final first = deriveId(parent, 'job', 0);
+      await env.confirm(first);
+      expect((await env.job(first)).state, AiJobState.done, reason: (await env.job(first)).error);
+      final leaves = await newLeaves();
+      expect(leaves, hasLength(1));
+      expect(leaves.single.parentId, isNull);
+      expect((await env.transactions()).every((t) => t.categoryId == leaves.single.id), isTrue);
+    });
+
+    test('an existing leaf is forced on the line and its pick is not learned', () async {
+      await env.init(llm: llmClient(), ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = (_) => ocrReply(['ROSSMANN', 'EL VE 139,00', 'TOPLAM 139,00']);
+      final seed = Seed(env.db);
+      final gifts = await seed.group('🎁 Подарунки');
+      final leaf = await seed.leaf('🎁 Подарунки (для рідних)', price: 139, parentId: gifts, unit: BudgetUnit.piece);
+      await seed.leaf('🧸 Іграшки', price: 300, parentId: gifts, unit: BudgetUnit.piece);
+      env.extractor.receipt = receiptOf([rl('EL VE', 139.0)], merchant: 'ROSSMANN');
+      llmServer.enqueueJson(planReply());
+      final aliasesBefore = await env.count('product_aliases');
+      final job = await env.sendPhotos([1], caption: said);
+      await env.drain();
+      expect(await env.messages(job, AiMessageKind.question), isEmpty);
+      await env.confirm(job);
+      expect((await env.job(job)).state, AiJobState.done, reason: (await env.job(job)).error);
+      final tx = (await env.transactions()).single;
+      expect(tx.categoryId, leaf);
+      expect(tx.name, startsWith('ROSSMANN'));
+      expect(await env.count('product_aliases'), aliasesBefore, reason: 'the category came from the message');
+    });
+
+    test('an amount-only line name takes the shop of the paired screenshot, never a currency category', () async {
+      await env.init(llm: llmClient(), ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = (bytes) => bytes.first == 2
+          ? ocrReply(['ROYAL CICEKCILIK', 'Сума 912,47 ₴', 'У валюті 1 000,00 TL', 'курс 0,9124'])
+          : ocrReply(['Alanya VD', '*1.000,00', 'TOPLAM']);
+      final seed = Seed(env.db);
+      await seed.leaf('💰 (TL) Повернути борг', price: 1, unit: BudgetUnit.piece);
+      env.extractor.receipt = ExtractedReceipt(
+        total: 1000,
+        tenders: [Tender(method: 'card', last4: '6141', amount: 1000)],
+        terminalDatetimeLocal: '2026-10-08T19:40:00',
+        lines: [rl('1.000,00 TL', 1000.0)],
+      );
+      llmServer.enqueueJson(planReply(category: 'квіти'));
+      final job = await env.sendPhotos([1, 2], caption: said);
+      await env.drain();
+      final d = await env.draft(job);
+      expect(d.json['merchant'], 'ROYAL CICEKCILIK');
+      expect(d.lines.single['name'], 'ROYAL CICEKCILIK');
+      expect(d.lines.single['category_name'], isNot(contains('Повернути борг')));
+      await env.confirm(job);
+      expect((await env.transactions()).single.name, 'ROYAL CICEKCILIK засоби для догляду для Маришки');
+    });
+
+    test('a junk model reply leaves the receipt on its usual way', () async {
+      await env.init(llm: llmClient(), ocr: OcrClient(baseUrl: ocrServer.url));
+      ocrServer.replyFor = (_) => ocrReply(['BIM', 'EKMEK KOY 600G 64,00', 'TOPLAM 64,00']);
+      await bazaarAction();
+      env.extractor.receipt = receiptOf([rl('EKMEK KÖY 600G', 64.0)]);
+      llmServer.enqueueContent('this is not json at all');
+      final job = await env.sendPhotos([1], caption: said);
+      await env.drain();
+      final d = await env.draft(job);
+      expect(d.lines.single['category_name'], contains('Хліб'), reason: 'the learned alias, as before');
+      expect((d.json['overrides'] as Map).containsKey('message_plan'), isFalse);
     });
   });
 
