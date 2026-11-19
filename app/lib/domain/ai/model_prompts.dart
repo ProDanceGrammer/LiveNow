@@ -704,3 +704,130 @@ MessagePlan parseMessagePlan(Map<String, dynamic> json, {required int receiptCou
     items: items,
   );
 }
+
+// ---------------------------------------------------------------------------
+// (e) which account a transfer message means
+// ---------------------------------------------------------------------------
+
+/// [accounts]: one line per account ("name, currency"), numbered from 1. The
+/// model only POINTS at accounts; the program checks the answer.
+ModelPrompt accountPickPrompt({
+  required String text,
+  required List<String> accounts,
+  String language = 'Ukrainian',
+}) {
+  final list = StringBuffer();
+  for (var i = 0; i < accounts.length; i++) {
+    list.writeln('${i + 1}. ${accounts[i]}');
+  }
+  return ModelPrompt(
+    system: modelSystemPrompt(language: language),
+    user:
+        'Task: the user moved money between their own accounts. Say which '
+        'account it left and which it went into. Use only the numbered list; '
+        'null when the message does not say or no account fits.\n'
+        'Message: $text\nAccounts:\n$list'
+        'Reply {"from": number or null, "to": number or null}.',
+    schemaName: 'account_pick',
+    schema: {
+      'type': 'object',
+      'additionalProperties': false,
+      'required': ['from', 'to'],
+      'properties': {
+        'from': {
+          'type': ['integer', 'null'],
+        },
+        'to': {
+          'type': ['integer', 'null'],
+        },
+      },
+    },
+  );
+}
+
+int? _pickIndex(Object? v, int count) {
+  final n = v is num ? v.round() : int.tryParse('$v');
+  return n != null && n >= 1 && n <= count ? n - 1 : null;
+}
+
+/// 0-based indexes of the accounts the model named, `from` and `to`. A number
+/// outside the list is dropped (null); the same account twice drops both.
+({int? from, int? to}) parseAccountPick(Map<String, dynamic> json, {required int accountCount}) {
+  final from = _pickIndex(json['from'], accountCount);
+  final to = _pickIndex(json['to'], accountCount);
+  if (from != null && from == to) return (from: null, to: null);
+  return (from: from, to: to);
+}
+
+// ---------------------------------------------------------------------------
+// (f) which part of a message belongs to which screenshot
+// ---------------------------------------------------------------------------
+
+/// [parts] are the message parts the rules could not place, [shots] one line
+/// per screenshot (amount, day, shop), both numbered from 1.
+ModelPrompt messageShotsPrompt({
+  required List<String> parts,
+  required List<String> shots,
+  String language = 'Ukrainian',
+}) {
+  final p = StringBuffer();
+  for (var i = 0; i < parts.length; i++) {
+    p.writeln('${i + 1}. ${parts[i]}');
+  }
+  final s = StringBuffer();
+  for (var i = 0; i < shots.length; i++) {
+    s.writeln('${i + 1}. ${shots[i]}');
+  }
+  return ModelPrompt(
+    system: modelSystemPrompt(language: language),
+    user:
+        'Task: the user sent bank screenshots with a message. Say which message '
+        'part is about which screenshot. Each part and each screenshot is used '
+        'at most once; leave out what does not fit. Do not invent.\n'
+        'Message parts:\n$p'
+        'Screenshots:\n$s'
+        'Reply {"pairs": [{"shot": number, "part": number}]}.',
+    schemaName: 'message_shots',
+    schema: {
+      'type': 'object',
+      'additionalProperties': false,
+      'required': ['pairs'],
+      'properties': {
+        'pairs': {
+          'type': 'array',
+          'items': {
+            'type': 'object',
+            'additionalProperties': false,
+            'required': ['shot', 'part'],
+            'properties': {
+              'shot': {'type': 'integer'},
+              'part': {'type': 'integer'},
+            },
+          },
+        },
+      },
+    },
+  );
+}
+
+/// Screenshot index (0-based) -> part index (0-based). Out-of-range numbers are
+/// dropped; a part or a screenshot named twice keeps only its first pair.
+Map<int, int> parseMessageShots(
+  Map<String, dynamic> json, {
+  required int shotCount,
+  required int partCount,
+}) {
+  final out = <int, int>{};
+  final usedParts = <int>{};
+  final list = json['pairs'];
+  if (list is! List) return out;
+  for (final e in list) {
+    if (e is! Map) continue;
+    final shot = _pickIndex(e['shot'], shotCount);
+    final part = _pickIndex(e['part'], partCount);
+    if (shot == null || part == null || out.containsKey(shot) || usedParts.contains(part)) continue;
+    out[shot] = part;
+    usedParts.add(part);
+  }
+  return out;
+}

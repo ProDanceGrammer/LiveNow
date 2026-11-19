@@ -12,6 +12,9 @@ class ScreenshotReading {
     this.merchant,
     this.date,
     this.dayGuessed = false,
+    this.bankScreen = false,
+    this.incoming = false,
+    this.uahOnly = false,
   });
 
   final double? useAmount;
@@ -28,13 +31,26 @@ class ScreenshotReading {
   /// fitting one, and the draft asks the user to check it.
   final bool dayGuessed;
 
-  bool get hasAnything => rate != null || (useAmount != null && countAmount != null);
+  /// A detail screen of the bank app (balance and tags lines): its main amount
+  /// is the one above the balance, whatever symbol OCR made of the "₴".
+  final bool bankScreen;
+
+  /// The main amount has no minus: money came in (a top-up, a card-to-card in).
+  final bool incoming;
+
+  /// A bank screen with neither a lira amount nor a rate: only hryvnia, so it is
+  /// no paper receipt's rate info (a transfer, a top-up, a domestic purchase).
+  final bool uahOnly;
+
+  bool get hasAnything =>
+      rate != null || (useAmount != null && countAmount != null) || (bankScreen && useAmount != null);
 
   /// The shop amount; from the charged amount and the rate when only those show.
   double? get shopAmount {
     final c = countAmount;
     if (c != null) return c;
     final u = useAmount;
+    if (uahOnly) return u;
     final r = rate;
     if (u == null || r == null || r <= 0) return null;
     return (u / r * 100).roundToDouble() / 100;
@@ -47,6 +63,9 @@ class ScreenshotReading {
     if (merchant != null) 'merchant': merchant,
     if (date != null) 'date': _isoLocal(date!),
     if (date != null && dayGuessed) 'day_guessed': true,
+    if (bankScreen) 'bank_screen': true,
+    if (incoming) 'incoming': true,
+    if (uahOnly) 'uah_only': true,
   };
 
   factory ScreenshotReading.fromJson(Map<String, dynamic> j) => ScreenshotReading(
@@ -56,6 +75,9 @@ class ScreenshotReading {
     merchant: j['merchant'] is String ? j['merchant'] as String : null,
     date: j['date'] is String ? DateTime.tryParse(j['date'] as String) : null,
     dayGuessed: j['day_guessed'] == true,
+    bankScreen: j['bank_screen'] == true,
+    incoming: j['incoming'] == true,
+    uahOnly: j['uah_only'] == true,
   );
 }
 
@@ -142,6 +164,15 @@ ScreenshotReading parseBankScreenshot(String text, {DateTime? now}) {
     }
   }
   final when = _readDate(text, now: now ?? DateTime.now(), strict: true);
+  // A hryvnia-only detail screen (transfer, top-up): the amount above the balance.
+  final bank = _bankScreenOf(text, hasDate: when != null);
+  var incoming = false;
+  var uahOnly = false;
+  if (bank != null && useAmount == null && countAmount == null && rate == null) {
+    useAmount = bank.amount;
+    incoming = bank.incoming;
+    uahOnly = true;
+  }
   return ScreenshotReading(
     useAmount: useAmount,
     countAmount: countAmount,
@@ -149,7 +180,55 @@ ScreenshotReading parseBankScreenshot(String text, {DateTime? now}) {
     merchant: _merchantOf(text),
     date: when?.at,
     dayGuessed: when?.dayGuessed ?? false,
+    bankScreen: bank != null,
+    incoming: incoming,
+    uahOnly: uahOnly,
   );
+}
+
+// ---- a bank app's detail screen without a lira amount --------------------------
+
+final _balanceWord = _fold('залишок');
+final _tagsMark = RegExp(r'#\s*(?:ter|tag|тег)', caseSensitive: false);
+
+/// Whole-line amount: optional sign, a number with two decimals, at most two
+/// stray symbols (the "₴" read as `∞`, `会`, `号` or nothing).
+final _mainAmountLine = RegExp(r'^\s*([-−–+])?\s*(\d[\d\s  ]*[.,]\d{2})\s*[^\d\s]{0,2}\s*$');
+
+/// Monobank's own captions of a card-to-card transfer and a top-up, never a shop.
+final _bankCaptions = [_fold('переказ на картку'), _fold('поповнення картки')];
+
+bool _isBankCaption(String line) {
+  final f = _fold(line.trim());
+  if (f.length < 10) return false;
+  for (final c in _bankCaptions) {
+    final budget = c.length * 0.2 > 2 ? (c.length * 0.2).floor() : 2;
+    if (_editDistance(f, c) <= budget) return true;
+  }
+  return false;
+}
+
+bool _isBalanceLine(String line) {
+  final f = _fold(line.replaceAll(RegExp(r'\s+'), ''));
+  return f.length >= 5 && f.length <= 10 && (_editDistance(f, _balanceWord) <= 1 || f == 'balance');
+}
+
+/// A detail screen of the bank app (the balance line and the tags line, or the
+/// balance line and a date) and the first amount-only line ABOVE the balance:
+/// that skips the balance, the chart's amounts and the status-bar time.
+({double amount, bool incoming})? _bankScreenOf(String text, {required bool hasDate}) {
+  final lines = text.split(RegExp(r'\r?\n'));
+  final balanceAt = lines.indexWhere(_isBalanceLine);
+  if (balanceAt < 0) return null;
+  if (!hasDate && !lines.any(_tagsMark.hasMatch)) return null;
+  for (var i = 0; i < balanceAt; i++) {
+    final m = _mainAmountLine.firstMatch(lines[i]);
+    if (m == null) continue;
+    final v = parseAmountText(m.group(2)!);
+    if (v == null) continue;
+    return (amount: v, incoming: m.group(1) == null || m.group(1) == '+');
+  }
+  return null;
 }
 
 final _amountLine = RegExp(
@@ -172,6 +251,8 @@ final _uiLine = RegExp(
 /// digits is dropped.
 String? _merchantOf(String text) {
   final lines = text.split(RegExp(r'\r?\n'));
+  // A transfer or top-up has no shop: Monobank's own caption stands there.
+  if (lines.any(_isBankCaption)) return null;
   final at = lines.indexWhere(_amountLine.hasMatch);
   if (at <= 0) return null;
   for (var i = at - 1; i >= 0; i--) {
@@ -402,17 +483,31 @@ final _captionCurrency = RegExp(
 /// amount, day and currency taken out), or null. A part with an amount goes to
 /// the screenshot of that shop or charged amount, a part with a day to the
 /// screenshots of that day; a part with neither to every screenshot no other
-/// part took (the message wins over the merchant read on the screenshot).
+/// part took (the message wins over the merchant read on the screenshot), unless
+/// [generic] is false (the generic part then belongs to something else, e.g. the
+/// receipts sent in the same message).
 List<String?> captionsForShots(
   String? caption,
   List<ScreenshotReading> shots, {
   required DateTime now,
+  bool generic = true,
+}) => placeCaptions(caption, shots, now: now, generic: generic).captions;
+
+/// [captionsForShots] and the parts (as names) that no screenshot took: a part
+/// with an amount or day that fits none, or a second part without either. The
+/// rules cannot place those; the runner may ask the model once.
+({List<String?> captions, List<String> leftover}) placeCaptions(
+  String? caption,
+  List<ScreenshotReading> shots, {
+  required DateTime now,
+  bool generic = true,
 }) {
   final out = List<String?>.filled(shots.length, null);
+  final leftover = <String>[];
   final text = (caption ?? '').trim();
-  if (text.isEmpty || shots.isEmpty) return out;
+  if (text.isEmpty || shots.isEmpty) return (captions: out, leftover: leftover);
   final taken = List<bool>.filled(shots.length, false);
-  String? generic;
+  String? genericName;
   var hasGeneric = false;
   for (final raw in text.split(_captionSplit)) {
     var part = raw.trim();
@@ -429,11 +524,13 @@ List<String?> captionsForShots(
       part = part.replaceRange(a.start, a.end, ' ');
     }
     final name = _cleanName(part.replaceAll(_captionCurrency, ' '));
+    var placed = false;
     if (amount != null) {
       for (var i = 0; i < shots.length; i++) {
         if (!taken[i] && _sameAmount(shots[i], amount)) {
           taken[i] = true;
           out[i] = name;
+          placed = true;
           break;
         }
       }
@@ -443,19 +540,22 @@ List<String?> captionsForShots(
         if (!taken[i] && d != null && d.year == day.year && d.month == day.month && d.day == day.day) {
           taken[i] = true;
           out[i] = name;
+          placed = true;
         }
       }
     } else if (!hasGeneric) {
       hasGeneric = true;
-      generic = name;
+      genericName = name;
+      placed = true;
     }
+    if (!placed && name != null) leftover.add(name);
   }
-  if (generic != null) {
+  if (generic && genericName != null) {
     for (var i = 0; i < shots.length; i++) {
-      if (!taken[i]) out[i] = generic;
+      if (!taken[i]) out[i] = genericName;
     }
   }
-  return out;
+  return (captions: out, leftover: leftover);
 }
 
 /// A day written with a month name, wherever it stands (for taking it out).

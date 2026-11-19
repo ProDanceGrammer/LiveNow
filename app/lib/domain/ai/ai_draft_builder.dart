@@ -435,6 +435,9 @@ class DraftBuilder {
         }
       }
     }
+    // A bank screenshot of money that CAME IN (a top-up) is income: categories of
+    // that kind first, a spending category shown as a weak guess.
+    if (typed == null && ctx.payment && source['income'] == true) ctx.wantIncome = true;
     if (pay?.question != null) {
       ctx.blockers.add(pay!.question!.id);
       ctx.questions.add(pay.question!);

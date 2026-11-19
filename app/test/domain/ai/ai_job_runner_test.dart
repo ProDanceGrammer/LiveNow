@@ -1106,7 +1106,9 @@ void main() {
       ocrServer.replyFor = (image) => switch (image.first) {
         2 => ocrReply(['Сума 361,64 ₴', 'У валюті 391,50 TL', 'курс 0,9237']),
         4 => ocrReply(['Сума 180,00 ₴', 'У валюті 200,00 TL', 'курс 0,9000']),
-        _ => ocrReply(['BIM', 'TOPLAM']),
+        // A screenshot belongs to the receipt that prints its lira amount.
+        1 => ocrReply(['BIM', 'TOPLAM 391,50 TL']),
+        _ => ocrReply(['BIM', 'TOPLAM 200,00 TL']),
       };
       await bazaarAction();
       env.extractor.queue

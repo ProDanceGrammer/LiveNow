@@ -1728,6 +1728,16 @@ class AiJobRunner {
         shots.add(reading);
       }
     }
+    // A screenshot belongs to a receipt only when its lira amount stands among
+    // that receipt's printed amounts; every other one (hryvnia only, a transfer,
+    // a purchase of another day) is a purchase of its own, never lost.
+    final related = <int>[];
+    final own = <int>[];
+    for (var i = 0; i < shots.length; i++) {
+      (receipts.isNotEmpty && _fitsReceipt(shots[i], receiptRows) ? related : own).add(i);
+    }
+    final relatedShots = [for (final i in related) shots[i]];
+    final relatedBlobs = [for (final i in related) shotBlobs[i]];
     // The message may say where the receipts go (category), for whom and what
     // each one was: read once here, carried into each receipt's job.
     MessagePlan? plan;
@@ -1735,11 +1745,11 @@ class AiJobRunner {
       await _step(job, JobSteps.message);
       plan = await _messagePlan(payload.text, receiptRows);
     }
-    if (receipts.length == 1) {
+    if (receipts.length == 1 && own.isEmpty) {
       await _startDraftJob(
         job,
         photo: receipts.first,
-        shots: shots,
+        shots: relatedShots,
         solo: true,
         release: blobs,
         plan: plan == null
@@ -1752,43 +1762,46 @@ class AiJobRunner {
       );
       return;
     }
-    // Screenshots alone: the message may say what each one was (by its sum or
-    // day, or one text for all of them).
-    final captions = receipts.isEmpty
-        ? captionsForShots(payload.text, shots, now: await _messageTime(job, payload))
-        : const <String?>[];
+    // Screenshots of their own: the message may say what each one was (by its
+    // sum or day, or one text for all of them when no receipt took it).
+    final ownCaptions = own.isEmpty
+        ? const <String?>[]
+        : await _shotCaptions(
+            job,
+            payload,
+            [for (final i in own) shots[i]],
+            generic: receipts.isEmpty,
+          );
     if (receipts.isEmpty && shots.length == 1) {
-      await _applyScreenshot(job, payload, blobs, shots.first, caption: captions.first);
+      await _applyScreenshot(job, payload, blobs, shots.first, caption: ownCaptions.first);
       return;
     }
-    // Several receipts, or several screenshots alone: one job each, so every
-    // receipt has its own draft, Confirm and Undo. A receipt job gets all the
-    // screenshots and takes the one whose amount fits its total.
+    // Several receipts, or several screenshots: one job each, so every receipt
+    // has its own draft, Confirm and Undo. A receipt job gets the screenshots
+    // that fit a receipt and takes the one whose amount fits its total.
     final kids = <({String kind, JobPayload payload})>[
-      if (receipts.isNotEmpty)
-        for (var i = 0; i < receipts.length; i++)
-          (
-            kind: AiJobKind.receipt,
-            payload: JobPayload(
-              messageId: payload.messageId,
-              blobIds: [receipts[i].id],
-              screenshots: [for (final s in shots) s.toJson()],
-              receiptCount: receipts.length,
-              planCategory: plan?.category,
-              planItem: plan?.items[i + 1],
-              planRecipient: plan?.recipient,
-            ),
-          )
-      else
-        for (var i = 0; i < shotBlobs.length; i++)
-          (
-            kind: AiJobKind.screenshot,
-            payload: JobPayload(
-              messageId: payload.messageId,
-              blobIds: [shotBlobs[i].id],
-              text: captions[i],
-            ),
+      for (var i = 0; i < receipts.length; i++)
+        (
+          kind: AiJobKind.receipt,
+          payload: JobPayload(
+            messageId: payload.messageId,
+            blobIds: [receipts[i].id],
+            screenshots: [for (final s in relatedShots) s.toJson()],
+            receiptCount: receipts.length,
+            planCategory: plan?.category,
+            planItem: plan?.items[i + 1],
+            planRecipient: plan?.recipient,
           ),
+        ),
+      for (var k = 0; k < own.length; k++)
+        (
+          kind: AiJobKind.screenshot,
+          payload: JobPayload(
+            messageId: payload.messageId,
+            blobIds: [shotBlobs[own[k]].id],
+            text: ownCaptions[k],
+          ),
+        ),
     ];
     await _spawn(job, kids);
     final what = receipts.isNotEmpty
@@ -1798,9 +1811,66 @@ class AiJobRunner {
       job,
       'Знайшов $what. Обробляю кожен чек окремо, по черзі.',
     );
-    // The screenshots are already read; the receipts keep their bytes until
-    // their own job is done.
-    if (receipts.isNotEmpty) await _releasePhotos(shotBlobs);
+    // The screenshots that fit a receipt are already read; the receipts keep
+    // their bytes until their own job is done, the others read their own photo.
+    if (receipts.isNotEmpty) await _releasePhotos(relatedBlobs);
+  }
+
+  /// A screenshot fits a receipt when its lira amount is one of the amounts OCR
+  /// read on that receipt (the tolerance of [pickScreenshot]).
+  bool _fitsReceipt(ScreenshotReading shot, List<String> receiptRows) {
+    final c = shot.countAmount;
+    if (c == null) return false;
+    final tol = c * 0.005 > 1.0 ? c * 0.005 : 1.0;
+    for (final rows in receiptRows) {
+      for (final m in RegExp(r'\d[\d.,]*\d|\d').allMatches(rows)) {
+        final v = parseAmountText(m.group(0)!);
+        if (v != null && (v - c).abs() <= tol) return true;
+      }
+    }
+    return false;
+  }
+
+  /// What the message says about each of [shots]. The rules (amount, day, one
+  /// generic text) first; message parts they could not place go to the model
+  /// ONCE together with the screenshots still without a name, and every answer
+  /// is checked: a part and a screenshot are used at most once.
+  Future<List<String?>> _shotCaptions(
+    AiJob job,
+    JobPayload payload,
+    List<ScreenshotReading> shots, {
+    required bool generic,
+  }) async {
+    final now = await _messageTime(job, payload);
+    final placed = placeCaptions(payload.text, shots, now: now, generic: generic);
+    final captions = [...placed.captions];
+    final client = llm;
+    final open = [
+      for (var i = 0; i < captions.length; i++)
+        if (captions[i] == null) i,
+    ];
+    if (client == null || placed.leftover.isEmpty || open.isEmpty) return captions;
+    String describe(ScreenshotReading r) {
+      final d = r.date;
+      return [
+        'amount ${fmtMoney(r.shopAmount ?? r.useAmount ?? 0)}',
+        if (d != null) 'day ${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}',
+        if (r.merchant != null) 'shop ${r.merchant}',
+      ].join(', ');
+    }
+    try {
+      final reply = await client.runPrompt(
+        messageShotsPrompt(
+          parts: placed.leftover,
+          shots: [for (final i in open) describe(shots[i])],
+        ),
+      );
+      final pairs = parseMessageShots(reply, shotCount: open.length, partCount: placed.leftover.length);
+      pairs.forEach((shot, part) => captions[open[shot]] = placed.leftover[part]);
+    } on Object catch (e) {
+      if (e is AiUnreachableException || e is AiCancelledException) rethrow;
+    }
+    return captions;
   }
 
   /// Creates the follow-up jobs of [parent] in the same thread. Their ids are
@@ -1897,12 +1967,12 @@ class AiJobRunner {
       return;
     }
     final merchant = reading.merchant;
-    final name = caption ?? merchant ?? 'Оплата карткою';
+    final name = caption ?? merchant ?? (reading.incoming ? 'Надходження' : 'Оплата карткою');
     final date = reading.date;
     final receipt = ExtractedReceipt(
       // With the message's name the merchant goes before it in the
       // transaction's name; alone it IS the line.
-      merchant: caption == null ? null : merchant,
+      merchant: caption == null || reading.uahOnly ? null : merchant,
       invoiceDatetimeLocal: date == null ? null : isoLocalOf(date),
       currency: reading.countAmount != null ? 'TRY' : 'UAH',
       total: amount,
@@ -1919,6 +1989,8 @@ class AiJobRunner {
         'payment': true,
         // The user's words name it (and may name a group of categories).
         if (caption != null) 'named': true,
+        // Money that came in (a top-up) is income.
+        if (reading.incoming) 'income': true,
         // A merchant's name is a name, not a product to translate.
         if (caption == null) 'keep_names': true,
       },
@@ -1945,7 +2017,13 @@ class AiJobRunner {
     String? caption,
   }) async {
     await _step(job, JobSteps.payment);
-    final target = caption == null ? await _batchForScreenshot(job, reading) : null;
+    // A hryvnia-only screen (transfer, top-up) whose message part says "from X
+    // to Y" is a transfer between the user's own accounts.
+    if (reading.uahOnly && caption != null && await _screenshotTransfer(job, payload, blobs, reading, caption)) {
+      return;
+    }
+    // A hryvnia-only screen is never the rate of a recorded receipt.
+    final target = caption == null && !reading.uahOnly ? await _batchForScreenshot(job, reading) : null;
     if (target == null) {
       await _startShotPurchase(job, payload, blobs, reading, caption);
       return;
@@ -2147,10 +2225,20 @@ class AiJobRunner {
     final text = (payload.text ?? await _messageBody(payload.messageId) ?? '').trim();
     final transfer = parseTransferText(text);
     if (transfer != null) {
-      await _transfer(job, transfer);
+      await _transfer(job, transfer, text);
       return;
     }
     final accounts = await db.select(db.budgetAccountsTable).get();
+    // "9026 грн із ФОП на монобанк": no verb, but it is a transfer when BOTH
+    // names are accounts (the model is not asked for a message this loose).
+    final loose = parseTransferPart(text);
+    if (loose != null && loose.amount != null) {
+      final picked = await _pickAccounts(loose, text, accounts, ask: _Ask.never);
+      if (picked.from.length == 1 && picked.to.length == 1 && picked.from.first.id != picked.to.first.id) {
+        await _writeTransfer(job, picked.from.first, picked.to.first, amount: loose.amount!);
+        return;
+      }
+    }
     final typed = parseTypedExpense(
       text,
       now: (await _messageTime(job, payload)).toLocal(),
@@ -2227,13 +2315,12 @@ class AiJobRunner {
     await _status(job, AiStage.done);
   }
 
-  Future<void> _transfer(AiJob job, TransferRequest req) async {
+  Future<void> _transfer(AiJob job, TransferRequest req, String text) async {
     final accounts = await db.select(db.budgetAccountsTable).get();
-    final from = matchAccountName(req.from, accounts, (a) => a.name);
-    final to = matchAccountName(req.to, accounts, (a) => a.name);
+    final picked = await _pickAccounts(req, text, accounts, ask: _Ask.always);
     String names() => accounts.map((a) => a.name).join(', ');
-    if (from.length != 1 || to.length != 1) {
-      final which = from.length != 1 ? req.from : req.to;
+    if (picked.from.length != 1 || picked.to.length != 1) {
+      final which = picked.from.length != 1 ? req.from : req.to;
       await _replyAndFinish(
         job,
         'Не вдалося однозначно знайти рахунок «$which». '
@@ -2241,28 +2328,130 @@ class AiJobRunner {
       );
       return;
     }
-    final src = from.first;
-    final dst = to.first;
-    if (src.id == dst.id) {
+    if (picked.from.first.id == picked.to.first.id) {
       await _replyAndFinish(job, 'Потрібні два різні рахунки.');
       return;
     }
+    await _writeTransfer(job, picked.from.first, picked.to.first, amount: req.amount!);
+  }
+
+  /// A screenshot of a transfer or top-up with the message's "from X to Y": when
+  /// both accounts are found, it is written at once (two transactions, Undo)
+  /// with the screenshot's exact amount and day. False = not a transfer: the
+  /// caption is then a purchase name.
+  Future<bool> _screenshotTransfer(
+    AiJob job,
+    JobPayload payload,
+    List<AiBlob> blobs,
+    ScreenshotReading reading,
+    String caption,
+  ) async {
+    final req = parseTransferPart(caption);
+    final amount = reading.useAmount;
+    if (req == null || amount == null) return false;
+    final accounts = await db.select(db.budgetAccountsTable).get();
+    // "кава з молоком на винос" has the same shape: the model is asked only when
+    // the rules already found one of the two accounts.
+    final picked = await _pickAccounts(req, caption, accounts, ask: _Ask.partial, currencyHint: 'UAH');
+    if (picked.from.length != 1 || picked.to.length != 1 || picked.from.first.id == picked.to.first.id) {
+      return false;
+    }
+    DateTime? at;
+    final d = reading.date;
+    if (d != null) {
+      try {
+        at = receiptLocalToUtc(isoLocalOf(d));
+      } on FormatException {
+        at = null;
+      }
+    }
+    await _writeTransfer(
+      job,
+      picked.from.first,
+      picked.to.first,
+      amount: amount,
+      amountCurrency: 'UAH',
+      at: at,
+    );
+    await _releasePhotos(blobs);
+    return true;
+  }
+
+  /// Both accounts of a transfer message: the rules ([resolveAccount]) first;
+  /// when they leave a side at none or several, ONE model call may point at
+  /// them (see [_Ask]), and only valid, distinct numbers are taken.
+  Future<({List<BudgetAccount> from, List<BudgetAccount> to})> _pickAccounts(
+    TransferRequest req,
+    String text,
+    List<BudgetAccount> accounts, {
+    required _Ask ask,
+    String? currencyHint,
+  }) async {
+    List<BudgetAccount> find(String typed, {String? hint}) => resolveAccount(
+      typed,
+      accounts,
+      nameOf: (a) => a.name,
+      currencyOf: (a) => a.currency,
+      currencyHint: hint,
+    );
+    var from = find(req.from, hint: currencyHint);
+    var to = find(req.to);
+    final open = from.length != 1 || to.length != 1;
+    final askModel = switch (ask) {
+      _Ask.always => true,
+      _Ask.partial => from.length == 1 || to.length == 1,
+      _Ask.never => false,
+    };
+    final client = llm;
+    if (open && askModel && client != null) {
+      try {
+        final reply = await client.runPrompt(
+          accountPickPrompt(
+            text: text,
+            accounts: [for (final a in accounts) '${a.name}, ${a.currency}'],
+          ),
+        );
+        final pick = parseAccountPick(reply, accountCount: accounts.length);
+        if (from.length != 1 && pick.from != null) from = [accounts[pick.from!]];
+        if (to.length != 1 && pick.to != null) to = [accounts[pick.to!]];
+      } on Object catch (e) {
+        if (e is AiUnreachableException || e is AiCancelledException) rethrow;
+      }
+    }
+    return (from: from, to: to);
+  }
+
+  /// Writes a transfer as the two usual transactions in one undoable batch.
+  /// [amount] is in the source account's currency, unless [amountCurrency] says
+  /// it is in the destination's (a hryvnia screenshot of a top-up).
+  Future<void> _writeTransfer(
+    AiJob job,
+    BudgetAccount src,
+    BudgetAccount dst, {
+    required double amount,
+    String? amountCurrency,
+    DateTime? at,
+  }) async {
     final sameCurrency = src.currency.toUpperCase() == dst.currency.toUpperCase();
-    final destAmount = sameCurrency
-        ? req.amount
-        : (req.amount / src.rateToBase * dst.rateToBase * 100).round() / 100;
-    final at = _clock().toUtc();
+    double convert(double v, BudgetAccount from, BudgetAccount to) =>
+        (v / from.rateToBase * to.rateToBase * 100).round() / 100;
+    final inDest = !sameCurrency &&
+        amountCurrency != null &&
+        dst.currency.toUpperCase() == amountCurrency.toUpperCase();
+    final sourceAmount = inDest ? convert(amount, dst, src) : amount;
+    final destAmount = sameCurrency ? amount : (inDest ? amount : convert(amount, src, dst));
+    final when = at ?? _clock().toUtc();
     final payload = JobPayload.decode(job.payloadJson);
     await _setJob(job.id, state: AiJobState.committing, stage: AiStage.saving);
     await db.transaction(() async {
       final r = await TransferBuilder(db, _budget).create(
         sourceAccountId: src.id,
         destAccountId: dst.id,
-        sourceAmount: req.amount,
+        sourceAmount: sourceAmount,
         destAmount: destAmount,
         sourceRate: src.rateToBase,
         destRate: dst.rateToBase,
-        date: at,
+        date: when,
         namespaceId: job.id,
       );
       final batch = await _batches.startBatch(
@@ -2295,7 +2484,7 @@ class AiJobRunner {
         kind: AiMessageKind.result,
         body:
             'Переказ записано (пакет ${batch.substring(0, 8)}): '
-            '${fmtMoney(req.amount)} ${src.currency} ${src.name} → '
+            '${fmtMoney(sourceAmount)} ${src.currency} ${src.name} → '
             '${fmtMoney(destAmount)} ${dst.currency} ${dst.name}.'
             '${sameCurrency ? '' : ' Суму отримання пораховано за курсами рахунків.'}',
         contentJson: jsonEncode({
@@ -2430,6 +2619,18 @@ class AiJobRunner {
   }
 
   static String foldOf(String s) => s.trim().toLowerCase();
+}
+
+/// When the model may be asked which account a transfer message means.
+enum _Ask {
+  /// The message is a transfer for sure (it has a verb).
+  always,
+
+  /// Only when the rules already found one of the two accounts.
+  partial,
+
+  /// Never: the rules decide.
+  never,
 }
 
 /// What the user answered to a "weight of one pack?" question: grams, or "by
