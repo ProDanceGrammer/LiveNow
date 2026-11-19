@@ -1,15 +1,20 @@
 import 'dart:convert';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livenow/core/ids.dart';
+import 'package:livenow/core/time_codec.dart';
 import 'package:livenow/data/database.dart';
 import 'package:livenow/domain/growth_rules.dart' show MetricKind;
 import 'package:livenow/domain/metric_service.dart';
 import 'package:livenow/domain/postpone_rules.dart';
+import 'package:livenow/domain/saved_view_service.dart';
+import 'package:livenow/domain/saved_views.dart';
+import 'package:livenow/domain/template_filters.dart';
 import 'package:livenow/ui/data_imports.dart' show importTemplatesCsv;
 import 'package:livenow/ui/dialog_stack.dart';
 import 'package:livenow/ui/providers.dart';
@@ -37,10 +42,11 @@ void main() {
     WidgetTester tester, {
     String? csv,
     Future<void> Function(AppDatabase db)? seed,
+    Size size = const Size(1400, 900),
   }) async {
     // Wide window: below 900 px the app switches to the phone layout, which
     // hides the Import CSV button (Settings has it there).
-    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -639,6 +645,204 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
     }
     expect(find.byTooltip('Urgency to Keep in Balance'), findsWidgets);
+    await settleAndUnmount(tester);
+  });
+
+  // ---- filters ---------------------------------------------------------------
+
+  /// Walk (dir A, avg 30), Jog (A + B, avg 60), Read (B, never run), Nap (none).
+  late String dirA, dirB;
+  Future<void> seedFilterData(AppDatabase db) async {
+    final svc = MetricService(db);
+    dirA = await svc.saveMetric(name: 'Alpha', kind: MetricKind.boolean);
+    dirB = await svc.saveMetric(name: 'Beta', kind: MetricKind.boolean);
+    Future<void> tpl(String n, List<String> ids) => db
+        .into(db.actionTemplatesTable)
+        .insert(
+          ActionTemplatesTableCompanion.insert(
+            id: newId(),
+            name: n,
+            payload: jsonEncode({'name': n, 'metricIds': ids}),
+          ),
+        );
+    await tpl('Walk', [dirA]);
+    await tpl('Jog', [dirA, dirB]);
+    await tpl('Read', [dirB]);
+    await tpl('Nap', []);
+    Future<void> run(String n, int minutes) async {
+      final end = DateTime.now().toUtc().subtract(const Duration(days: 1));
+      final start = end.subtract(Duration(minutes: minutes));
+      await db
+          .into(db.actionsTable)
+          .insert(
+            ActionsTableCompanion.insert(
+              id: newId(),
+              name: n,
+              createdAt: dateTimeToDb(start)!,
+              updatedAt: dateTimeToDb(DateTime.now().toUtc())!,
+              done: const Value(true),
+              startAt: Value(dateTimeToDb(start)),
+              endAt: Value(dateTimeToDb(end)),
+              completedAt: Value(dateTimeToDb(end)),
+            ),
+          );
+    }
+
+    await run('Walk', 30);
+    await run('Jog', 60);
+  }
+
+  Finder row(String n) => find.text(n);
+
+  Future<void> openPanel(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('templates-options-toggle')));
+    await tester.pump();
+  }
+
+  Future<void> pickDirection(
+    WidgetTester tester,
+    String pickerKey,
+    String name,
+  ) async {
+    final add = find.descendant(
+      of: find.byKey(ValueKey(pickerKey)),
+      matching: find.byTooltip('Add…'),
+    );
+    await tester.ensureVisible(add);
+    await tester.tap(add);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text(name).last);
+    await tester.pump();
+    await tester.tap(find.textContaining('Done ('));
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
+  Future<void> filtersScenario(WidgetTester tester, Size size) async {
+    await pump(tester, size: size, seed: seedFilterData);
+    await refresh(tester);
+    for (final n in ['Walk', 'Jog', 'Read', 'Nap']) {
+      expect(row(n), findsOneWidget);
+    }
+    await openPanel(tester);
+
+    // Name.
+    await tester.enterText(find.byKey(const ValueKey('tpl-filter-name')), 'A');
+    await tester.pump();
+    expect(row('Walk'), findsOneWidget);
+    expect(row('Read'), findsOneWidget);
+    expect(row('Nap'), findsOneWidget);
+    expect(row('Jog'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tpl-filter-reset')));
+    await tester.pump();
+    expect(row('Jog'), findsOneWidget);
+    expect(find.byKey(const ValueKey('tpl-filter-reset')), findsNothing);
+
+    // Average: a bound hides the never-run templates.
+    await tester.enterText(
+      find.byKey(const ValueKey('tpl-filter-min-avg')),
+      '40',
+    );
+    await tester.pump();
+    expect(row('Jog'), findsOneWidget);
+    expect(row('Walk'), findsNothing);
+    expect(row('Read'), findsNothing);
+    await tester.enterText(find.byKey(const ValueKey('tpl-filter-min-avg')), '');
+    await tester.enterText(
+      find.byKey(const ValueKey('tpl-filter-max-avg')),
+      '30',
+    );
+    await tester.pump();
+    expect(row('Walk'), findsOneWidget);
+    expect(row('Jog'), findsNothing);
+    expect(row('Nap'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tpl-filter-reset')));
+    await tester.pump();
+
+    // Include (Any, then All) and exclude.
+    await pickDirection(tester, 'tpl-filter-include', 'Alpha');
+    expect(row('Walk'), findsOneWidget);
+    expect(row('Jog'), findsOneWidget);
+    expect(row('Read'), findsNothing);
+    await pickDirection(tester, 'tpl-filter-include', 'Beta');
+    expect(row('Read'), findsOneWidget); // Any of Alpha / Beta
+    expect(row('Nap'), findsNothing);
+    await tester.tap(find.text('All'));
+    await tester.pump();
+    expect(row('Jog'), findsOneWidget);
+    expect(row('Walk'), findsNothing);
+    expect(row('Read'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tpl-filter-reset')));
+    await tester.pump();
+    await pickDirection(tester, 'tpl-filter-exclude', 'Beta');
+    expect(row('Walk'), findsOneWidget);
+    expect(row('Nap'), findsOneWidget);
+    expect(row('Jog'), findsNothing);
+    expect(row('Read'), findsNothing);
+
+    // Everything hidden: "No matches", then Reset brings all back.
+    await tester.enterText(find.byKey(const ValueKey('tpl-filter-name')), 'zzz');
+    await tester.pump();
+    expect(find.text('No matches'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('tpl-filter-reset')));
+    await tester.pump();
+    for (final n in ['Walk', 'Jog', 'Read', 'Nap']) {
+      expect(row(n), findsOneWidget);
+    }
+    await settleAndUnmount(tester);
+  }
+
+  testWidgets('template filters work on desktop', (tester) async {
+    await filtersScenario(tester, const Size(1400, 900));
+  });
+
+  testWidgets('template filters work on a phone-sized window', (tester) async {
+    await filtersScenario(tester, const Size(800, 1400));
+  });
+
+  testWidgets('the default saved view applies the filters on open; Clear '
+      'drops them', (tester) async {
+    await pump(
+      tester,
+      seed: (db) async {
+        await seedFilterData(db);
+        final id = await SavedViewService(db).save(
+          screen: ViewScreens.actionsTemplates,
+          name: 'Only A',
+          kind: SavedViewKind.both,
+          filter: templateFilterToJson(
+            TemplateFilters(nameText: 'o', includeIds: {dirA}),
+          ),
+        );
+        await SavedViewService(db).setDefault(id);
+      },
+    );
+    await refresh(tester);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(row('Jog'), findsOneWidget);
+    expect(row('Walk'), findsNothing); // "o" is not in Walk
+    expect(row('Nap'), findsNothing);
+    expect(find.byKey(const ValueKey('templates-filters-badge')), findsOneWidget);
+
+    await openPanel(tester);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('tpl-filter-name')))
+          .controller!
+          .text,
+      'o',
+    );
+    await tester.tap(find.byKey(const ValueKey('views-clear')));
+    await tester.pump();
+    for (final n in ['Walk', 'Jog', 'Read', 'Nap']) {
+      expect(row(n), findsOneWidget);
+    }
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('tpl-filter-name')))
+          .controller!
+          .text,
+      '',
+    );
     await settleAndUnmount(tester);
   });
 }

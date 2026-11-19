@@ -5,6 +5,7 @@ import 'budget_account_view.dart';
 import 'budget_category_view.dart';
 import 'budget_tx_view_rules.dart';
 import 'date_range_filter.dart';
+import 'template_filters.dart';
 import 'template_sort.dart';
 
 /// Saved views: a named sort / filter preset of one screen. Everything here is
@@ -331,6 +332,29 @@ Map<String, Object?> allFilterToJson(AllActionsFilters f, SearchFlags flags) => 
 }
 
 // ---- Templates --------------------------------------------------------------
+
+Map<String, Object?> templateFilterToJson(TemplateFilters f) => {
+  'name': f.nameText,
+  if (f.minAverage != null) 'minAvg': f.minAverage,
+  if (f.maxAverage != null) 'maxAvg': f.maxAverage,
+  'include': f.includeIds.toList()..sort(),
+  'all': f.allIncluded,
+  'exclude': f.excludeIds.toList()..sort(),
+};
+
+TemplateFilters templateFilterFromJson(Map<String, Object?> j) =>
+    TemplateFilters(
+      nameText: j['name'] is String ? j['name'] as String : '',
+      minAverage: j['minAvg'] is num
+          ? (j['minAvg'] as num).toInt()
+          : null,
+      maxAverage: j['maxAvg'] is num
+          ? (j['maxAvg'] as num).toInt()
+          : null,
+      includeIds: _ids(j['include']),
+      allIncluded: j['all'] == true,
+      excludeIds: _ids(j['exclude']),
+    );
 
 Map<String, Object?> templateSortToJson(List<TemplateSortKey> sort) => {
   'keys': encodeSortKeys<TemplateSortKey>(sort, (k) => k.field.name, (k) => k.ascending),

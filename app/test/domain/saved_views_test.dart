@@ -7,6 +7,7 @@ import 'package:livenow/domain/date_range_filter.dart';
 import 'package:livenow/domain/postpone_rules.dart';
 import 'package:livenow/domain/saved_view_service.dart';
 import 'package:livenow/domain/saved_views.dart';
+import 'package:livenow/domain/template_filters.dart';
 
 void main() {
   setUpAll(initPostponeTimeZoneData);
@@ -349,6 +350,40 @@ void main() {
         });
         expect(all.filters.dateRange.active, isFalse);
       });
+    });
+  });
+
+  group('template filters JSON', () {
+    test('round trip', () {
+      const f = TemplateFilters(
+        nameText: 'Спорт',
+        minAverage: 5,
+        maxAverage: 90,
+        includeIds: {'b', 'a'},
+        allIncluded: true,
+        excludeIds: {'x'},
+      );
+      final back = templateFilterFromJson(templateFilterToJson(f));
+      expect(back.nameText, 'Спорт');
+      expect(back.minAverage, 5);
+      expect(back.maxAverage, 90);
+      expect(back.includeIds, {'a', 'b'});
+      expect(back.allIncluded, isTrue);
+      expect(back.excludeIds, {'x'});
+    });
+
+    test('junk or empty input gives an empty filter', () {
+      expect(templateFilterFromJson(const {}).active, isFalse);
+      final junk = templateFilterFromJson({
+        'name': 5,
+        'minAvg': 'x',
+        'maxAvg': [],
+        'include': 'a',
+        'all': 'yes',
+        'exclude': [1, null],
+      });
+      expect(junk.active, isFalse);
+      expect(junk.allIncluded, isFalse);
     });
   });
 }

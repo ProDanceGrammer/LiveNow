@@ -13,6 +13,7 @@ import '../../core/text_rules.dart';
 import '../../data/database.dart';
 import '../../domain/action_urgency.dart';
 import '../../domain/growth_rules.dart';
+import '../../domain/template_filters.dart';
 import '../../domain/template_import_service.dart';
 import '../../domain/template_search.dart';
 import '../../domain/template_sort.dart';
@@ -149,12 +150,19 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
     unregisterSearchTarget();
     _searchText.dispose();
     _searchFocus.dispose();
+    _fName.dispose();
+    _fMinAvg.dispose();
+    _fMaxAvg.dispose();
     super.dispose();
   }
   bool _showOptions = false;
   List<TemplateSortKey> _sort = const [
     TemplateSortKey(TemplateSortField.name),
   ];
+  TemplateFilters _filters = const TemplateFilters();
+  final _fName = TextEditingController();
+  final _fMinAvg = TextEditingController();
+  final _fMaxAvg = TextEditingController();
 
   @override
   Widget build(BuildContext context) {
@@ -197,9 +205,14 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
                 ),
                 IconButton(
                   key: const ValueKey('templates-options-toggle'),
-                  tooltip: 'Sort',
+                  tooltip: 'Sort and filter',
                   isSelected: _showOptions,
-                  icon: const Icon(Icons.tune),
+                  icon: Badge(
+                    key: const ValueKey('templates-filters-badge'),
+                    isLabelVisible: _filters.active && !_showOptions,
+                    smallSize: 8,
+                    child: const Icon(Icons.tune),
+                  ),
                   onPressed: () => setState(() => _showOptions = !_showOptions),
                 ),
               ],
@@ -212,6 +225,8 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _sortRow(),
+                  const SizedBox(height: 8),
+                  _filterSection(),
                   const SizedBox(height: 8),
                   SavedViewsBar(hooks: _viewHooks()),
                 ],
@@ -252,8 +267,22 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
                   for (final t in filtered)
                     t.id: _infoOf(t, _decoded(t), directionNames, averages[t.id], stats),
                 };
+                final kept = _filters.active
+                    ? [
+                        for (final t in filtered)
+                          if (_filters.matches(
+                            name: t.name,
+                            averageMinutes: infos[t.id]!.averageMinutes,
+                            metricIds: _decoded(t).ids.toSet(),
+                          ))
+                            t,
+                      ]
+                    : filtered;
+                if (kept.isEmpty) {
+                  return const Center(child: Text('No matches'));
+                }
                 final templates = sortTemplates(
-                  filtered,
+                  kept,
                   _sort,
                   (t) => infos[t.id]!,
                 );
@@ -440,9 +469,23 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
     );
   }
 
-  /// Saved views for the Templates sort (templates have no filters).
+  /// Puts [f] in force and shows it in the panel's text fields.
+  void _setFilters(TemplateFilters f, {bool refreshFields = false}) {
+    setState(() => _filters = f);
+    if (!refreshFields) return;
+    _fName.text = f.nameText;
+    _fMinAvg.text = f.minAverage?.toString() ?? '';
+    _fMaxAvg.text = f.maxAverage?.toString() ?? '';
+  }
+
+  /// Saved views for the Templates sort and filters.
   SavedViewHooks _viewHooks() => SavedViewHooks(
     screen: ViewScreens.actionsTemplates,
+    readFilter: () => templateFilterToJson(_filters),
+    applyFilter: (j) =>
+        _setFilters(templateFilterFromJson(j), refreshFields: true),
+    clearFilter: () =>
+        _setFilters(const TemplateFilters(), refreshFields: true),
     readSort: () => templateSortToJson(_sort),
     applySort: (j) {
       final keys = templateSortFromJson(j);
@@ -456,6 +499,108 @@ class _TemplatesScreenState extends ConsumerState<TemplatesScreen>
       () => _sort = const [TemplateSortKey(TemplateSortField.name)],
     ),
   );
+
+  Widget _avgField(
+    Key key,
+    TextEditingController c,
+    String label,
+    TemplateFilters Function(int? n) apply,
+  ) => SizedBox(
+    width: 150,
+    child: TextField(
+      key: key,
+      controller: c,
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(labelText: label, isDense: true),
+      onChanged: (v) => _setFilters(apply(int.tryParse(v.trim()))),
+    ),
+  );
+
+  Widget _filterSection() {
+    final f = _filters;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('Filters', style: Theme.of(context).textTheme.titleSmall),
+            const Spacer(),
+            if (f.active)
+              TextButton(
+                key: const ValueKey('tpl-filter-reset'),
+                onPressed: () =>
+                    _setFilters(const TemplateFilters(), refreshFields: true),
+                child: const Text('Reset filters'),
+              ),
+          ],
+        ),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.end,
+          children: [
+            SizedBox(
+              width: 220,
+              child: TextField(
+                key: const ValueKey('tpl-filter-name'),
+                controller: _fName,
+                decoration: const InputDecoration(
+                  labelText: 'Name contains',
+                  isDense: true,
+                ),
+                onChanged: (v) => _setFilters(f.copyWith(nameText: v)),
+              ),
+            ),
+            _avgField(
+              const ValueKey('tpl-filter-min-avg'),
+              _fMinAvg,
+              'Average from (min)',
+              (n) => n == null
+                  ? _filters.copyWith(clearMinAverage: true)
+                  : _filters.copyWith(minAverage: n),
+            ),
+            _avgField(
+              const ValueKey('tpl-filter-max-avg'),
+              _fMaxAvg,
+              'Average to (min)',
+              (n) => n == null
+                  ? _filters.copyWith(clearMaxAverage: true)
+                  : _filters.copyWith(maxAverage: n),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        MetricPicker(
+          key: const ValueKey('tpl-filter-include'),
+          label: 'Include directions',
+          selectedIds: f.includeIds,
+          onChanged: (ids) => _setFilters(f.copyWith(includeIds: ids)),
+        ),
+        if (f.includeIds.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: SegmentedButton<bool>(
+              key: const ValueKey('tpl-filter-include-mode'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: false, label: Text('Any')),
+                ButtonSegment(value: true, label: Text('All')),
+              ],
+              selected: {f.allIncluded},
+              onSelectionChanged: (s) =>
+                  _setFilters(f.copyWith(allIncluded: s.first)),
+            ),
+          ),
+        const SizedBox(height: 8),
+        MetricPicker(
+          key: const ValueKey('tpl-filter-exclude'),
+          label: 'Exclude directions',
+          selectedIds: f.excludeIds,
+          onChanged: (ids) => _setFilters(f.copyWith(excludeIds: ids)),
+        ),
+      ],
+    );
+  }
 
   Widget _sortRow() {
     final used = {for (final k in _sort) k.field};
