@@ -341,6 +341,50 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('Duplicate in the edit dialog copies the transaction; Undo removes '
+      'the copy', (tester) async {
+    await pump(
+      tester,
+      seed: () async {
+        final b = BudgetService(db);
+        final cat = await b.saveCategory(const CategoryInput(name: 'x'));
+        await b.createTransaction(categoryId: cat, name: 'Coffee');
+      },
+    );
+    await openTab(tester, 'Transactions');
+    final txId = (await rows(
+      tester,
+      () => db.select(db.budgetTransactionsTable).get(),
+    )).single.id;
+    await tester.tap(find.byKey(ValueKey('budget-tx-$txId')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('tx-duplicate')));
+    await settle(tester);
+    final all = await rows(
+      tester,
+      () => db.select(db.budgetTransactionsTable).get(),
+    );
+    expect(all, hasLength(2));
+    expect(all.map((t) => t.name), everyElement('Coffee'));
+    await tester.pump(const Duration(milliseconds: 400)); // the first dialog closes
+    // The copy's edit dialog is open.
+    expect(find.byKey(const ValueKey('tx-duplicate')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    expect(
+      (await rows(
+        tester,
+        () => db.select(db.budgetTransactionsTable).get(),
+      )).single.id,
+      txId,
+    );
+    await tester.pump(const Duration(seconds: 6));
+    await unmount(tester);
+  });
+
   Future<void> chooseMenu(WidgetTester tester, String itemKey) async {
     await tester.tap(find.byKey(ValueKey(itemKey)));
     await tester.pump(const Duration(milliseconds: 500));

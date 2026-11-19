@@ -318,6 +318,30 @@ void main() {
       expect((await tx(id)).id, id);
     });
 
+    test('duplicate copies the row and its snapshot under a new id', () async {
+      final cat = await budget.saveCategory(
+        const CategoryInput(name: 'x', price: 7),
+      );
+      final id = await budget.createTransaction(
+        categoryId: cat,
+        name: 'Coffee',
+        quantity: 2,
+        date: DateTime.utc(2026, 11, 16, 9),
+      );
+      final copyId = (await budget.duplicateTransaction(id))!;
+      expect(copyId, isNot(id));
+      final a = await tx(id);
+      final b = await tx(copyId);
+      expect(b.name, 'Coffee');
+      expect(b.categoryId, a.categoryId);
+      expect(b.quantity, 2);
+      expect(b.unitPrice, a.unitPrice);
+      expect(b.occurredAt, a.occurredAt);
+      expect(b.isIncome, a.isIncome);
+      expect(b.rateCount, a.rateCount);
+      expect(await budget.duplicateTransaction('ghost'), isNull);
+    });
+
     test('lastQuantity returns the newest transaction quantity', () async {
       final cat = await budget.saveCategory(const CategoryInput(name: 'x'));
       expect(await budget.lastQuantity(cat), isNull);

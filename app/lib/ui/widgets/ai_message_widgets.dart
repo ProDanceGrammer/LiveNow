@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -122,7 +123,11 @@ class AiPhotoBubble extends ConsumerWidget {
             runSpacing: 6,
             children: pics,
           ),
-          if (message.body.isNotEmpty) Text(message.body),
+          if (message.body.isNotEmpty)
+            SelectableText(
+              message.body,
+              key: ValueKey('ai-photo-caption-${message.id}'),
+            ),
         ],
       ),
     );
@@ -137,16 +142,22 @@ class AiPhotoBubble extends ConsumerWidget {
   ) {
     final data = blob.data;
     if (data != null && data.isNotEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.memory(
-          base64Decode(data),
-          key: ValueKey('ai-photo-${message.id}$suffix'),
-          width: width,
-          cacheWidth: (width * 2).round(),
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          errorBuilder: (_, _, _) => _PhotoPlaceholder(width: width),
+      final bytes = base64Decode(data);
+      // Still on this device (just sent): opens from here, no hub needed.
+      return GestureDetector(
+        key: ValueKey('ai-photo-open-${message.id}$suffix'),
+        onTap: () => _showPhoto(context, bytes),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(
+            bytes,
+            key: ValueKey('ai-photo-${message.id}$suffix'),
+            width: width,
+            cacheWidth: (width * 2).round(),
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => _PhotoPlaceholder(width: width),
+          ),
         ),
       );
     }
@@ -173,11 +184,24 @@ Future<void> _openOriginal(
     return;
   }
   if (!context.mounted) return;
-  await showStackedDialog<void>(
+  await _showPhoto(context, bytes);
+}
+
+/// A photo full size, zoomable.
+Future<void> _showPhoto(BuildContext context, Uint8List bytes) {
+  return showStackedDialog<void>(
     context: context,
     builder: (_) => Dialog(
       key: const ValueKey('ai-photo-viewer'),
-      child: InteractiveViewer(child: Image.memory(bytes)),
+      child: InteractiveViewer(
+        child: Image.memory(
+          bytes,
+          errorBuilder: (_, _, _) => const Padding(
+            padding: EdgeInsets.all(32),
+            child: Icon(Icons.broken_image_outlined, size: 48),
+          ),
+        ),
+      ),
     ),
   );
 }

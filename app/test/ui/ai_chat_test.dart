@@ -295,6 +295,21 @@ void main() {
     expect(find.byKey(const ValueKey('ai-chat-pending-0')), findsNothing);
     expect(find.text('BIM, card 6141'), findsOneWidget);
     expect(find.byType(Image), findsNWidgets(2), reason: 'both photos in one bubble');
+
+    // The text sent with the photos can be selected and copied.
+    final msgId = (await tester.runAsync(
+      () async => (await db.select(db.aiMessagesTable).getSingle()).id,
+    ))!;
+    expect(find.byKey(ValueKey('ai-photo-caption-$msgId')), findsOneWidget);
+    expect(
+      tester.widget(find.byKey(ValueKey('ai-photo-caption-$msgId'))),
+      isA<SelectableText>(),
+    );
+
+    // A photo still on this device opens full size without the hub.
+    await tester.tap(find.byKey(ValueKey('ai-photo-open-$msgId-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ai-photo-viewer')), findsOneWidget);
   });
 
   uiTest('a pending photo can be removed, and photos alone can be sent', (

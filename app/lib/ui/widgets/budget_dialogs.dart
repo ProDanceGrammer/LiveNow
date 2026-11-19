@@ -1,4 +1,5 @@
 import 'app_search_field.dart';
+import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 
 import 'package:drift/drift.dart' show Value;
@@ -1460,12 +1461,57 @@ class _BudgetTransactionDialogState
   }
 
   Future<void> _save() async {
+    final navigator = Navigator.of(context);
+    if (await _write()) navigator.pop();
+  }
+
+  /// Saves this transaction's edits, copies it (Undo in a toast), closes this
+  /// dialog and opens the copy's.
+  Future<void> _duplicate() async {
+    final source = widget.existing;
+    if (source == null) return;
+    final overlay = rootOverlayOf(context);
+    final navigator = Navigator.of(context);
+    final db = ref.read(databaseProvider);
+    final service = ref.read(budgetServiceProvider);
+    final history = ref.read(undoHistoryProvider.notifier);
+    if (!await _write()) return;
+    final copyId = await service.duplicateTransaction(source.row.id);
+    if (copyId == null) return;
+    offerUndo(
+      overlay,
+      history,
+      'Duplicated transaction',
+      () => service.deleteTransaction(copyId),
+    );
+    final copy = await (db.select(
+      db.budgetTransactionsTable,
+    )..where((t) => t.id.equals(copyId))).getSingleOrNull();
+    // The navigator this dialog is on outlives it: the copy's dialog opens there.
+    navigator.pop();
+    if (copy != null && navigator.mounted) {
+      unawaited(
+        BudgetTransactionDialog.show(
+          navigator.context,
+          existing: BudgetTxItem(
+            row: copy,
+            date: copy.actionId == null
+                ? (dateTimeFromDb(copy.occurredAt) ?? source.date)
+                : source.date,
+            actionName: source.actionName,
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Validates and stores the form (insert or update); false when invalid.
+  Future<bool> _write() async {
     if (_categoryId == null) {
       setState(() => _error = 'Pick a category');
-      return;
+      return false;
     }
-    if (!_form.currentState!.validate()) return;
-    final navigator = Navigator.of(context);
+    if (!_form.currentState!.validate()) return false;
     final service = ref.read(budgetServiceProvider);
     final existing = widget.existing?.row;
     final quantity = parseBudgetNumber(_quantity.text) ?? 1;
@@ -1501,7 +1547,7 @@ class _BudgetTransactionDialogState
           rateInteract: typed(_rateInteract, existing.rateInteract),
         );
       }
-      navigator.pop();
+      return true;
     } on BudgetGroupException catch (e) {
       setState(() => _error = e.message);
     } on InvalidNumberException catch (e) {
@@ -1509,6 +1555,7 @@ class _BudgetTransactionDialogState
     } on InvalidNameException catch (e) {
       setState(() => _error = e.message);
     }
+    return false;
   }
 
   @override
@@ -1825,6 +1872,13 @@ class _BudgetTransactionDialogState
         ]),
       ),
       actions: [
+        if (widget.existing != null)
+          TextButton.icon(
+            key: const ValueKey('tx-duplicate'),
+            onPressed: _duplicate,
+            icon: const Icon(Icons.copy_rounded),
+            label: const Text('Duplicate'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),

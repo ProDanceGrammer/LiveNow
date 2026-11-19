@@ -678,6 +678,22 @@ class BudgetService {
   Future<void> undoDeleteTransaction(BudgetTransaction row) =>
       db.into(db.budgetTransactionsTable).insert(row);
 
+  /// An exact copy of transaction [id] (same name, category, action, date,
+  /// quantity and snapshot: price, rates, accounts, income flag) under a new id;
+  /// returns that id, or null when the transaction is gone.
+  Future<String?> duplicateTransaction(String id) async {
+    final row = await (db.select(
+      db.budgetTransactionsTable,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
+    if (row == null) return null;
+    final copyId = newId();
+    final now = dateTimeToDb(DateTime.now())!;
+    await db
+        .into(db.budgetTransactionsTable)
+        .insert(row.copyWith(id: copyId, createdAt: now, updatedAt: now));
+    return copyId;
+  }
+
   // ---- transaction templates ----------------------------------------------------
 
   Stream<List<BudgetTxTemplate>> watchTxTemplates() =>
