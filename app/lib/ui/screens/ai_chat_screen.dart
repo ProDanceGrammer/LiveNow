@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/platform_info.dart';
 import '../../data/database.dart';
 import '../../domain/ai/ai_chat_service.dart';
 import '../../domain/ai/ai_draft.dart';
@@ -10,6 +12,7 @@ import '../../domain/ai/photo_prep.dart';
 import '../ai_history_loader.dart';
 import '../ai_providers.dart';
 import '../ai_ui_providers.dart';
+import '../shortcut_keys.dart';
 import '../widgets/ai_draft_card.dart';
 import '../widgets/ai_message_widgets.dart';
 import '../widgets/ai_question_card.dart';
@@ -87,13 +90,43 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 
   /// Picks one or more photos and keeps them in the composer until Send.
   Future<void> _attach(AiPhotoSource source) async {
+    final pick = ref.read(aiPhotoPickerProvider);
+    await _addPhotos(() => pick(source));
+  }
+
+  /// Pastes an image from the clipboard (desktop Ctrl/Cmd+V, the "Paste photo"
+  /// menu item, an Android keyboard insert); the same path and limits as
+  /// picking. With no image on the clipboard desktop Ctrl+V pastes text.
+  Future<void> _pasteImage() async {
+    final read = ref.read(aiClipboardImageProvider);
+    await _addPhotos(() async {
+      final bytes = await read();
+      return bytes == null ? const <Uint8List>[] : [bytes];
+    });
+  }
+
+  Future<void> _ctrlV() async {
+    final read = ref.read(aiClipboardImageProvider);
+    final editable = _focus.context?.findAncestorStateOfType<EditableTextState>();
+    Uint8List? bytes;
+    try {
+      bytes = await read();
+    } catch (_) {}
+    if (!mounted) return;
+    if (bytes == null) {
+      editable?.pasteText(SelectionChangedCause.keyboard);
+    } else {
+      await _addPhotos(() async => [bytes!]);
+    }
+  }
+
+  Future<void> _addPhotos(Future<List<Uint8List>> Function() get) async {
     if (_sending) return;
     final overlay = rootOverlayOf(context);
-    final pick = ref.read(aiPhotoPickerProvider);
     final prep = ref.read(aiPhotoPrepProvider);
     setState(() => _sending = true);
     try {
-      final picked = await pick(source);
+      final picked = await get();
       final room = AiChatService.maxPhotosPerMessage - _pending.length;
       final added = <PreparedPhoto>[
         for (final bytes in picked.take(room)) await prep(bytes),
@@ -323,6 +356,32 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     );
   }
 
+  /// The default text menu plus "Paste photo" while the clipboard holds an image.
+  Widget _contextMenu(BuildContext context, EditableTextState state) {
+    final read = ref.read(aiClipboardImageProvider);
+    return FutureBuilder<Uint8List?>(
+      future: read().then<Uint8List?>((b) => b, onError: (_) => null),
+      builder: (context, snap) {
+        final items = [...state.contextMenuButtonItems];
+        if (snap.data != null) {
+          items.add(
+            ContextMenuButtonItem(
+              label: 'Paste photo',
+              onPressed: () {
+                state.hideToolbar();
+                _pasteImage();
+              },
+            ),
+          );
+        }
+        return AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: state.contextMenuAnchors,
+          buttonItems: items,
+        );
+      },
+    );
+  }
+
   Widget _inputArea(BuildContext context) {
     return SafeArea(
       top: false,
@@ -352,6 +411,14 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                             _send();
                             return KeyEventResult.handled;
                           }
+                          if (e is KeyDownEvent &&
+                              isDesktopPlatform &&
+                              primaryActivator(
+                                LogicalKeyboardKey.keyV,
+                              ).accepts(e, HardwareKeyboard.instance)) {
+                            _ctrlV();
+                            return KeyEventResult.handled;
+                          }
                           return KeyEventResult.ignored;
                         },
                         child: TextField(
@@ -361,6 +428,26 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                           minLines: 1,
                           maxLines: 6,
                           keyboardType: TextInputType.multiline,
+                          contextMenuBuilder: _contextMenu,
+                          contentInsertionConfiguration:
+                              defaultTargetPlatform == TargetPlatform.android
+                              ? ContentInsertionConfiguration(
+                                  allowedMimeTypes: const [
+                                    'image/png',
+                                    'image/jpeg',
+                                    'image/webp',
+                                    'image/gif',
+                                  ],
+                                  onContentInserted: (c) {
+                                    final data = c.data;
+                                    if (c.hasData && data != null) {
+                                      _addPhotos(
+                                        () async => [Uint8List.fromList(data)],
+                                      );
+                                    }
+                                  },
+                                )
+                              : null,
                           decoration: const InputDecoration(
                             hintText: 'Message, or paste a checklist',
                             isDense: true,

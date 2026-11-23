@@ -7,6 +7,12 @@ import '../../core/platform_info.dart';
 /// number pads above all, have no key for that). Sits in `MaterialApp.builder`
 /// so it is above pages, dialogs and toasts; that is outside the Navigator's
 /// overlay, hence no Tooltip (a Semantics label instead).
+///
+/// While the button shows, the child sees `viewInsets.bottom` raised by
+/// [kKeyboardHideStrip], so everything that rises above the keyboard (the chat
+/// Send row, Scaffold FABs, bottom sheets, dialogs) stays above the button.
+const double kKeyboardHideStrip = 44;
+
 class KeyboardHideLayer extends StatelessWidget {
   const KeyboardHideLayer({super.key, required this.child});
 
@@ -14,7 +20,8 @@ class KeyboardHideLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final inset = MediaQuery.viewInsetsOf(context).bottom;
+    final media = MediaQuery.of(context);
+    final inset = media.viewInsets.bottom;
     final show = isIOSPlatform && inset > 0;
     final scheme = Theme.of(context).colorScheme;
     // Always a Stack with [child] first: switching the tree's shape when the
@@ -22,7 +29,17 @@ class KeyboardHideLayer extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        child,
+        // ALWAYS a MediaQuery (same tree shape whether or not the strip shows).
+        MediaQuery(
+          data: show
+              ? media.copyWith(
+                  viewInsets: media.viewInsets.copyWith(
+                    bottom: inset + kKeyboardHideStrip,
+                  ),
+                )
+              : media,
+          child: child,
+        ),
         if (show)
           Positioned(
             right: 8,

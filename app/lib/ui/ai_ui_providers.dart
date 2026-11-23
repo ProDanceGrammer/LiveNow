@@ -6,6 +6,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:pasteboard/pasteboard.dart';
 
 import '../core/capped_read.dart';
 import '../data/database.dart';
@@ -103,6 +104,12 @@ final aiPhotoPickerProvider =
         ];
       },
     );
+
+/// The image on the clipboard (PNG bytes), or null when it holds none. Tests
+/// replace it with a fake.
+final aiClipboardImageProvider = Provider<Future<Uint8List?> Function()>(
+  (ref) => () => Pasteboard.image,
+);
 
 /// Resizes a picked photo (CPU heavy, so off the UI isolate by default). Tests
 /// replace it with a synchronous function.
