@@ -752,6 +752,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.1"
+  livenow_clipboard:
+    dependency: "direct main"
+    description:
+      path: "packages/livenow_clipboard"
+      relative: true
+    source: path
+    version: "0.0.1"
   logging:
     dependency: transitive
     description:

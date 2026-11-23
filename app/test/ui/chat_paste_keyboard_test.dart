@@ -37,7 +37,7 @@ void main() {
 
   Future<void> mount(
     WidgetTester tester, {
-    Uint8List? clipboard,
+    List<Uint8List> clipboard = const [],
     Widget? extra,
   }) async {
     tester.view.physicalSize = const Size(400, 800);
@@ -51,7 +51,12 @@ void main() {
     final overrides = <Override>[
       databaseProvider.overrideWithValue(db),
       hubConnectedProvider.overrideWith(_Hub.new),
-      aiClipboardImageProvider.overrideWithValue(() async => clipboard),
+      aiClipboardPhotosProvider.overrideWithValue(
+        ClipboardPhotos(
+          has: () async => clipboard.isNotEmpty,
+          read: () async => clipboard,
+        ),
+      ),
       aiPhotoPrepProvider.overrideWithValue(
         (b) async => (bytes: b, width: 10, height: 20),
       ),
@@ -90,12 +95,25 @@ void main() {
   testWidgets('clipboard PNG: "Paste photo" adds a pending photo', (
     tester,
   ) async {
-    await mount(tester, clipboard: png);
+    await mount(tester, clipboard: [png]);
     await openMenu(tester);
     expect(find.text('Paste photo'), findsOneWidget);
     await tester.tap(find.text('Paste photo'));
     await settle(tester);
     expect(find.byKey(const ValueKey('ai-chat-pending-0')), findsOneWidget);
+    await finish(tester);
+  });
+
+  testWidgets('several copied photos: "Paste photo" adds them all', (
+    tester,
+  ) async {
+    await mount(tester, clipboard: [png, png, png]);
+    await openMenu(tester);
+    await tester.tap(find.text('Paste photo'));
+    await settle(tester);
+    for (var i = 0; i < 3; i++) {
+      expect(find.byKey(ValueKey('ai-chat-pending-$i')), findsOneWidget);
+    }
     await finish(tester);
   });
 

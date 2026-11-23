@@ -44,6 +44,9 @@ dependencies:
   file_selector: ^1.1.0
   image_picker: ^1.1.2
   pasteboard: 0.6.0
+  # All images on the iOS clipboard (pasteboard reads only one).
+  livenow_clipboard:
+    path: packages/livenow_clipboard
   image: ^4.10.1
   appflowy_editor:
     git:

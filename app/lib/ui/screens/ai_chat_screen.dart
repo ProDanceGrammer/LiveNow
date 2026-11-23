@@ -98,25 +98,22 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   /// menu item, an Android keyboard insert); the same path and limits as
   /// picking. With no image on the clipboard desktop Ctrl+V pastes text.
   Future<void> _pasteImage() async {
-    final read = ref.read(aiClipboardImageProvider);
-    await _addPhotos(() async {
-      final bytes = await read();
-      return bytes == null ? const <Uint8List>[] : [bytes];
-    });
+    final clip = ref.read(aiClipboardPhotosProvider);
+    await _addPhotos(clip.read);
   }
 
   Future<void> _ctrlV() async {
-    final read = ref.read(aiClipboardImageProvider);
+    final clip = ref.read(aiClipboardPhotosProvider);
     final editable = _focus.context?.findAncestorStateOfType<EditableTextState>();
-    Uint8List? bytes;
+    var photos = const <Uint8List>[];
     try {
-      bytes = await read();
+      photos = await clip.read();
     } catch (_) {}
     if (!mounted) return;
-    if (bytes == null) {
+    if (photos.isEmpty) {
       editable?.pasteText(SelectionChangedCause.keyboard);
     } else {
-      await _addPhotos(() async => [bytes!]);
+      await _addPhotos(() async => photos);
     }
   }
 
@@ -356,14 +353,15 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     );
   }
 
-  /// The default text menu plus "Paste photo" while the clipboard holds an image.
+  /// The default text menu plus "Paste photo" while the clipboard holds an image
+/// (every copied photo is pasted).
   Widget _contextMenu(BuildContext context, EditableTextState state) {
-    final read = ref.read(aiClipboardImageProvider);
-    return FutureBuilder<Uint8List?>(
-      future: read().then<Uint8List?>((b) => b, onError: (_) => null),
+    final clip = ref.read(aiClipboardPhotosProvider);
+    return FutureBuilder<bool>(
+      future: clip.has().then<bool>((b) => b, onError: (_) => false),
       builder: (context, snap) {
         final items = [...state.contextMenuButtonItems];
-        if (snap.data != null) {
+        if (snap.data == true) {
           items.add(
             ContextMenuButtonItem(
               label: 'Paste photo',

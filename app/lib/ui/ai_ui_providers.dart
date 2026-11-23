@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:livenow_clipboard/livenow_clipboard.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '../core/capped_read.dart';
@@ -105,11 +107,59 @@ final aiPhotoPickerProvider =
       },
     );
 
-/// The image on the clipboard (PNG bytes), or null when it holds none. Tests
-/// replace it with a fake.
-final aiClipboardImageProvider = Provider<Future<Uint8List?> Function()>(
-  (ref) => () => Pasteboard.image,
+/// The photos on the clipboard. [has] is the cheap check for the "Paste photo"
+/// menu item (on iOS it does not read the content, so no "Allow Paste"
+/// prompt); [read] returns every image. Tests replace it with a fake.
+class ClipboardPhotos {
+  const ClipboardPhotos({required this.has, required this.read});
+  final Future<bool> Function() has;
+  final Future<List<Uint8List>> Function() read;
+}
+
+final aiClipboardPhotosProvider = Provider<ClipboardPhotos>(
+  (ref) => const ClipboardPhotos(has: _clipboardHas, read: _clipboardRead),
 );
+
+const _imageExtensions = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'};
+
+bool _isImagePath(String path) {
+  final dot = path.lastIndexOf('.');
+  return dot >= 0 && _imageExtensions.contains(path.substring(dot).toLowerCase());
+}
+
+Future<bool> _clipboardHas() async {
+  if (Platform.isIOS) {
+    try {
+      return await LivenowClipboard.hasImages();
+    } on MissingPluginException {
+      // Fall through to the single-image check.
+    }
+  }
+  return (await _clipboardRead()).isNotEmpty;
+}
+
+/// iOS: every copied photo. Desktop: image FILES copied in Explorer/Finder
+/// (several pictures copy as files), else the one bitmap. Android: one image.
+Future<List<Uint8List>> _clipboardRead() async {
+  if (Platform.isIOS) {
+    try {
+      final all = await LivenowClipboard.images();
+      if (all.isNotEmpty) return all;
+    } on MissingPluginException {
+      // An older build without the plugin: one image below.
+    }
+  } else if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    final paths = (await Pasteboard.files()).where(_isImagePath).toList();
+    if (paths.isNotEmpty) {
+      return [
+        for (final p in paths)
+          await readBytesCapped(XFile(p), maxBytes: kMaxPhotoInputBytes),
+      ];
+    }
+  }
+  final one = await Pasteboard.image;
+  return one == null ? const [] : [one];
+}
 
 /// Resizes a picked photo (CPU heavy, so off the UI isolate by default). Tests
 /// replace it with a synchronous function.
