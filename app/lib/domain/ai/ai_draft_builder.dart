@@ -197,6 +197,13 @@ class _Ctx {
   /// That payment's line is named by the user's message (not the merchant).
   bool named = false;
 
+  /// Monobank's own category label of a bank screenshot nobody's words named: used like
+  /// the user's words for the category (a group asks, a leaf matches), never for the name.
+  String? bankHint;
+
+  /// [bankHint] resolved once: its group, else the leaf it decides (null = no help).
+  ({BudgetCategory? group, BudgetCategory? leaf})? _hintPick;
+
   /// The category the user's message named for a photographed receipt.
   _MsgCat? msgCat;
   final _fx = <String, ReceiptFx>{};
@@ -423,6 +430,10 @@ class DraftBuilder {
     ctx.snacksId = await planner.findSnacksCategory();
     ctx.payment = source['payment'] == true;
     ctx.named = ctx.payment && source['named'] == true;
+    final bankShot = overrides['screenshot'];
+    if (ctx.payment && !ctx.named && bankShot is Map && bankShot['bank_category'] is String) {
+      ctx.bankHint = bankShot['bank_category'] as String;
+    }
     final planned = messagePlanOf(overrides);
     if (typed == null && !ctx.payment && planned?['category'] != null) {
       ctx.msgCat = await _messageCategory(ctx, planned!['category']!);
@@ -609,7 +620,8 @@ class DraftBuilder {
       // The message already named the category: nothing to look up or ask.
       if (ctx.msgCat == null &&
           await _namedGroup(ctx, p.name) == null &&
-          !(await _lookup(ctx, p.name)).decided) {
+          !(await _lookup(ctx, p.name)).decided &&
+          !await _hintHelps(ctx)) {
         wanted.add((index: i, printed: _stripStars(p.name)));
       }
     }
@@ -1331,6 +1343,12 @@ class DraftBuilder {
 
     final look = await _lookup(ctx, line.name);
     if (look.decided) return look.pick;
+    // The bank's own label, when nothing the user said or the shop alias decided.
+    if (await _hintHelps(ctx)) {
+      final h = ctx._hintPick!;
+      if (h.group != null) return _askInGroup(ctx, line, h.group!);
+      return h.leaf;
+    }
     final usable = look.usable;
 
     // The model's suggestion (translated, chosen among the real categories).
@@ -1467,13 +1485,28 @@ class DraftBuilder {
   /// The user's message names a GROUP of categories for a bank payment
   /// ("кафе і ресторани" over Кафе / Ресторани): that group, else null. A
   /// clearly best match only; a leaf or a same-name wrapper is not a group.
-  Future<BudgetCategory?> _namedGroup(_Ctx ctx, String name) async {
-    if (!ctx.named) return null;
+  Future<BudgetCategory?> _namedGroup(_Ctx ctx, String name, {bool viaHint = false}) async {
+    if (!ctx.named && !viaHint) return null;
     final r = await resolver.resolve(name, limit: 3);
     final top = r.candidates.firstOrNull;
     if (top == null || top.fromAlias || !top.isAggregate || top.score < 0.8) return null;
     final c = ctx.byId[top.id];
     return c == null || ctx.isWrapper(c) ? null : c;
+  }
+
+  /// True when the bank's category label ([_Ctx.bankHint]) names a group of the budget or
+  /// decides one leaf by the usual rules; the answer is kept in [_Ctx._hintPick].
+  Future<bool> _hintHelps(_Ctx ctx) async {
+    final hint = ctx.bankHint;
+    if (hint == null) return false;
+    var pick = ctx._hintPick;
+    if (pick == null) {
+      final group = await _namedGroup(ctx, hint, viaHint: true);
+      final look = group == null ? await _lookup(ctx, hint) : null;
+      pick = (group: group, leaf: look != null && look.decided ? look.pick : null);
+      ctx._hintPick = pick;
+    }
+    return pick.group != null || pick.leaf != null;
   }
 
   /// The user named [group]: always asked which of its subcategories (no

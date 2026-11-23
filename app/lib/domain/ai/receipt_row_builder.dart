@@ -210,6 +210,9 @@ final _anyAmount = RegExp('^(?:$_marker\\s*)?(-?\\d[\\d.,]*)\$');
 final _vat1 = RegExp(r'^%\s*(\d{1,2})[.,]?$');
 final _vat2 = RegExp(r'^(\d{1,2})\s*%[.,]?$');
 
+/// A VAT rate printed with its dot whose `%` OCR lost (`1.`, `18.`).
+final _bareVat = RegExp(r'^(?:0|1|8|10|18|20)\.$');
+
 /// A VAT mark OCR garbled beyond reading (`1%O1`, `1'O%01`): noise, not a name.
 final _vatGarble = RegExp(r"^[\d'’OolI]{0,3}%[\dOolI'’.,]*$");
 
@@ -361,6 +364,10 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
         names.removeLast();
       }
     }
+    // `%1.` read without its `%` ("ELMA GALA  1.  *69.33"): the VAT column, not the name.
+    if (r.vat == null && r.amounts.isNotEmpty && names.length >= 2 && _bareVat.hasMatch(names.last)) {
+      r.vat = _vatRate(names.removeLast().replaceAll('.', ''));
+    }
     r.name = names.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
     r.text = [
       r.name,
@@ -458,6 +465,9 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
     if (r.looseAmounts.isEmpty) continue;
     if (f == 'toplam' || f == 'geneltoplam') {
       total ??= r.looseAmounts.last;
+    } else if (f.contains('odenecek')) {
+      // "Odenecek KDV Dahil Tutar" (BIM, e-Arsiv): the amount to pay; "TOPLAM KDV" is the tax.
+      total ??= r.looseAmounts.last;
     } else if (f == 'aratoplam') {
       subtotal ??= r.looseAmounts.last;
     }
@@ -471,7 +481,8 @@ RebuiltReceipt? rebuildReceipt(List<ReceiptWord> words) {
     final f = foldText(rowText);
     final card = last4 != null || f.contains('pos') || f.contains('kredi');
     final cash = f.contains('nakit');
-    if ((card || cash) && r.looseAmounts.isNotEmpty) {
+    // A terminal id read as an amount ("951038911  9510389.11") is no payment.
+    if ((card || cash) && r.looseAmounts.isNotEmpty && r.looseAmounts.last < 1e6) {
       tenders.add(
         Tender(
           method: cash && !card ? 'cash' : 'card',

@@ -1739,10 +1739,23 @@ class AiJobRunner {
     final relatedBlobs = [for (final i in related) shotBlobs[i]];
     // The message may say where the receipts go (category), for whom and what
     // each one was: read once here, carried into each receipt's job.
+    // Parts of the message that name a screenshot of its own (by its amount or
+    // day) are about that screenshot, not the receipts: the receipts' plan reads
+    // only what is left (nothing left = no plan).
+    var receiptText = payload.text;
+    if (receipts.isNotEmpty && own.isNotEmpty) {
+      final placed = placeCaptions(
+        payload.text,
+        [for (final i in own) shots[i]],
+        now: await _messageTime(job, payload),
+        generic: false,
+      );
+      receiptText = placed.leftover.join('. ');
+    }
     MessagePlan? plan;
-    if (receipts.isNotEmpty && (payload.text ?? '').trim().isNotEmpty) {
+    if (receipts.isNotEmpty && (receiptText ?? '').trim().isNotEmpty) {
       await _step(job, JobSteps.message);
-      plan = await _messagePlan(payload.text, receiptRows);
+      plan = await _messagePlan(receiptText, receiptRows);
     }
     if (receipts.length == 1 && own.isEmpty) {
       await _startDraftJob(
@@ -2142,35 +2155,30 @@ class AiJobRunner {
     await _releasePhotos(blobs);
   }
 
-  /// A photo read for a bank screenshot: with the service's default recogniser and, when
-  /// that looks like a bank screen ([looksLikeBankShot]) and the service offers Ukrainian,
-  /// ONCE more with `lang: 'uk'` (the default one cannot read Cyrillic). The Ukrainian
-  /// reading is kept when it has the same or more of (amount, date), else the first; the
-  /// merchant comes from the kept text. Receipts are never read twice.
+  /// A photo read for a bank screenshot. When the service offers Ukrainian the photo is read
+  /// with it FIRST (a bank app's Cyrillic is lost by the default Latin recogniser): a bank
+  /// screen keeps that reading (one pass); anything else (a paper receipt) is read again
+  /// with the default recogniser (Turkish letters) and that reading stands. A service
+  /// without Ukrainian, or a failed Ukrainian pass, keeps today's single default read.
   Future<({ScreenshotReading reading, String rows})> _readShot(
     Uint8List bytes,
     String mime, {
     required DateTime now,
   }) async {
-    final first = await _ocrRead(bytes, mime);
-    var reading = parseBankScreenshot(first.text, now: now);
-    var rows = first.rows;
     final client = ocr;
-    if (client != null && looksLikeBankShot(first.text, reading)) {
-      if ((await client.healthInfo()).hasUkrainian) {
-        try {
-          final uk = await _ocrRead(bytes, mime, lang: kOcrLangUkrainian);
-          final ukReading = parseBankScreenshot(uk.text, now: now);
-          if (screenshotRichness(ukReading) >= screenshotRichness(reading)) {
-            reading = ukReading;
-            rows = uk.rows;
-          }
-        } on AiBadResponseException {
-          // The Ukrainian pass failed: the first reading stands.
+    if (client != null && (await client.healthInfo()).hasUkrainian) {
+      try {
+        final uk = await _ocrRead(bytes, mime, lang: kOcrLangUkrainian);
+        final ukReading = parseBankScreenshot(uk.text, now: now);
+        if (ukReading.bankScreen || ukReading.hasAnything) {
+          return (reading: ukReading, rows: uk.rows);
         }
+      } on AiBadResponseException {
+        // The Ukrainian pass failed: the default reading below stands.
       }
     }
-    return (reading: reading, rows: rows);
+    final read = await _ocrRead(bytes, mime);
+    return (reading: parseBankScreenshot(read.text, now: now), rows: read.rows);
   }
 
   /// The OCR text of a photo and its printed rows (tilt-corrected when the

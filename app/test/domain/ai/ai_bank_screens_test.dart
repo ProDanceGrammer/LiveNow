@@ -155,13 +155,6 @@ void main() {
       expect(t.useAmount, 9026.87, reason: 'a glued 2 after the decimals is the sign');
       expect(t.incoming, isTrue);
     });
-
-    test('re-read cues: a signed amount line may be a bank screen, a receipt is not', () {
-      final lost = 'Kypc\n-3 491.00 \n18 2026, 22:23';
-      expect(looksLikeBankShot(lost, parseBankScreenshot(lost, now: now)), isTrue);
-      expect(looksLikeBankShot(_paper, parseBankScreenshot(_paper, now: now)), isFalse);
-      expect(looksLikeBankShot(_cyGift('₴'), parseBankScreenshot(_cyGift('₴'), now: now)), isTrue);
-    });
   });
 
   group('the message sent with the screenshots', () {

@@ -15,6 +15,7 @@ class ScreenshotReading {
     this.bankScreen = false,
     this.incoming = false,
     this.uahOnly = false,
+    this.bankCategory,
   });
 
   final double? useAmount;
@@ -42,6 +43,11 @@ class ScreenshotReading {
   /// no paper receipt's rate info (a transfer, a top-up, a domestic purchase).
   final bool uahOnly;
 
+  /// The bank's own category chip under the merchant ("Кафе та ресторани"), read from
+  /// the Ukrainian text. A hint for the category when the message says nothing about
+  /// this screenshot; never set for a card-to-card transfer or a top-up.
+  final String? bankCategory;
+
   bool get hasAnything =>
       rate != null || (useAmount != null && countAmount != null) || (bankScreen && useAmount != null);
 
@@ -66,6 +72,7 @@ class ScreenshotReading {
     if (bankScreen) 'bank_screen': true,
     if (incoming) 'incoming': true,
     if (uahOnly) 'uah_only': true,
+    if (bankCategory != null) 'bank_category': bankCategory,
   };
 
   factory ScreenshotReading.fromJson(Map<String, dynamic> j) => ScreenshotReading(
@@ -78,6 +85,9 @@ class ScreenshotReading {
     bankScreen: j['bank_screen'] == true,
     incoming: j['incoming'] == true,
     uahOnly: j['uah_only'] == true,
+    bankCategory: j['bank_category'] is String && (j['bank_category'] as String).trim().isNotEmpty
+        ? (j['bank_category'] as String).trim()
+        : null,
   );
 }
 
@@ -119,7 +129,8 @@ final _use = RegExp(
   unicode: true,
 );
 final _count = RegExp(
-  '$_num\\s*(?:₺|tl|try)(?![\\p{L}])|(?:₺|tl|try)\\s*$_num',
+  // The Ukrainian model reads the Latin "TL" with a Cyrillic "Т" ("130.00 ТL").
+  '$_num\\s*(?:₺|[tт]l|try)(?![\\p{L}])|(?:₺|[tт]l|try)\\s*$_num',
   caseSensitive: false,
   unicode: true,
 );
@@ -172,44 +183,47 @@ ScreenshotReading parseBankScreenshot(String text, {DateTime? now}) {
   var uahOnly = false;
   if (bank != null) {
     useAmount = bank.amount;
+    // "-49." with the small decimals lost: the lira amount and the rate give them.
+    if (bank.partial && countAmount != null && rate != null) {
+      final derived = (countAmount * rate * 100).roundToDouble() / 100;
+      if ((derived - bank.amount).abs() < 1) useAmount = derived;
+    }
     uahOnly = countAmount == null && rate == null;
     incoming = uahOnly && bank.incoming;
   }
+  final lines = text.split(RegExp(r'\r?\n'));
+  final names = _nameAndChip(lines);
   return ScreenshotReading(
     useAmount: useAmount,
     countAmount: countAmount,
     rate: rate,
-    merchant: _merchantOf(text),
+    // A transfer or top-up has no shop: Monobank's own caption stands there.
+    merchant: lines.any(_isBankCaption) ? null : names?.name ?? _merchantOf(text),
     date: when?.at,
     dayGuessed: when?.dayGuessed ?? false,
     bankScreen: bank != null,
     incoming: incoming,
     uahOnly: uahOnly,
+    bankCategory: bank != null && !lines.any(_isBankCaption) ? names?.chip : null,
   );
 }
-
-/// A whole-line charged amount ("-3 491.00 ₴", the symbol read or not): the cue that a
-/// photo MAY be a bank screen whose Cyrillic the default (Latin) recogniser lost, so it is
-/// read once more in Ukrainian. A receipt rarely has one on a line of its own.
-final _signedAmountLine = RegExp(r'^\s*[-−–]\s*\d[\d\s  ]*[.,]\d{2}\s*[^\d\s]{0,2}\s*$', multiLine: true);
-
-/// True when [text] (read without the Ukrainian recogniser) is, or may be, a bank screen.
-bool looksLikeBankShot(String text, ScreenshotReading r) =>
-    r.bankScreen || r.hasAnything || _signedAmountLine.hasMatch(text);
-
-/// How much of (amount, date) a reading found: the Ukrainian re-read replaces the first
-/// one only when it has the same or more.
-int screenshotRichness(ScreenshotReading r) =>
-    (r.useAmount != null ? 1 : 0) + (r.date != null ? 1 : 0);
 
 // ---- a bank app's detail screen without a lira amount --------------------------
 
 final _balanceWord = _fold('залишок');
+final _cashbackWord = _fold('кешбек');
 final _tagsMark = RegExp(r'#\s*(?:ter|tag|тег)', caseSensitive: false);
 
 /// Whole-line amount: optional sign, a number with two decimals, at most two
 /// stray symbols (the "₴" read as `∞`, `会`, `号`, nothing, or as a digit by the Ukrainian model: "-3 491.00 2").
-final _mainAmountLine = RegExp(r'^\s*([-−–+])?\s*(\d[\d\s  ]*[.,]\d{2})\s*\S{0,2}\s*$');
+/// Monobank prints the integer large and the decimals small, so OCR may split them
+/// ("-45.  .86 2", "-920 .00"): the groups are the integer part and the two decimals.
+final _mainAmountLine = RegExp(
+  r'^\s*([-−–+])?\s*(\d[\d\s  ]*?)\s*(?:[.,]\s*)?[.,]\s*(\d{2})\s*\S{0,2}\s*$',
+);
+
+/// A charged amount whose small decimals OCR lost: "-49." (trusted only with a sign).
+final _wholeAmountLine = RegExp(r'^\s*([-−–])\s*(\d{1,9})\s*[.,]\s*$');
 
 /// Monobank's own captions of a card-to-card transfer and a top-up, never a shop.
 final _bankCaptions = [_fold('переказ на картку'), _fold('поповнення картки')];
@@ -225,24 +239,34 @@ bool _isBankCaption(String line) {
 }
 
 bool _isBalanceLine(String line) {
-  final f = _fold(line.replaceAll(RegExp(r'\s+'), ''));
-  return f.length >= 5 && f.length <= 10 && (_editDistance(f, _balanceWord) <= 1 || f == 'balance');
+  bool word(String f) =>
+      f.length >= 5 && f.length <= 10 && (_editDistance(f, _balanceWord) <= 1 || f == 'balance');
+  final parts = line.trim().split(RegExp(r'\s+'));
+  if (word(_fold(parts.join()))) return true;
+  // The balance card and the cashback card share one row ("Залишок  Кешбек").
+  return parts.length >= 2 &&
+      word(_fold(parts.first)) &&
+      _editDistance(_fold(parts.skip(1).join()), _cashbackWord) <= 2;
 }
 
 /// A detail screen of the bank app (the balance line and the tags line, or the
 /// balance line and a date) and the first amount-only line ABOVE the balance:
 /// that skips the balance, the chart's amounts and the status-bar time.
-({double amount, bool incoming})? _bankScreenOf(String text, {required bool hasDate}) {
+({double amount, bool incoming, bool partial})? _bankScreenOf(String text, {required bool hasDate}) {
   final lines = text.split(RegExp(r'\r?\n'));
   final balanceAt = lines.indexWhere(_isBalanceLine);
   if (balanceAt < 0) return null;
   if (!hasDate && !lines.any(_tagsMark.hasMatch)) return null;
   for (var i = 0; i < balanceAt; i++) {
     final m = _mainAmountLine.firstMatch(lines[i]);
-    if (m == null) continue;
-    final v = parseAmountText(m.group(2)!);
-    if (v == null) continue;
-    return (amount: v, incoming: m.group(1) == null || m.group(1) == '+');
+    if (m != null) {
+      final v = parseAmountText('${m.group(2)!.replaceAll(RegExp(r'\s+'), ' ')}.${m.group(3)}');
+      if (v == null) continue;
+      return (amount: v, incoming: m.group(1) == null || m.group(1) == '+', partial: false);
+    }
+    final w = _wholeAmountLine.firstMatch(lines[i]);
+    final v = w == null ? null : parseAmountText(w.group(2)!);
+    if (v != null) return (amount: v, incoming: false, partial: true);
   }
   return null;
 }
@@ -261,6 +285,31 @@ final _uiLine = RegExp(
   caseSensitive: false,
   unicode: true,
 );
+
+final _cyrillic = RegExp(r'[а-яіїєґ]', caseSensitive: false);
+
+/// A detail screen of the bank app reads, from the top: the shop name, the coloured
+/// category chip ("Кафе та ресторани"), then the date line. Read in Ukrainian the chip is
+/// Cyrillic, so the nearest text line above the date is the chip and the one above it the
+/// shop. A non-Cyrillic line there (a Latin reading lost the chip) is not trusted: null.
+({String name, String chip})? _nameAndChip(List<String> lines) {
+  final dateAt = lines.indexWhere(
+    (l) => _year.hasMatch(l) && parseScreenshotDate(l, now: DateTime(2000)) != null,
+  );
+  if (dateAt <= 0) return null;
+  final found = <String>[];
+  for (var i = dateAt - 1; i >= 0 && found.length < 2; i--) {
+    final raw = lines[i].trim();
+    if (_time.hasMatch(raw)) continue;
+    final l = raw.replaceFirst(RegExp(r'^[^\p{L}]+', unicode: true), '');
+    if (_letters.allMatches(l).length < 3 || _uiLine.hasMatch(l)) continue;
+    found.add(l.length <= 80 ? l : l.substring(0, 80));
+  }
+  if (found.length < 2) return null;
+  final letters = _letters.allMatches(found[0]).length;
+  if (_cyrillic.allMatches(found[0]).length * 10 < letters * 7) return null;
+  return (name: found[1], chip: found[0]);
+}
 
 /// The nearest line above the first amount with at least three letters that is
 /// not a time, a date or a button of the bank app; a leading icon read as
@@ -525,7 +574,12 @@ List<String?> captionsForShots(
   final taken = List<bool>.filled(shots.length, false);
   String? genericName;
   var hasGeneric = false;
-  for (final raw in text.split(_captionSplit)) {
+  // "117, 49 грн" is a list of amounts, not two parts ("10.11.2026, 14:32" is no list).
+  final listed = text.replaceAllMapped(
+    RegExp(r'(?<=\d|₴|грн|uah)\s*,\s+(?=\d)(?!\d{1,2}:\d{2})', caseSensitive: false),
+    (_) => ' і ',
+  );
+  for (final raw in listed.split(_captionSplit)) {
     var part = raw.trim();
     if (part.isEmpty) continue;
     final day = parseScreenshotDate(part, now: now, strict: false);
@@ -533,22 +587,38 @@ List<String?> captionsForShots(
         .replaceAll(_wordDateIn, ' ')
         .replaceAll(_numericDate, ' ')
         .replaceAll(_time, ' ');
-    double? amount;
-    final a = RegExp(_num).firstMatch(part);
-    if (a != null) {
-      amount = parseAmountText(a.group(1)!);
-      part = part.replaceRange(a.start, a.end, ' ');
+    final amounts = <double>[];
+    final nums = RegExp(_num).allMatches(part).toList();
+    if (nums.isNotEmpty) {
+      // The first number and the ones joined to it by "і" / "та" / "and" / a comma
+      // ("117 і 49 грн - кафе"): each is an amount of its own.
+      var end = nums.first.end;
+      for (final m in nums) {
+        if (m != nums.first) {
+          final gap = part
+              .substring(end, m.start)
+              .replaceAll(_captionCurrency, ' ')
+              .replaceAll(RegExp(r'[\s,;&+]+'), ' ')
+              .trim()
+              .toLowerCase();
+          if (!const {'', 'і', 'й', 'та', 'и', 'and'}.contains(gap)) break;
+        }
+        final v = parseAmountText(m.group(1)!);
+        if (v == null) break;
+        amounts.add(v);
+        end = m.end;
+      }
+      if (amounts.isNotEmpty) part = part.replaceRange(nums.first.start, end, ' ');
     }
     final name = _cleanName(part.replaceAll(_captionCurrency, ' '));
     var placed = false;
-    if (amount != null) {
-      for (var i = 0; i < shots.length; i++) {
-        if (!taken[i] && _sameAmount(shots[i], amount)) {
-          taken[i] = true;
-          out[i] = name;
-          placed = true;
-          break;
-        }
+    if (amounts.isNotEmpty) {
+      for (final amount in amounts) {
+        final i = _closestShot(shots, taken, amount);
+        if (i == null) continue;
+        taken[i] = true;
+        out[i] = name;
+        placed = true;
       }
     } else if (day != null) {
       for (var i = 0; i < shots.length; i++) {
@@ -562,7 +632,8 @@ List<String?> captionsForShots(
     } else if (!hasGeneric) {
       hasGeneric = true;
       genericName = name;
-      placed = true;
+      // Without [generic] it names no screenshot: it stays for the receipts.
+      placed = generic;
     }
     if (!placed && name != null) leftover.add(name);
   }
@@ -581,13 +652,24 @@ final _wordDateIn = RegExp(
   unicode: true,
 );
 
-bool _sameAmount(ScreenshotReading s, double a) {
-  for (final v in [s.shopAmount, s.useAmount]) {
-    if (v == null) continue;
-    final tol = v * 0.005 > 1.0 ? v * 0.005 : 1.0;
-    if ((v - a).abs() <= tol) return true;
+/// The untaken screenshot whose shop or charged amount is nearest to [a] (within the
+/// 0.5 % / 1.0 tolerance), else null: "49" is the 49.49 one, not a 50 TL one.
+int? _closestShot(List<ScreenshotReading> shots, List<bool> taken, double a) {
+  int? best;
+  var bestDiff = double.infinity;
+  for (var i = 0; i < shots.length; i++) {
+    if (taken[i]) continue;
+    for (final v in [shots[i].shopAmount, shots[i].useAmount]) {
+      if (v == null) continue;
+      final tol = v * 0.005 > 1.0 ? v * 0.005 : 1.0;
+      final diff = (v - a).abs();
+      if (diff <= tol && diff < bestDiff) {
+        best = i;
+        bestDiff = diff;
+      }
+    }
   }
-  return false;
+  return best;
 }
 
 String? _cleanName(String s) {

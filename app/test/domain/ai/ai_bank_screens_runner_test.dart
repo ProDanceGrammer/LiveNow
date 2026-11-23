@@ -206,44 +206,45 @@ void main() {
       'Коментар\nОпис та #теги\nЗалишок\n12 150.30 ₴',
     );
 
-    test('a bank screen is read again once with lang uk, and that reading is used', () async {
+    test('a bank screen is read ONCE, with lang uk first, and that reading is used', () async {
       ocrServer.healthLangs = ['default', 'uk'];
       ocrServer.replyForLang = (_, lang) => ocrReply(lang == 'uk' ? cyrillic : lost);
       await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
       final job = await env.sendPhotos([4]);
       await env.drain();
       expect(ocrServer.callsWithLang('uk'), greaterThan(0));
-      expect(ocrServer.callsWithLang('uk'), ocrServer.callsWithLang(null),
-          reason: 'every default reading of a bank screen gets exactly one Ukrainian pass');
-      expect(ocrServer.requests.where((r) => r.lang != null && r.lang != 'uk'), isEmpty);
+      expect(ocrServer.callsWithLang(null), 0, reason: 'a bank screen costs one pass');
       final d = await env.draft(job);
       expect(d.lines.single['amount'], 3491.0);
       expect(d.json['at'], startsWith('2026-11-18T19:23'), reason: 'the date only the Ukrainian reading has');
     });
 
-    test('a receipt is never read again', () async {
+    test('a receipt is read with lang uk first and then again with the default model', () async {
       ocrServer.healthLangs = ['default', 'uk'];
       ocrServer.replyForLang = (_, lang) => ocrReply(['BIM', 'EKMEK KOY 600G 64,00', 'TOPLAM 391,50 TL']);
       env.extractor.receipt = receiptOf(e1Lines());
       await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
       await env.sendPhotos([1]);
       await env.drain();
+      expect(ocrServer.callsWithLang('uk'), greaterThan(0));
       expect(ocrServer.callsWithLang(null), greaterThan(0));
-      expect(ocrServer.callsWithLang('uk'), 0);
+      final order = [for (final r in ocrServer.requests) if (r.path == '/ocr') r.lang];
+      expect(order.first, 'uk', reason: 'the Ukrainian model reads first');
     });
 
-    test('a worse Ukrainian reading is discarded', () async {
+    test('a Ukrainian reading without a bank screen in it is followed by the default read', () async {
       ocrServer.healthLangs = ['default', 'uk'];
-      // The first reading has amount AND date; the Ukrainian one only an amount.
+      // The Ukrainian pass sees only an amount; the default reading is a full bank screen.
       ocrServer.replyForLang = (_, lang) =>
           ocrReply(lang == 'uk' ? ['-3 491.00 ₴'] : _gift);
       await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
       final job = await env.sendPhotos([4]);
       await env.drain();
       expect(ocrServer.callsWithLang('uk'), greaterThan(0));
+      expect(ocrServer.callsWithLang(null), greaterThan(0));
       final d = await env.draft(job);
       expect(d.lines.single['amount'], 3491.0);
-      expect(d.json['at'], startsWith('2026-11-18T19:23'), reason: 'the first reading, with its date, was kept');
+      expect(d.json['at'], startsWith('2026-11-18T19:23'), reason: 'the default reading, with its date, stands');
     });
 
     test('no lang uk when the service does not offer it', () async {
