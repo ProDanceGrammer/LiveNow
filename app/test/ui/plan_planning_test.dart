@@ -843,6 +843,39 @@ void main() {
       await tester.pump(const Duration(seconds: 6));
       await unmount(tester);
     });
+
+    testWidgets('the editor\'s delete icon asks, Cancel keeps it, Keep actions deletes and closes', (
+      tester,
+    ) async {
+      await mountRestDay(tester);
+      await rightClickFirstChip(tester);
+      await tester.tap(find.byKey(const ValueKey('plan-chip-edit')));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PlanItemEditorDialog), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('plan-editor-delete')));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Delete "Rest day"?'), findsOneWidget);
+      await tester.tap(find.text('Cancel').last);
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PlanItemEditorDialog), findsOneWidget, reason: 'Cancel keeps the editor');
+
+      await tester.tap(find.byKey(const ValueKey('plan-editor-delete')));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(const ValueKey('plan-delete-keep')));
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PlanItemEditorDialog), findsNothing);
+      expect(chips(), findsNothing);
+      expect(ghosts(), findsNWidgets(7), reason: 'the other plan item stays');
+      await tester.pump(const Duration(seconds: 6));
+      resetStackedDialogsForTest();
+      await unmount(tester);
+    });
   });
 
   testWidgets('the ghost follows the grid while it scrolls under the pointer', (

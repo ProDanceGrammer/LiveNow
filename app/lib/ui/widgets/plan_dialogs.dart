@@ -123,8 +123,9 @@ Future<void> applyGhostChange(
 }
 
 /// Asks whether the plan item's future, never-edited actions go with it, then
-/// deletes it with one Undo. Used by the Plan items list and the right-click menu.
-Future<void> askAndDeletePlanItem(
+/// deletes it with one Undo. Used by the Plan items list, the right-click menu
+/// and the item's editor. True when it was deleted (not cancelled).
+Future<bool> askAndDeletePlanItem(
   BuildContext context,
   WidgetRef ref,
   String id,
@@ -155,8 +156,9 @@ Future<void> askAndDeletePlanItem(
       ],
     ),
   );
-  if (choice == null || !context.mounted) return;
+  if (choice == null || !context.mounted) return false;
   await runUndoableDeletePlanItem(context, ref, id, removeFuture: choice);
+  return true;
 }
 
 // ---- plan item editor ---------------------------------------------------------
@@ -589,6 +591,16 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
       _templateId = id;
     });
     _refreshAverage();
+  }
+
+  /// Deletes the item being edited (same question and Undo as the Plan items
+  /// list) and closes the editor; Cancel keeps it open.
+  Future<void> _delete() async {
+    final id = widget.itemId;
+    if (id == null) return;
+    final name = _name.text.trim().isEmpty ? 'plan item' : _name.text.trim();
+    final deleted = await askAndDeletePlanItem(context, ref, id, name);
+    if (deleted && mounted) Navigator.of(context).pop();
   }
 
   Future<void> _save() async {
@@ -1349,7 +1361,20 @@ class _PlanItemEditorDialogState extends ConsumerState<PlanItemEditorDialog> {
     final showUseName =
         selected != null && selected.name.trim() != _name.text.trim();
     return AlertDialog(
-      title: Text(isNew ? 'New plan item' : 'Edit plan item'),
+      title: isNew
+          ? const Text('New plan item')
+          : Row(
+              children: [
+                const Expanded(child: Text('Edit plan item')),
+                IconButton(
+                  key: const ValueKey('plan-editor-delete'),
+                  tooltip: 'Delete',
+                  color: Theme.of(context).colorScheme.error,
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _delete,
+                ),
+              ],
+            ),
       content: SizedBox(
         width: dialogWidth(context, 640),
         child: !_loaded
