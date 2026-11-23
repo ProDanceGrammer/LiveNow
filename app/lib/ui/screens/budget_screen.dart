@@ -1291,6 +1291,17 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
           prev = t;
         }
       }
+      final totalsBlock = _TotalsBlock(
+        key: const ValueKey('tx-totals'),
+        title: 'Total (${items.length})',
+        totals: overall,
+        base: base,
+        cols: cols,
+        showTotals: showTotals,
+        figures: showTotals ? figures : null,
+      );
+      // Phone: the card that opens the list.
+      final phoneTotals = phone && items.isNotEmpty;
       return Column(
         children: [
           Padding(
@@ -1345,29 +1356,14 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
           if (_showTemplates) const TxTemplatesPanel(),
           if (_showOptions) const BudgetTxOptionsPanel(),
           // The total of everything the search and filters leave in the list.
-          if (items.isNotEmpty)
-            () {
-              final block = _TotalsBlock(
-                key: const ValueKey('tx-totals'),
-                title: 'Total (${items.length})',
-                totals: overall,
-                base: base,
-                cols: cols,
-                showTotals: showTotals,
-                figures: showTotals ? figures : null,
-              );
-              // Phone: a compact card; wide: as before.
-              if (phone) {
-                return _card(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-                  child: SizedBox(width: double.infinity, child: block),
-                );
-              }
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                child: block,
-              );
-            }(),
+          // Wide: fixed above the columns. Phone: the first row of the list (a
+          // fixed card is a third of the screen and cut the scrolled group
+          // headers off right under it).
+          if (items.isNotEmpty && !phone)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: totalsBlock,
+            ),
           if (items.isNotEmpty && !phone) _TxColumnsHeader(cols: cols),
           Expanded(
             child: items.isEmpty
@@ -1380,8 +1376,20 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.only(bottom: 88),
-                    itemCount: entries.length,
+                    itemCount: entries.length + (phoneTotals ? 1 : 0),
                     itemBuilder: (context, i) {
+                      if (phoneTotals) {
+                        if (i == 0) {
+                          return _card(
+                            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: totalsBlock,
+                            ),
+                          );
+                        }
+                        i--;
+                      }
                       final e = entries[i];
                       if (e is _GroupEntry) {
                         return _GroupHeader(

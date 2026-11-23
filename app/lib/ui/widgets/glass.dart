@@ -340,21 +340,29 @@ class GlassSurface extends SingleChildRenderObjectWidget {
   final bool blurWindow;
 
   @override
-  RenderObject createRenderObject(BuildContext context) => RenderGlassSurface(
-    tokens: context.glass,
-    scope: GlassScope.maybeOf(context),
-    radius: radius,
-    strength: strength,
-    shadow: shadow,
-    blurWindow: blurWindow,
-  );
+  RenderObject createRenderObject(BuildContext context) {
+    final route = ModalRoute.of(context);
+    return RenderGlassSurface(
+      tokens: context.glass,
+      scope: GlassScope.maybeOf(context),
+      radius: radius,
+      strength: strength,
+      shadow: shadow,
+      blurWindow: blurWindow,
+      routeAnimation: route?.animation,
+      routeSecondaryAnimation: route?.secondaryAnimation,
+    );
+  }
 
   @override
   void updateRenderObject(
     BuildContext context,
     RenderGlassSurface renderObject,
   ) {
+    final route = ModalRoute.of(context);
     renderObject
+      ..routeAnimation = route?.animation
+      ..routeSecondaryAnimation = route?.secondaryAnimation
       ..tokens = context.glass
       ..scope = GlassScope.maybeOf(context)
       ..radius = radius
@@ -372,12 +380,53 @@ class RenderGlassSurface extends RenderProxyBox {
     required double strength,
     required bool shadow,
     required bool blurWindow,
+    Animation<double>? routeAnimation,
+    Animation<double>? routeSecondaryAnimation,
   }) : _tokens = tokens,
        _scope = scope,
        _radius = radius,
        _strength = strength,
        _shadow = shadow,
-       _blurWindow = blurWindow;
+       _blurWindow = blurWindow,
+       _routeAnimation = routeAnimation,
+       _routeSecondary = routeSecondaryAnimation;
+
+  // The window is read from the surface's GLOBAL position at paint time, but a
+  // page-slide transition moves the whole route with a compositing transform
+  // and does not repaint it. If anything inside the route repaints mid-slide,
+  // the windows are cached for the shifted position and stay wrong once the
+  // route is back (a lighter, unblurred patch in the bottom bar). So the
+  // surface repaints on every tick of its route's own and covering animations.
+  Animation<double>? _routeAnimation;
+  Animation<double>? _routeSecondary;
+
+  set routeAnimation(Animation<double>? v) {
+    if (identical(v, _routeAnimation)) return;
+    if (attached) _routeAnimation?.removeListener(markNeedsPaint);
+    _routeAnimation = v;
+    if (attached) v?.addListener(markNeedsPaint);
+  }
+
+  set routeSecondaryAnimation(Animation<double>? v) {
+    if (identical(v, _routeSecondary)) return;
+    if (attached) _routeSecondary?.removeListener(markNeedsPaint);
+    _routeSecondary = v;
+    if (attached) v?.addListener(markNeedsPaint);
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _routeAnimation?.addListener(markNeedsPaint);
+    _routeSecondary?.addListener(markNeedsPaint);
+  }
+
+  @override
+  void detach() {
+    _routeAnimation?.removeListener(markNeedsPaint);
+    _routeSecondary?.removeListener(markNeedsPaint);
+    super.detach();
+  }
 
   GlassTheme _tokens;
   GlassScope? _scope;
