@@ -12,6 +12,8 @@ import '../data_imports.dart';
 import '../device_prefs.dart' show setDevicePrefBool;
 import '../touchpad.dart';
 import '../reminders.dart';
+import '../saved_location.dart';
+import '../widgets/app_toast.dart';
 import '../notch_side.dart';
 import '../text_tool_access.dart';
 import '../work_hours.dart';
@@ -624,17 +626,17 @@ class _AutoBackupBlock extends ConsumerWidget {
           onTap: s.folder == null
               ? null
               : () async {
+                  final overlay = rootOverlayOf(context);
                   final r = await notifier.backupNow();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        r.outcome == AutoBackupOutcome.written
-                            ? 'Backup saved: ${r.path}'
-                            : 'Backup failed: ${r.error ?? r.outcome.name}',
-                      ),
-                    ),
-                  );
+                  final path = r.path;
+                  if (r.outcome == AutoBackupOutcome.written && path != null) {
+                    showSavedToast(overlay, 'Backup saved: ', path);
+                  } else {
+                    showInfoToast(
+                      overlay,
+                      'Backup failed: ${r.error ?? r.outcome.name}',
+                    );
+                  }
                 },
         ),
       ],

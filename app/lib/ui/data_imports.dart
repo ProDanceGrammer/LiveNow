@@ -22,6 +22,7 @@ import 'screens/growth_directions_screen.dart'
     show growthCsvPickerProvider, notionPagesPickerProvider;
 import 'screens/templates_screen.dart' show templateImportServiceProvider;
 import 'widgets/action_import_summary_dialog.dart';
+import 'saved_location.dart';
 import 'widgets/app_toast.dart';
 import 'widgets/budget_import_summary_dialog.dart';
 
@@ -298,14 +299,14 @@ Future<void> exportBudgetJson(BuildContext context, WidgetRef ref) async {
   final path = await ref
       .read(budgetFilesProvider)
       .saveText('livenow-budget-${_today()}.json', json);
-  if (path != null) showInfoToast(overlay, 'Backup saved: $path');
+  if (path != null) showSavedToast(overlay, 'Backup saved: ', path);
 }
 
 Future<void> exportBudgetCsv(BuildContext context, WidgetRef ref) async {
   final overlay = rootOverlayOf(context);
   final files = await ref.read(budgetIoServiceProvider).exportCsvs();
   final dir = await ref.read(budgetFilesProvider).saveFolder(files);
-  if (dir != null) showInfoToast(overlay, '3 CSV files saved to $dir');
+  if (dir != null) showSavedToast(overlay, '3 CSV files saved to ', dir);
 }
 
 // ---- full backup (every table) ----------------------------------------------
@@ -316,7 +317,7 @@ Future<void> exportBackupCompact(BuildContext context, WidgetRef ref) async {
   final path = await ref
       .read(backupFilesProvider)
       .exportFile('livenow-backup-${_today()}.$kBackupExtension', writer.writeCompact);
-  if (path != null) showInfoToast(overlay, 'Backup saved: $path');
+  if (path != null) showSavedToast(overlay, 'Backup saved: ', path);
 }
 
 Future<void> exportBackupCsv(BuildContext context, WidgetRef ref) async {
@@ -325,7 +326,7 @@ Future<void> exportBackupCsv(BuildContext context, WidgetRef ref) async {
   final dir = await ref
       .read(backupFilesProvider)
       .exportFolder('livenow-csv-${_today()}', writer.writeCsvFolder);
-  if (dir != null) showInfoToast(overlay, 'CSV files saved to $dir');
+  if (dir != null) showSavedToast(overlay, 'CSV files saved to ', dir);
 }
 
 Future<void> exportBackupSqlite(BuildContext context, WidgetRef ref) async {
@@ -334,7 +335,7 @@ Future<void> exportBackupSqlite(BuildContext context, WidgetRef ref) async {
   final path = await ref
       .read(backupFilesProvider)
       .exportFile('livenow-${_today()}.db', writer.writeSqliteCopy);
-  if (path != null) showInfoToast(overlay, 'Database copy saved: $path');
+  if (path != null) showSavedToast(overlay, 'Database copy saved: ', path);
 }
 
 /// The chosen import mode, or null when cancelled.
