@@ -164,14 +164,16 @@ ScreenshotReading parseBankScreenshot(String text, {DateTime? now}) {
     }
   }
   final when = _readDate(text, now: now ?? DateTime.now(), strict: true);
-  // A hryvnia-only detail screen (transfer, top-up): the amount above the balance.
+  // A detail screen of the bank app: its main amount is the first amount line above
+  // the balance, even when a real "₴" was read (the largest ₴ is then the BALANCE).
+  // Without a lira amount and a rate it is hryvnia only (transfer, top-up, domestic buy).
   final bank = _bankScreenOf(text, hasDate: when != null);
   var incoming = false;
   var uahOnly = false;
-  if (bank != null && useAmount == null && countAmount == null && rate == null) {
+  if (bank != null) {
     useAmount = bank.amount;
-    incoming = bank.incoming;
-    uahOnly = true;
+    uahOnly = countAmount == null && rate == null;
+    incoming = uahOnly && bank.incoming;
   }
   return ScreenshotReading(
     useAmount: useAmount,
@@ -186,14 +188,28 @@ ScreenshotReading parseBankScreenshot(String text, {DateTime? now}) {
   );
 }
 
+/// A whole-line charged amount ("-3 491.00 ₴", the symbol read or not): the cue that a
+/// photo MAY be a bank screen whose Cyrillic the default (Latin) recogniser lost, so it is
+/// read once more in Ukrainian. A receipt rarely has one on a line of its own.
+final _signedAmountLine = RegExp(r'^\s*[-−–]\s*\d[\d\s  ]*[.,]\d{2}\s*[^\d\s]{0,2}\s*$', multiLine: true);
+
+/// True when [text] (read without the Ukrainian recogniser) is, or may be, a bank screen.
+bool looksLikeBankShot(String text, ScreenshotReading r) =>
+    r.bankScreen || r.hasAnything || _signedAmountLine.hasMatch(text);
+
+/// How much of (amount, date) a reading found: the Ukrainian re-read replaces the first
+/// one only when it has the same or more.
+int screenshotRichness(ScreenshotReading r) =>
+    (r.useAmount != null ? 1 : 0) + (r.date != null ? 1 : 0);
+
 // ---- a bank app's detail screen without a lira amount --------------------------
 
 final _balanceWord = _fold('залишок');
 final _tagsMark = RegExp(r'#\s*(?:ter|tag|тег)', caseSensitive: false);
 
 /// Whole-line amount: optional sign, a number with two decimals, at most two
-/// stray symbols (the "₴" read as `∞`, `会`, `号` or nothing).
-final _mainAmountLine = RegExp(r'^\s*([-−–+])?\s*(\d[\d\s  ]*[.,]\d{2})\s*[^\d\s]{0,2}\s*$');
+/// stray symbols (the "₴" read as `∞`, `会`, `号`, nothing, or as a digit by the Ukrainian model: "-3 491.00 2").
+final _mainAmountLine = RegExp(r'^\s*([-−–+])?\s*(\d[\d\s  ]*[.,]\d{2})\s*\S{0,2}\s*$');
 
 /// Monobank's own captions of a card-to-card transfer and a top-up, never a shop.
 final _bankCaptions = [_fold('переказ на картку'), _fold('поповнення картки')];

@@ -334,4 +334,20 @@ void main() {
     expect(r.text.split('\n').length, 5);
     expect(await OcrClient(baseUrl: 'http://127.0.0.1:1').health(), isFalse);
   });
+
+  test('OcrClient: languages on offer, ?lang= is sent, an older service offers none', () async {
+    final c = OcrClient(baseUrl: ocrServer.url);
+    final old = await c.healthInfo();
+    expect(old.ok, isTrue);
+    expect(old.langs, isEmpty, reason: 'no "langs" field: no Ukrainian');
+    expect(old.hasUkrainian, isFalse);
+    ocrServer.healthLangs = ['default', 'uk'];
+    expect((await c.healthInfo()).hasUkrainian, isTrue);
+    await c.ocr(image);
+    await c.ocr(image, lang: 'uk');
+    expect(ocrServer.requests.where((r) => r.path == '/ocr').map((r) => r.lang), [null, 'uk']);
+    final down = await OcrClient(baseUrl: 'http://127.0.0.1:1').healthInfo();
+    expect(down.ok, isFalse);
+    expect(down.hasUkrainian, isFalse);
+  });
 }

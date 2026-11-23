@@ -6,9 +6,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 class RecordedRequest {
-  RecordedRequest(this.method, this.path, this.headers, this.body);
+  RecordedRequest(this.method, this.path, this.headers, this.body, {this.lang});
   final String method;
   final String path;
+
+  /// The `?lang=` of an /ocr call (null = none).
+  final String? lang;
   final Map<String, String> headers;
   final Uint8List body;
 
@@ -135,6 +138,16 @@ class MockOcrServer {
   /// When set, answers each /ocr call from its image bytes (instead of [reply]).
   Object Function(List<int> image)? replyFor;
 
+  /// Like [replyFor] but also gets the `?lang=` of the call (wins over [replyFor]).
+  Object Function(List<int> image, String? lang)? replyForLang;
+
+  /// The `langs` /health lists (null = the field is absent, like an older service).
+  List<String>? healthLangs;
+
+  /// The /ocr calls with `?lang=` equal to [lang].
+  int callsWithLang(String? lang) =>
+      requests.where((r) => r.path == '/ocr' && r.lang == lang).length;
+
   static Future<MockOcrServer> start() async =>
       MockOcrServer._(await HttpServer.bind(InternetAddress.loopbackIPv4, 0));
 
@@ -147,13 +160,17 @@ class MockOcrServer {
     final headers = <String, String>{};
     req.headers.forEach((k, v) => headers[k] = v.join(','));
     final image = body.takeBytes();
-    requests.add(RecordedRequest(req.method, req.uri.path, headers, image));
+    requests.add(
+      RecordedRequest(req.method, req.uri.path, headers, image, lang: req.uri.queryParameters['lang']),
+    );
     final res = req.response;
     if (req.uri.path == '/health') {
-      res.write('{"ok":true}');
+      res.write(jsonEncode({'ok': true, if (healthLangs != null) 'langs': healthLangs}));
     } else if (req.uri.path == '/ocr') {
       res.statusCode = status;
-      res.write(status == 200 ? jsonEncode(replyFor?.call(image) ?? reply) : 'error');
+      res.write(status == 200 ? jsonEncode(
+              replyForLang?.call(image, req.uri.queryParameters['lang']) ?? replyFor?.call(image) ?? reply,
+            ) : 'error');
     } else {
       res.statusCode = 404;
     }

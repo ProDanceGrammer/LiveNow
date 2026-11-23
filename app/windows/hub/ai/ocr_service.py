@@ -1,7 +1,9 @@
 """LiveNow local OCR service (runs next to the hub, listens on 127.0.0.1 only).
 
-  GET  /health  -> {"ok": true, "engine": "rapidocr" | "tesseract"}
-  POST /ocr     -> body = the raw image bytes (JPEG/PNG/...)
+  GET  /health  -> {"ok": true, "engine": "rapidocr" | "tesseract", "langs": ["default", "uk"],
+                    "default_rec": "latin" | "stock"}
+  POST /ocr     -> body = the raw image bytes (JPEG/PNG/...); optional ?lang=uk reads with the
+                   Ukrainian (East Slavic) recogniser, no lang = the default one (see README.txt)
                    reply = {"engine", "width", "height",
                             "lines": [{"text", "box": [x0, y0, x1, y1], "confidence"}],
                             "items": [{"text", "quad": [[x, y] x 4], "confidence"}]}
@@ -11,8 +13,9 @@
 
 Engine: RapidOCR (rapidocr_onnxruntime) when installed, else Tesseract (pytesseract, languages
 tur+eng). Force one with LIVENOW_OCR_ENGINE=rapidocr|tesseract. RapidOCR's stock models know
-Latin letters but not every Turkish diacritic; point LIVENOW_OCR_REC_MODEL (+ optional
-LIVENOW_OCR_REC_KEYS) at a Latin recognition model file to improve that (see README.txt).
+Latin letters but not every Turkish diacritic, so install_ai.ps1 downloads PP-OCRv5 Latin and
+East Slavic recognisers into the models folder (one detector, one recogniser per language; the Ukrainian one is
+loaded on first use). LIVENOW_OCR_REC_MODEL / _KEYS still replace the stock default.
 
 Only the standard library is required to START; the engines and Pillow are imported lazily.
 One image is processed at a time (a lock): the hub PC has little RAM.
@@ -24,14 +27,47 @@ import logging
 import os
 import sys
 import threading
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = logging.getLogger("livenow-ocr")
 MAX_BODY = int(os.environ.get("LIVENOW_OCR_MAX_BYTES", 25 * 1024 * 1024))
 MAX_SIDE = int(os.environ.get("LIVENOW_OCR_MAX_SIDE", 2000))
 DESKEW = os.environ.get("LIVENOW_OCR_DESKEW", "0") == "1"
+# Recognition models (see install_ai.ps1): <this folder>/models/{latin,eslav}_rec.onnx + _dict.txt.
+MODELS_DIR = os.environ.get("LIVENOW_OCR_MODELS_DIR") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "models")
+# Which recogniser reads a request WITHOUT ?lang=: "latin" (Turkish letters) or "stock" (RapidOCR's
+# own Chinese+English model). Decided by claude_dev/ai/ocr_lang_check.py, see README.txt.
+DEFAULT_REC = os.environ.get("LIVENOW_OCR_DEFAULT_REC", "latin").lower()
 _lock = threading.Lock()
 _engine = None  # (name, callable(PIL.Image) -> [(x0, y0, x1, y1, text, conf)])
+
+
+def _model_file(env_name, default_name):
+    """Path from the environment variable, else `<script dir>/models/<default_name>`; None if missing."""
+    path = os.environ.get(env_name) or os.path.join(MODELS_DIR, default_name)
+    return path if os.path.isfile(path) else None
+
+
+def _rec_spec(lang):
+    """(model, keys) of the Latin ("latin") or Ukrainian ("uk") recogniser, None when not installed."""
+    if lang == "uk":
+        model = _model_file("LIVENOW_OCR_REC_UK", "eslav_rec.onnx")
+        keys = _model_file("LIVENOW_OCR_REC_UK_KEYS", "eslav_dict.txt")
+    else:
+        model = _model_file("LIVENOW_OCR_REC_LATIN", "latin_rec.onnx")
+        keys = _model_file("LIVENOW_OCR_REC_LATIN_KEYS", "latin_dict.txt")
+    return (model, keys) if model and keys else None
+
+
+def available_langs():
+    """What `?lang=` accepts: "default" always, "uk" when the Ukrainian recogniser is installed."""
+    return ["default"] + (["uk"] if _rec_spec("uk") and _engine_name() == "rapidocr" else [])
+
+
+def _engine_name():
+    return _engine[0] if _engine else get_engine()[0]
 
 
 def _load_engine():
@@ -40,16 +76,43 @@ def _load_engine():
         try:
             from rapidocr_onnxruntime import RapidOCR  # type: ignore
 
-            kwargs = {}
-            if os.environ.get("LIVENOW_OCR_REC_MODEL"):
-                kwargs["rec_model_path"] = os.environ["LIVENOW_OCR_REC_MODEL"]
-            if os.environ.get("LIVENOW_OCR_REC_KEYS"):
-                kwargs["rec_keys_path"] = os.environ["LIVENOW_OCR_REC_KEYS"]
-            rapid = RapidOCR(**kwargs)
+            # The detector (and angle classifier) load once; recognisers are swapped per request.
+            # Default recogniser: LIVENOW_OCR_DEFAULT_REC=latin (when its files are installed) or
+            # stock (RapidOCR's Chinese+English model; the legacy LIVENOW_OCR_REC_MODEL/_KEYS
+            # variables replace it).
+            rapid = RapidOCR()
 
-            def run(img):
+            def build(model, keys):
+                # RapidOCR 1.2.3 ignores a rec_keys_path kwarg (it reads keys_path), so the
+                # recogniser is built here with an explicit config.
+                return rapid.init_module("ch_ppocr_v3_rec", "TextRecognizer")({
+                    "use_cuda": False, "model_path": model, "keys_path": keys,
+                    "rec_img_shape": [3, 48, 320], "rec_batch_num": 6})
+
+            latin = _rec_spec("latin") if DEFAULT_REC == "latin" else None
+            legacy = os.environ.get("LIVENOW_OCR_REC_MODEL")
+            recognisers = {}
+            if latin:
+                recognisers["default"] = build(*latin)
+            elif legacy and os.environ.get("LIVENOW_OCR_REC_KEYS"):
+                recognisers["default"] = build(legacy, os.environ["LIVENOW_OCR_REC_KEYS"])
+            else:
+                recognisers["default"] = rapid.text_recognizer
+            LOG.info("default recogniser: %s", "latin" if latin else "stock/legacy")
+
+            def recogniser(lang):
+                if lang not in recognisers:  # loaded on first use (memory)
+                    spec = _rec_spec(lang)
+                    if spec is None:
+                        raise ValueError("language %r is not installed" % lang)
+                    recognisers[lang] = build(*spec)
+                    LOG.info("loaded %s recogniser", lang)
+                return recognisers[lang]
+
+            def run(img, lang="default"):
                 import numpy as np  # type: ignore
 
+                rapid.text_recognizer = recogniser(lang if lang == "uk" else "default")
                 result, _ = rapid(np.array(img))
                 out = []
                 for box, text, conf in result or []:
@@ -71,7 +134,7 @@ def _load_engine():
         pytesseract.pytesseract.tesseract_cmd = cmd
     langs = os.environ.get("LIVENOW_OCR_TESS_LANGS", "tur+eng")
 
-    def run(img):
+    def run(img, lang="default"):
         d = pytesseract.image_to_data(img, lang=langs, config="--psm 6",
                                       output_type=pytesseract.Output.DICT)
         out = []
@@ -169,11 +232,11 @@ def group_rows(items):
     return out
 
 
-def run_ocr(data):
+def run_ocr(data, lang="default"):
     name, run = get_engine()
     img = preprocess(data)
     with _lock:
-        items = run(img)
+        items = run(img, lang)
     # "lines" joins boxes by a fixed y band (fine for flat screenshots); "items" are the raw
     # word boxes with their quads, so the app can rebuild rows of a skewed receipt photo itself.
     return {"engine": name, "width": img.width, "height": img.height,
@@ -200,13 +263,20 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self._send(404, {"error": "not found"})
         try:
-            self._send(200, {"ok": True, "engine": get_engine()[0]})
+            self._send(200, {"ok": True, "engine": get_engine()[0], "langs": available_langs(),
+                             "default_rec": DEFAULT_REC})
         except Exception as e:
             self._send(503, {"ok": False, "error": str(e)})
 
     def do_POST(self):
-        if self.path != "/ocr":
+        url = urlparse(self.path)
+        if url.path != "/ocr":
             return self._send(404, {"error": "not found"})
+        lang = (parse_qs(url.query).get("lang") or ["default"])[0].lower()
+        if lang not in ("default", "uk"):
+            return self._send(400, {"error": "unknown lang"})
+        if lang not in available_langs():
+            return self._send(400, {"error": "language not installed"})
         try:
             n = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -215,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(413 if n > MAX_BODY else 400, {"error": "bad body size"})
         data = self.rfile.read(n)
         try:
-            self._send(200, run_ocr(data))
+            self._send(200, run_ocr(data, lang))
         except Exception as e:
             LOG.exception("ocr failed")
             self._send(500, {"error": str(e)})

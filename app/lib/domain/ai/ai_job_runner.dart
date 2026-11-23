@@ -1670,9 +1670,8 @@ class AiJobRunner {
     required DateTime now,
   }) async {
     try {
-      final read = await _ocrRead(base64Decode(b.data!), b.mime);
-      final reading = parseBankScreenshot(read.text, now: now.toLocal());
-      return (reading: reading.hasAnything ? reading : null, rows: read.rows);
+      final read = await _readShot(base64Decode(b.data!), b.mime, now: now.toLocal());
+      return (reading: read.reading.hasAnything ? read.reading : null, rows: read.rows);
     } on AiJobFailure {
       return (reading: null, rows: '');
     }
@@ -1918,9 +1917,8 @@ class AiJobRunner {
     }
     final bytes = base64Decode(first.data!);
     await _step(job, JobSteps.ocr);
-    final text = await _ocrText(bytes, first.mime);
     final now = await _messageTime(job, payload);
-    final reading = parseBankScreenshot(text, now: now);
+    final reading = (await _readShot(bytes, first.mime, now: now)).reading;
     if (!reading.hasAnything) {
       await _replyAndFinish(
         job,
@@ -2144,15 +2142,47 @@ class AiJobRunner {
     await _releasePhotos(blobs);
   }
 
-  Future<String> _ocrText(Uint8List bytes, String mime) async =>
-      (await _ocrRead(bytes, mime)).text;
+  /// A photo read for a bank screenshot: with the service's default recogniser and, when
+  /// that looks like a bank screen ([looksLikeBankShot]) and the service offers Ukrainian,
+  /// ONCE more with `lang: 'uk'` (the default one cannot read Cyrillic). The Ukrainian
+  /// reading is kept when it has the same or more of (amount, date), else the first; the
+  /// merchant comes from the kept text. Receipts are never read twice.
+  Future<({ScreenshotReading reading, String rows})> _readShot(
+    Uint8List bytes,
+    String mime, {
+    required DateTime now,
+  }) async {
+    final first = await _ocrRead(bytes, mime);
+    var reading = parseBankScreenshot(first.text, now: now);
+    var rows = first.rows;
+    final client = ocr;
+    if (client != null && looksLikeBankShot(first.text, reading)) {
+      if ((await client.healthInfo()).hasUkrainian) {
+        try {
+          final uk = await _ocrRead(bytes, mime, lang: kOcrLangUkrainian);
+          final ukReading = parseBankScreenshot(uk.text, now: now);
+          if (screenshotRichness(ukReading) >= screenshotRichness(reading)) {
+            reading = ukReading;
+            rows = uk.rows;
+          }
+        } on AiBadResponseException {
+          // The Ukrainian pass failed: the first reading stands.
+        }
+      }
+    }
+    return (reading: reading, rows: rows);
+  }
 
   /// The OCR text of a photo and its printed rows (tilt-corrected when the
   /// service gave word boxes), the latter for the model that reads the message.
-  Future<({String text, String rows})> _ocrRead(Uint8List bytes, String mime) async {
+  Future<({String text, String rows})> _ocrRead(
+    Uint8List bytes,
+    String mime, {
+    String? lang,
+  }) async {
     final client = ocr;
     if (client != null) {
-      final r = await client.ocr(bytes, mime: mime);
+      final r = await client.ocr(bytes, mime: mime, lang: lang);
       final rebuilt = r.words.isEmpty ? null : rebuildReceipt(r.words);
       return (text: r.text, rows: _headRows(rebuilt?.text ?? r.text));
     }

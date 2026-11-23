@@ -197,6 +197,67 @@ void main() {
     expect((await env.draft(deriveId(parent, 'job', 0))).json['fx_source'], 'screenshot');
   });
 
+  group('Ukrainian second reading of a bank screenshot', () {
+    // What the default (Latin) recogniser keeps of a Cyrillic screen: the amount line only.
+    final lost = ['16:09', '-3 491.00', '18 2026, 22:23'];
+    // What the Ukrainian recogniser reads (invented names and sums).
+    final cyrillic = _rows(
+      '16:09\nПетро Р.\nПереказ на картку\n18 листопада 2026, 22:23\n-3 491.00 ₴\n'
+      'Коментар\nОпис та #теги\nЗалишок\n12 150.30 ₴',
+    );
+
+    test('a bank screen is read again once with lang uk, and that reading is used', () async {
+      ocrServer.healthLangs = ['default', 'uk'];
+      ocrServer.replyForLang = (_, lang) => ocrReply(lang == 'uk' ? cyrillic : lost);
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
+      final job = await env.sendPhotos([4]);
+      await env.drain();
+      expect(ocrServer.callsWithLang('uk'), greaterThan(0));
+      expect(ocrServer.callsWithLang('uk'), ocrServer.callsWithLang(null),
+          reason: 'every default reading of a bank screen gets exactly one Ukrainian pass');
+      expect(ocrServer.requests.where((r) => r.lang != null && r.lang != 'uk'), isEmpty);
+      final d = await env.draft(job);
+      expect(d.lines.single['amount'], 3491.0);
+      expect(d.json['at'], startsWith('2026-11-18T19:23'), reason: 'the date only the Ukrainian reading has');
+    });
+
+    test('a receipt is never read again', () async {
+      ocrServer.healthLangs = ['default', 'uk'];
+      ocrServer.replyForLang = (_, lang) => ocrReply(['BIM', 'EKMEK KOY 600G 64,00', 'TOPLAM 391,50 TL']);
+      env.extractor.receipt = receiptOf(e1Lines());
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
+      await env.sendPhotos([1]);
+      await env.drain();
+      expect(ocrServer.callsWithLang(null), greaterThan(0));
+      expect(ocrServer.callsWithLang('uk'), 0);
+    });
+
+    test('a worse Ukrainian reading is discarded', () async {
+      ocrServer.healthLangs = ['default', 'uk'];
+      // The first reading has amount AND date; the Ukrainian one only an amount.
+      ocrServer.replyForLang = (_, lang) =>
+          ocrReply(lang == 'uk' ? ['-3 491.00 ₴'] : _gift);
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
+      final job = await env.sendPhotos([4]);
+      await env.drain();
+      expect(ocrServer.callsWithLang('uk'), greaterThan(0));
+      final d = await env.draft(job);
+      expect(d.lines.single['amount'], 3491.0);
+      expect(d.json['at'], startsWith('2026-11-18T19:23'), reason: 'the first reading, with its date, was kept');
+    });
+
+    test('no lang uk when the service does not offer it', () async {
+      ocrServer.healthLangs = null; // an older service: no "langs" field
+      ocrServer.replyForLang = (_, lang) => ocrReply(_gift);
+      await env.init(ocr: OcrClient(baseUrl: ocrServer.url));
+      final job = await env.sendPhotos([4]);
+      await env.drain();
+      expect(ocrServer.callsWithLang(null), greaterThan(0));
+      expect(ocrServer.callsWithLang('uk'), 0);
+      expect((await env.draft(job)).lines.single['amount'], 3491.0);
+    });
+  });
+
   group('the model as a fallback', () {
     const typed = 'перевів 100 з Невідомий на Monobank';
 

@@ -83,6 +83,20 @@ ReceiptWord? _wordOf(Object? it) {
   return ReceiptWord.fromQuad((it['text'] ?? '').toString(), quad);
 }
 
+/// `/health` of the OCR service: [langs] are the `?lang=` values it accepts besides the
+/// default reading (empty from an older service without the field: no `uk`).
+class OcrHealth {
+  const OcrHealth({this.ok = false, this.langs = const []});
+
+  final bool ok;
+  final List<String> langs;
+
+  bool get hasUkrainian => langs.contains(kOcrLangUkrainian);
+}
+
+/// `?lang=` of the Ukrainian (East Slavic) recogniser, used for bank screenshots.
+const kOcrLangUkrainian = 'uk';
+
 class OcrClient {
   OcrClient({
     String baseUrl = 'http://127.0.0.1:$kOcrServicePort',
@@ -112,14 +126,40 @@ class OcrClient {
     }
   }
 
+  /// `/health` with the languages on offer. Never throws: unreachable = not ok.
+  Future<OcrHealth> healthInfo({Duration timeout = const Duration(seconds: 3)}) async {
+    try {
+      final r = await aiHttpSend(
+        'GET',
+        Uri.parse('$baseUrl/health'),
+        timeout: timeout,
+        connectTimeout: timeout,
+        maxBytes: 64 * 1024,
+      );
+      if (!r.ok) return const OcrHealth();
+      try {
+        final j = jsonDecode(r.text);
+        final l = j is Map ? j['langs'] : null;
+        return OcrHealth(ok: true, langs: [if (l is List) for (final v in l) v.toString()]);
+      } on FormatException {
+        return const OcrHealth(ok: true);
+      }
+    } on AiException {
+      return const OcrHealth();
+    }
+  }
+
+  /// [lang] `uk` reads with the Ukrainian recogniser (only when [OcrHealth.langs]
+  /// lists it); null = the service's default reading.
   Future<OcrResult> ocr(
     Uint8List image, {
     String? mime,
+    String? lang,
     AiCancelToken? cancel,
   }) async {
     final r = await aiHttpSend(
       'POST',
-      Uri.parse('$baseUrl/ocr'),
+      Uri.parse('$baseUrl/ocr${lang == null ? '' : '?lang=${Uri.encodeQueryComponent(lang)}'}'),
       body: image,
       headers: {'content-type': mime ?? 'application/octet-stream'},
       timeout: requestTimeout,

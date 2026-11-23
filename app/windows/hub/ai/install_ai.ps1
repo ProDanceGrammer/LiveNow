@@ -45,6 +45,30 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item (Join-Path $source 'ocr_service.py') $dest -Force
 Copy-Item (Join-Path $source 'requirements.txt') $dest -Force
 
+# Recognition models: PP-OCRv5 mobile, ONNX (monkt/paddleocr-onnx on Hugging Face, Apache-2.0, pinned
+# to one commit). "latin" reads Turkish letters (default reading), "eslav" reads Ukrainian (bank screens).
+$modelBase = 'https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65/languages'
+$models = @(
+    @{ File = 'latin_rec.onnx'; Url = "$modelBase/latin/rec.onnx"; Sha = '614ffc2d6d3902d360fad7f1b0dd455ee45e877069d14c4e51a99dc4ef144409' },
+    @{ File = 'latin_dict.txt'; Url = "$modelBase/latin/dict.txt"; Sha = '3c0a8a79b612653c25f765271714f71281e4e955962c153e272b7b8c1d2b13ff' },
+    @{ File = 'eslav_rec.onnx'; Url = "$modelBase/eslav/rec.onnx"; Sha = 'dc6bf0e855247decce214ba6dae5bc135fa0ad725a5918a7fcfb59fad6c9cdee' },
+    @{ File = 'eslav_dict.txt'; Url = "$modelBase/eslav/dict.txt"; Sha = '3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb' }
+)
+$modelDir = Join-Path $dest 'models'
+New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
+foreach ($m in $models) {
+    $target = Join-Path $modelDir $m.File
+    if ((Test-Path $target) -and ((Get-FileHash $target -Algorithm SHA256).Hash -eq $m.Sha)) { continue }
+    Write-Host "Downloading $($m.File)..."
+    $tmp = "$target.part"
+    Invoke-WebRequest -Uri $m.Url -OutFile $tmp -UseBasicParsing
+    if ((Get-FileHash $tmp -Algorithm SHA256).Hash -ne $m.Sha) {
+        Remove-Item $tmp -Force
+        throw "Checksum of $($m.File) does not match: not installed."
+    }
+    Move-Item $tmp $target -Force
+}
+
 $py = Get-Command py -ErrorAction SilentlyContinue
 $pyExe = Get-Command python -ErrorAction SilentlyContinue
 $venv = Join-Path $dest 'venv'

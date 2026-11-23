@@ -23,6 +23,19 @@ const _topUp = '16:091\n3 rpMBHeBoro paxyHKy XYZ\nOnOBHeHHA KapTKW\n18ncTonaqa20
 const _lira = '19:271\nBREW CAFE\nPo3BarM Ta cnopT\n7nmcTonaqa2026,20:05\n-137.94会\n'
     'yBan1oTi150.00TL,Kypc0.9196\nOnuc Ta#Tern\n3aBaHTaKTMΦawn\n3anmok\n9801.01号';
 
+// The same screens as the Ukrainian recogniser reads them (real Cyrillic and "₴"); every
+// name and amount is invented. [sym] is what the "₴" came out as: the sign, junk or nothing.
+String _cyGift(String sym) => '16:09\nПетро Р.\nПереказ на картку\n18 листопада 2026, 22:23\n-3 491.00 $sym\n'
+    'Коментар\nОпис та #теги\nЗавантажити квитанцію\nЗалишок\n12 150.30 $sym\n'
+    'Витрати за листопад\n27 482 $sym\n3 741 $sym';
+String _cyTopUp(String sym) => '16:09\nЗ гривневого рахунку XYZ\nПоповнення картки\n'
+    '18 листопада 2026, 22:19\n9 026.87 $sym\nОпис та #теги\nЗалишок\n17 701.20 $sym\n'
+    'Відкрити депозит';
+String _cyShop(String sym) => '16:09\nЙекмеки\n18 листопада 2026, 21:10\n-450.00 $sym\n'
+    'Опис та #теги\nЗалишок\n8 100.00 $sym';
+String _cyLira(String sym) => '19:27\nSunset Cafe\n18 листопада 2026, 21:10\n-45,17 $sym\n'
+    'У валюті 50,00 TL, курс 0,9034\nОпис та #теги\nЗалишок\n19 801,01 $sym';
+
 // A paper receipt (no bank markers at all).
 const _paper = 'BIM BIRLESIK MAGAZALAR\nEKMEK KOY 600G 64,00\nTOPLAM 64,00 TL\n18.11.2026 19:40';
 
@@ -84,6 +97,70 @@ void main() {
       final r = parseBankScreenshot(_paper, now: now);
       expect(r.bankScreen, isFalse);
       expect(r.hasAnything, isFalse);
+    });
+  });
+
+  group('real Cyrillic: the main amount wins over the largest ₴ (the balance)', () {
+    for (final sym in ['₴', '会', '']) {
+      final tag = sym.isEmpty ? 'no symbol read' : '"$sym"';
+      test('card-to-card, $tag', () {
+        final r = parseBankScreenshot(_cyGift(sym), now: now);
+        expect(r.bankScreen, isTrue);
+        expect(r.useAmount, 3491.0, reason: 'not the 12 150.30 balance nor the 27 482 chart');
+        expect(r.uahOnly, isTrue);
+        expect(r.incoming, isFalse);
+        expect(r.date, DateTime(2026, 11, 18, 22, 23));
+        expect(r.merchant, isNull);
+        expect(r.shopAmount, 3491.0);
+      });
+      test('top-up, $tag', () {
+        final r = parseBankScreenshot(_cyTopUp(sym), now: now);
+        expect(r.useAmount, 9026.87);
+        expect(r.incoming, isTrue);
+        expect(r.uahOnly, isTrue);
+        expect(r.date, DateTime(2026, 11, 18, 22, 19));
+        expect(r.merchant, isNull);
+      });
+      test('a purchase in hryvnia keeps its merchant, $tag', () {
+        final r = parseBankScreenshot(_cyShop(sym), now: now);
+        expect(r.useAmount, 450.0);
+        expect(r.uahOnly, isTrue);
+        expect(r.incoming, isFalse);
+        expect(r.merchant, 'Йекмеки');
+        expect(r.date, DateTime(2026, 11, 18, 21, 10));
+      });
+      test('a lira payment keeps its rate and lira amount, $tag', () {
+        final r = parseBankScreenshot(_cyLira(sym), now: now);
+        expect(r.useAmount, 45.17);
+        expect(r.countAmount, 50.0);
+        expect(r.rate, 0.9034);
+        expect(r.uahOnly, isFalse, reason: 'a lira amount is there');
+        expect(r.incoming, isFalse);
+        expect(r.merchant, 'Sunset Cafe');
+      });
+    }
+
+    test('the Ukrainian model reads "₴" as a digit "2" (as on the hub)', () {
+      const gift = 'Переказ на картку\n18 листопада 2026, 22:23\n-3 491.00 2\nКомент\n'
+          'Залишок\n12150.302\nОпис та #теги';
+      final r = parseBankScreenshot(gift, now: now);
+      expect(r.bankScreen, isTrue);
+      expect(r.useAmount, 3491.0, reason: 'the trailing 2 is the hryvnia sign');
+      expect(r.incoming, isFalse);
+      expect(r.date, DateTime(2026, 11, 18, 22, 23));
+      const topUp = 'Поповнення картки\n18 листопада 2026, 22:19\n9 026.872\n'
+          'Опис та #теги\nЗалишок\n7701.202';
+      final t = parseBankScreenshot(topUp, now: now);
+      expect(t.bankScreen, isTrue);
+      expect(t.useAmount, 9026.87, reason: 'a glued 2 after the decimals is the sign');
+      expect(t.incoming, isTrue);
+    });
+
+    test('re-read cues: a signed amount line may be a bank screen, a receipt is not', () {
+      final lost = 'Kypc\n-3 491.00 \n18 2026, 22:23';
+      expect(looksLikeBankShot(lost, parseBankScreenshot(lost, now: now)), isTrue);
+      expect(looksLikeBankShot(_paper, parseBankScreenshot(_paper, now: now)), isFalse);
+      expect(looksLikeBankShot(_cyGift('₴'), parseBankScreenshot(_cyGift('₴'), now: now)), isTrue);
     });
   });
 
