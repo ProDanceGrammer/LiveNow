@@ -169,14 +169,18 @@ void main() {
     'fx_source': 'market',
   };
 
-  uiTest('Budget shows the chat button and opens the threads screen', (
+  uiTest('Budget has no chat button of its own (the shell app bar has it)', (
     tester,
   ) async {
     await mount(tester, const BudgetScreen());
-    expect(find.byKey(const ValueKey('ai-chat-button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-chat-button')), findsNothing);
     expect(find.byKey(const ValueKey('budget-fab')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('ai-chat-button')));
-    await settle(tester);
+  });
+
+  uiTest('the threads screen lists the chats and offers a new one', (
+    tester,
+  ) async {
+    await mount(tester, const AiThreadsScreen());
     expect(find.byKey(const ValueKey('ai-threads-list')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-new-thread')), findsOneWidget);
     expect(find.text('Receipts'), findsOneWidget);

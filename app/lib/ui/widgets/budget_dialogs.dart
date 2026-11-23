@@ -18,6 +18,7 @@ import '../account_icon_codec.dart';
 import '../budget_category_rows.dart' show categoryLine;
 import '../budget_providers.dart';
 import '../dialog_stack.dart';
+import '../layout.dart';
 import '../open_entity.dart';
 import '../providers.dart';
 import '../undo.dart' show offerUndo, undoHistoryProvider;
@@ -37,18 +38,85 @@ import 'section_block.dart';
 
 const _dialogWidth = 440.0;
 
-Widget _dialogBody(List<Widget> children) => SizedBox(
-  width: _dialogWidth,
-  child: SingleChildScrollView(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: children,
+/// 440 px on a wide window, the room a phone leaves otherwise.
+Widget _dialogBody(List<Widget> children) => Builder(
+  builder: (context) => SizedBox(
+    width: dialogWidth(context, _dialogWidth),
+    child: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
     ),
   ),
 );
 
 const _gap = SizedBox(height: 16);
+
+/// A dialog group: on the phone a [SectionBlock] with a short header (the
+/// leading gap is dropped, the block's margin separates it); on a wide window
+/// the children exactly as given.
+List<Widget> _sec(BuildContext context, String header, List<Widget> kids) {
+  if (!usePhoneLayout(context)) return kids;
+  final body = kids.isNotEmpty && identical(kids.first, _gap)
+      ? kids.sublist(1)
+      : kids;
+  final g = context.glass;
+  return [
+    SectionBlock(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            header,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.4,
+              color: g.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ...body,
+        ],
+      ),
+    ),
+  ];
+}
+
+/// Fields side by side with the given flex values; one per line on a phone
+/// narrower than ~360 px of dialog content.
+Widget _fieldRow(
+  BuildContext context,
+  List<Widget> fields, {
+  List<int>? flex,
+  double gap = 12,
+  CrossAxisAlignment align = CrossAxisAlignment.start,
+}) {
+  if (usePhoneLayout(context) && dialogWidth(context, _dialogWidth) < 360) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < fields.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          fields[i],
+        ],
+      ],
+    );
+  }
+  return Row(
+    crossAxisAlignment: align,
+    children: [
+      for (var i = 0; i < fields.length; i++) ...[
+        if (i > 0) SizedBox(width: gap),
+        Expanded(flex: flex == null ? 1 : flex[i], child: fields[i]),
+      ],
+    ],
+  );
+}
 
 /// Opens a category in its editor (used by every place that shows one).
 Future<void> openBudgetCategoryById(
@@ -415,33 +483,34 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
-          _gap,
-          TextFormField(
-            key: const ValueKey('account-name'),
-            controller: _name,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: 'Name'),
-            validator: (v) =>
-                nameFieldError(v, required: 'Name is required'),
-            onFieldSubmitted: (_) => _save(),
-          ),
-          _gap,
-          TextFormField(
-            controller: _type,
-            decoration: const InputDecoration(
-              labelText: 'Type (optional)',
-              hintText: 'electronic money / cash / crypto',
+          ..._sec(context, 'Details', [
+            _gap,
+            TextFormField(
+              key: const ValueKey('account-name'),
+              controller: _name,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Name'),
+              validator: (v) =>
+                  nameFieldError(v, required: 'Name is required'),
+              onFieldSubmitted: (_) => _save(),
             ),
-          ),
-          _gap,
-          // Currency and rate share a line (equal height: the hint is under
-          // the row, not under one field).
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextFormField(
+            _gap,
+            TextFormField(
+              controller: _type,
+              decoration: const InputDecoration(
+                labelText: 'Type (optional)',
+                hintText: 'electronic money / cash / crypto',
+              ),
+            ),
+          ]),
+          ..._sec(context, 'Currency & balance', [
+            _gap,
+            // Currency and rate share a line (equal height: the hint is under
+            // the row, not under one field).
+            _fieldRow(
+              context,
+              [
+                TextFormField(
                   key: const ValueKey('account-currency'),
                   controller: _currency,
                   textCapitalization: TextCapitalization.characters,
@@ -449,11 +518,7 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
                   validator: (v) =>
                       (v ?? '').trim().isEmpty ? 'Required' : null,
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 3,
-                child: TextFormField(
+                TextFormField(
                   key: const ValueKey('account-rate'),
                   controller: _rate,
                   decoration: InputDecoration(
@@ -461,29 +526,30 @@ class _BudgetAccountDialogState extends ConsumerState<BudgetAccountDialog> {
                   ),
                   validator: (v) => number(v, positive: true),
                 ),
+              ],
+              flex: const [2, 3],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 4),
+              child: Text(
+                'e.g. 40 = 40 of this currency per 1 $base',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 6, left: 4),
-            child: Text(
-              'e.g. 40 = 40 of this currency per 1 $base',
-              style: Theme.of(context).textTheme.bodySmall,
             ),
-          ),
-          _gap,
-          TextFormField(
-            key: const ValueKey('account-opening'),
-            controller: _opening,
-            decoration: const InputDecoration(
-              labelText: 'Opening balance',
-              helperText:
-                  'Balance = opening balance + transactions up to today',
-              helperMaxLines: 2,
+            _gap,
+            TextFormField(
+              key: const ValueKey('account-opening'),
+              controller: _opening,
+              decoration: const InputDecoration(
+                labelText: 'Opening balance',
+                helperText:
+                    'Balance = opening balance + transactions up to today',
+                helperMaxLines: 2,
+              ),
+              validator: number,
+              onFieldSubmitted: (_) => _save(),
             ),
-            validator: number,
-            onFieldSubmitted: (_) => _save(),
-          ),
+          ]),
         ]),
       ),
       actions: [
@@ -955,6 +1021,7 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
       content: Form(
         key: _form,
         child: _layout(context, [
+          ..._sec(context, 'Category', [
           TextFormField(
             key: const ValueKey('category-name'),
             controller: _name,
@@ -1026,10 +1093,12 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
               ],
             ],
           ),
+          ]),
           // A group only sums its sub-categories: the unit, price, units,
           // frequency, one-time and end-date fields would all be ignored, so
           // they are not shown at all.
           if (!isGroup) ...[
+            ..._sec(context, 'Amount', [
             _gap,
             GlassPillSelector<BudgetUnit>(
               label: 'Unit of measure',
@@ -1045,54 +1114,43 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
             _gap,
             // Price (or the percent), units per month and the frequency share one
             // row, equal height: the hint lives under the row, not under one field.
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: percent
-                      ? TextFormField(
-                          key: const ValueKey('category-percent'),
-                          controller: _percent,
-                          decoration: const InputDecoration(
-                            labelText: 'Percent',
-                          ),
-                          validator: optionalNumber,
-                        )
-                      : TextFormField(
-                          key: const ValueKey('category-price'),
-                          controller: _price,
-                          decoration: const InputDecoration(
-                            labelText: 'Price per unit',
-                          ),
-                          validator: optionalNumber,
+            _fieldRow(
+              context,
+              [
+                percent
+                    ? TextFormField(
+                        key: const ValueKey('category-percent'),
+                        controller: _percent,
+                        decoration: const InputDecoration(labelText: 'Percent'),
+                        validator: optionalNumber,
+                      )
+                    : TextFormField(
+                        key: const ValueKey('category-price'),
+                        controller: _price,
+                        decoration: const InputDecoration(
+                          labelText: 'Price per unit',
                         ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 3,
-                  child: TextFormField(
-                    key: const ValueKey('category-units'),
-                    controller: _units,
-                    decoration: const InputDecoration(
-                      labelText: 'Units per month',
-                    ),
-                    validator: optionalNumber,
+                        validator: optionalNumber,
+                      ),
+                TextFormField(
+                  key: const ValueKey('category-units'),
+                  controller: _units,
+                  decoration: const InputDecoration(
+                    labelText: 'Units per month',
                   ),
+                  validator: optionalNumber,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: TextFormField(
-                    key: const ValueKey('category-frequency'),
-                    controller: _frequency,
-                    decoration: const InputDecoration(
-                      labelText: 'Every N months',
-                    ),
-                    validator: optionalNumber,
+                TextFormField(
+                  key: const ValueKey('category-frequency'),
+                  controller: _frequency,
+                  decoration: const InputDecoration(
+                    labelText: 'Every N months',
                   ),
+                  validator: optionalNumber,
                 ),
               ],
+              flex: const [3, 3, 2],
+              gap: 10,
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6, left: 4),
@@ -1130,7 +1188,9 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                 ),
               ),
             ],
-            ...accountFields,
+            ]),
+            ..._sec(context, 'Accounts', accountFields),
+            ..._sec(context, 'Schedule', [
             _gap,
             Row(
               children: [
@@ -1154,9 +1214,10 @@ class _BudgetCategoryDialogState extends ConsumerState<BudgetCategoryDialog> {
                   ),
               ],
             ),
+            ]),
           ],
           // A group has no price fields: its accounts follow the Type row.
-          if (isGroup) ...accountFields,
+          if (isGroup) ..._sec(context, 'Accounts', accountFields),
           _gap,
           // Parent category: same block style as the sub-categories below. The
           // searchable picker never offers the category itself or anything
@@ -1648,6 +1709,14 @@ class _BudgetTransactionDialogState
                   : 'New transaction',
             ),
           ),
+          // Phone: Duplicate is an icon here so the actions row does not overflow.
+          if (widget.existing != null && usePhoneLayout(context))
+            IconButton(
+              key: const ValueKey('tx-duplicate'),
+              tooltip: 'Duplicate',
+              icon: const Icon(Icons.copy_rounded),
+              onPressed: _duplicate,
+            ),
           if (widget.existing != null)
             IconButton(
               key: const ValueKey('tx-delete'),
@@ -1661,6 +1730,7 @@ class _BudgetTransactionDialogState
       content: Form(
         key: _form,
         child: _dialogBody([
+          ..._sec(context, 'Category & action', [
           // Category: open it, change it, or clear it (a transaction needs one,
           // so Save asks for another) - the same three controls as the action.
           Row(
@@ -1757,6 +1827,8 @@ class _BudgetTransactionDialogState
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
+          ]),
+          ..._sec(context, 'Amount', [
           _gap,
           TextFormField(
             key: const ValueKey('tx-name'),
@@ -1776,36 +1848,31 @@ class _BudgetTransactionDialogState
               ),
             ),
           _gap,
-          Row(
-            children: [
-              Expanded(
-                child: TextFormField(
-                  key: const ValueKey('tx-quantity'),
-                  controller: _quantity,
-                  autofocus: widget.quick,
-                  decoration: InputDecoration(
-                    labelText: isAmount ? 'Amount' : 'Quantity',
+          _fieldRow(
+            context,
+            [
+              TextFormField(
+                key: const ValueKey('tx-quantity'),
+                controller: _quantity,
+                autofocus: widget.quick,
+                decoration: InputDecoration(
+                  labelText: isAmount ? 'Amount' : 'Quantity',
+                ),
+                validator: quantityNumber,
+                onChanged: (_) => setState(() {}),
+                onFieldSubmitted: (_) => _save(),
+              ),
+              if (!isAmount)
+                TextFormField(
+                  key: const ValueKey('tx-price'),
+                  controller: _price,
+                  decoration: const InputDecoration(
+                    labelText: 'Price per unit',
                   ),
-                  validator: quantityNumber,
+                  validator: optionalNumber,
                   onChanged: (_) => setState(() {}),
                   onFieldSubmitted: (_) => _save(),
                 ),
-              ),
-              if (!isAmount) ...[
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    key: const ValueKey('tx-price'),
-                    controller: _price,
-                    decoration: const InputDecoration(
-                      labelText: 'Price per unit',
-                    ),
-                    validator: optionalNumber,
-                    onChanged: (_) => setState(() {}),
-                    onFieldSubmitted: (_) => _save(),
-                  ),
-                ),
-              ],
             ],
           ),
           if (cat != null && amounts != null) ...[
@@ -1828,40 +1895,35 @@ class _BudgetTransactionDialogState
               ),
             amountLine(null, TxValue.main, amounts.base, base),
           ],
-          if (countAccount != null || useAccount != null) ...[
-            _gap,
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    key: const ValueKey('tx-rate-count'),
-                    controller: _rateCount,
-                    decoration: InputDecoration(
-                      labelText: 'Rate (count)',
-                      helperText: countAccount == null
-                          ? null
-                          : 'now ${budgetNumber(countAccount.rateToBase)}',
-                    ),
-                    validator: optionalNumber,
+          ]),
+          if (countAccount != null || useAccount != null)
+            ..._sec(context, 'Rates', [
+              _gap,
+              _fieldRow(context, [
+                TextFormField(
+                  key: const ValueKey('tx-rate-count'),
+                  controller: _rateCount,
+                  decoration: InputDecoration(
+                    labelText: 'Rate (count)',
+                    helperText: countAccount == null
+                        ? null
+                        : 'now ${budgetNumber(countAccount.rateToBase)}',
                   ),
+                  validator: optionalNumber,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    key: const ValueKey('tx-rate-interact'),
-                    controller: _rateInteract,
-                    decoration: InputDecoration(
-                      labelText: 'Rate (use)',
-                      helperText: useAccount == null
-                          ? null
-                          : 'now ${budgetNumber(useAccount.rateToBase)}',
-                    ),
-                    validator: optionalNumber,
+                TextFormField(
+                  key: const ValueKey('tx-rate-interact'),
+                  controller: _rateInteract,
+                  decoration: InputDecoration(
+                    labelText: 'Rate (use)',
+                    helperText: useAccount == null
+                        ? null
+                        : 'now ${budgetNumber(useAccount.rateToBase)}',
                   ),
+                  validator: optionalNumber,
                 ),
-              ],
-            ),
-          ],
+              ]),
+            ]),
           if (_error != null) ...[
             _gap,
             Text(
@@ -1872,7 +1934,7 @@ class _BudgetTransactionDialogState
         ]),
       ),
       actions: [
-        if (widget.existing != null)
+        if (widget.existing != null && !usePhoneLayout(context))
           TextButton.icon(
             key: const ValueKey('tx-duplicate'),
             onPressed: _duplicate,
@@ -1953,6 +2015,7 @@ class _BudgetSettingsDialogState extends ConsumerState<BudgetSettingsDialog> {
       content: Form(
         key: _form,
         child: _dialogBody([
+          ..._sec(context, 'Currency & period', [
           TextFormField(
             key: const ValueKey('settings-base'),
             controller: _base,
@@ -1991,15 +2054,23 @@ class _BudgetSettingsDialogState extends ConsumerState<BudgetSettingsDialog> {
             },
             onFieldSubmitted: (_) => _save(),
           ),
-          _gap,
-          SwitchListTile(
-            key: const ValueKey('settings-show-urgency'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Show urgency colours and values'),
-            subtitle: const Text('On categories and transactions'),
-            value: _showUrgency,
-            onChanged: (v) => setState(() => _showUrgency = v),
-          ),
+          ]),
+          ..._sec(context, 'Display', [
+            _gap,
+            // The block's decoration sits between the dialog's Material and
+            // the tile: its own transparent Material keeps the ink visible.
+            Material(
+              type: MaterialType.transparency,
+              child: SwitchListTile(
+                key: const ValueKey('settings-show-urgency'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Show urgency colours and values'),
+                subtitle: const Text('On categories and transactions'),
+                value: _showUrgency,
+                onChanged: (v) => setState(() => _showUrgency = v),
+              ),
+            ),
+          ]),
         ]),
       ),
       actions: [

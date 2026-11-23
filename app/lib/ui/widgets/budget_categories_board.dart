@@ -312,7 +312,9 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard>
     } else {
       final indexById = {for (var i = 0; i < rows.length; i++) rows[i].id: i};
       list = ListView.builder(
-        padding: const EdgeInsets.fromLTRB(4, 2, 4, 88),
+        padding: phone
+            ? const EdgeInsets.fromLTRB(12, 2, 12, 88)
+            : const EdgeInsets.fromLTRB(4, 2, 4, 88),
         // A fixed height: layout cost is O(visible rows).
         itemExtent: phone ? _kPhoneRow : _kWideRow,
         itemCount: rows.length,
@@ -327,15 +329,23 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard>
       }
     }
 
+    // Phone: no outer glass panel, every row is its own card on the page; the
+    // toolbar keeps its 12 px gutter by itself.
+    Widget shell(Widget column) => phone
+        ? Padding(padding: const EdgeInsets.only(top: 4), child: column)
+        : Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+            child: GlassSurface(
+              radius: GlassTheme.radiusPanel,
+              shadow: false,
+              blurWindow: false,
+              child: column,
+            ),
+          );
     return SavedViewsDefaultLoader(
       hooks: categoryViewHooks(ref),
-      child: Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-      child: GlassSurface(
-        radius: GlassTheme.radiusPanel,
-        shadow: false,
-        blurWindow: false,
-        child: Column(
+      child: shell(
+        Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
@@ -411,7 +421,6 @@ class _BudgetCategoriesBoardState extends ConsumerState<BudgetCategoriesBoard>
           ],
         ),
       ),
-    ),
     );
   }
 }
@@ -453,7 +462,11 @@ class _CategoryBoardRow extends StatelessWidget {
         ? urgencyColors(vm.urgency!, dark: dark)
         : null;
     final fg = tint?.fg;
-    final base = TextStyle(fontSize: 13.5, color: fg);
+    final base = TextStyle(
+      fontSize: 13.5,
+      color: fg,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
     final small = TextStyle(
       fontSize: 11.5,
       color: (fg ?? scheme.onSurface).withValues(alpha: 0.65),
@@ -498,7 +511,10 @@ class _CategoryBoardRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: base.copyWith(
-                    fontWeight: vm.hasChildren ? FontWeight.w700 : null,
+                    fontWeight: vm.hasChildren
+                        ? FontWeight.w800
+                        : (phone ? FontWeight.w600 : null),
+                    fontSize: phone ? 15 : null,
                   ),
                 ),
               ),
@@ -512,20 +528,25 @@ class _CategoryBoardRow extends StatelessWidget {
           if (phone) ...[
             // Two short rows: `amount per unit`, then `each N months · until
             // ... in <account>`.
-            if (vm.amountLine != null)
-              Text(
-                vm.amountLine!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: small,
-              ),
-            if (vm.schedule != null || vm.accountName != null)
+            if (vm.amountLine != null ||
+                vm.schedule != null ||
+                vm.accountName != null)
               Text.rich(
                 TextSpan(
                   children: [
-                    if (vm.schedule != null) TextSpan(text: vm.schedule),
+                    if (vm.amountLine != null) TextSpan(text: vm.amountLine),
+                    if (vm.schedule != null)
+                      TextSpan(
+                        text: vm.amountLine == null
+                            ? vm.schedule
+                            : ' · ${vm.schedule}',
+                      ),
                     if (vm.accountName != null) ...[
-                      TextSpan(text: vm.schedule == null ? 'in ' : ' in '),
+                      TextSpan(
+                        text: vm.amountLine == null && vm.schedule == null
+                            ? 'in '
+                            : ' · in ',
+                      ),
                       WidgetSpan(
                         alignment: PlaceholderAlignment.middle,
                         child: AccountIcon(icon: vm.accountIcon, size: 12),
@@ -534,7 +555,7 @@ class _CategoryBoardRow extends StatelessWidget {
                     ],
                   ],
                 ),
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: small,
               ),
@@ -675,6 +696,27 @@ class _CategoryBoardRow extends StatelessWidget {
       ),
     );
 
+    if (phone) {
+      // One distinct card per row; a group (has children) is a stronger fill.
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: GlassSurface(
+          radius: 14,
+          shadow: false,
+          blurWindow: false,
+          strength: vm.hasChildren ? 1.8 : 1,
+          child: tint == null
+              ? row
+              : Ink(
+                  decoration: BoxDecoration(
+                    color: tint.bg,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: row,
+                ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: tint == null

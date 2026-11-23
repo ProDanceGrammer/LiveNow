@@ -17,6 +17,7 @@ import '../saved_views_bar.dart'
     show SavedViewsBar, SavedViewsDefaultLoader;
 import '../providers.dart'
     show actionUrgencyProvider, actionsWithDirectionsProvider;
+import '../theme/glass_theme.dart';
 import '../urgency_colors.dart';
 import '../widgets/action_tile.dart' show formatUrgency;
 import '../layout.dart';
@@ -32,7 +33,6 @@ import '../widgets/glass.dart';
 import '../widgets/label_icon.dart';
 import '../widgets/param_icons.dart';
 import '../widgets/sort_chips.dart';
-import 'ai_threads_screen.dart';
 
 enum BudgetTab {
   overview('Overview'),
@@ -191,29 +191,16 @@ class _BudgetScreenState extends ConsumerState<BudgetScreen>
           ),
         ],
       ),
-      floatingActionButton: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FloatingActionButton.small(
-            heroTag: null,
-            key: const ValueKey('ai-chat-button'),
-            onPressed: () => AiThreadsScreen.open(context),
-            tooltip: 'Assistant',
-            child: const Icon(Icons.chat_bubble_outline),
-          ),
-          const SizedBox(width: 12),
-          FloatingActionButton(
-            heroTag: null,
-            key: const ValueKey('budget-fab'),
-            onPressed: _onFab,
-            tooltip: switch (tab) {
-              BudgetTab.overview || BudgetTab.transactions => 'Add transaction',
-              BudgetTab.categories => 'New category',
-              BudgetTab.accounts => 'New account',
-            },
-            child: const Icon(Icons.add),
-          ),
-        ],
+      floatingActionButton: FloatingActionButton(
+        heroTag: null,
+        key: const ValueKey('budget-fab'),
+        onPressed: _onFab,
+        tooltip: switch (tab) {
+          BudgetTab.overview || BudgetTab.transactions => 'Add transaction',
+          BudgetTab.categories => 'New category',
+          BudgetTab.accounts => 'New account',
+        },
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -361,6 +348,14 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
           entries: within,
         ),
       ];
+      if (usePhoneLayout(context)) {
+        return _phoneOverview(
+          context,
+          view: view,
+          asOf: asOf,
+          boards: boards,
+        );
+      }
       return ListView(
         padding: const EdgeInsets.only(bottom: 88),
         children: [
@@ -480,6 +475,171 @@ class _OverviewViewState extends ConsumerState<_OverviewView> {
       );
     });
   }
+
+  /// Phone: flat sections. One row of period controls, one summary card with
+  /// Plan / Fact / Position as labelled columns, then the boards as section
+  /// headers with flat rows (a coloured edge, no nested glass).
+  Widget _phoneOverview(
+    BuildContext context, {
+    required BudgetView view,
+    required DateTime? asOf,
+    required List<_BoardColumn> boards,
+  }) {
+    final s = view.settings;
+    final snap = view.snapshot;
+    final period = view.period;
+    final cur = s.baseCurrency;
+    final g = context.glass;
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 88),
+      children: [
+        _card(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            children: [
+              IconButton(
+                key: const ValueKey('budget-months-minus'),
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.remove),
+                tooltip: 'Shorter period',
+                onPressed: () => _setMonths(s, s.periodMonths - 1),
+              ),
+              Text(
+                '${s.periodMonths} months',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              IconButton(
+                key: const ValueKey('budget-months-plus'),
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.add),
+                tooltip: 'Longer period',
+                onPressed: () => _setMonths(s, s.periodMonths + 1),
+              ),
+              const Spacer(),
+              // Below ~320 px the label does not fit next to the period
+              // controls: the button keeps its key and says it in a tooltip.
+              if (MediaQuery.sizeOf(context).width < 320)
+                IconButton(
+                  key: const ValueKey('budget-as-of'),
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.event, size: 18),
+                  tooltip: asOf == null
+                      ? 'As of today'
+                      : 'As of ${budgetDate(asOf)}',
+                  onPressed: () => _pickAsOf(view),
+                )
+              else
+                Flexible(
+                  child: TextButton.icon(
+                    key: const ValueKey('budget-as-of'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.event, size: 18),
+                    label: Text(
+                      asOf == null ? 'As of today' : 'As of ${budgetDate(asOf)}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onPressed: () => _pickAsOf(view),
+                  ),
+                ),
+              if (asOf != null)
+                IconButton(
+                  key: const ValueKey('budget-as-of-reset'),
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.today),
+                  tooltip: 'Back to today',
+                  onPressed: () =>
+                      ref.read(budgetAsOfProvider.notifier).state = null,
+                ),
+            ],
+          ),
+        ),
+        _card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _PhoneFigure(
+                      key: const ValueKey('budget-plan-total'),
+                      icon: Param.plan,
+                      label: 'Plan',
+                      range:
+                          '${budgetDate(period.asOf)} – ${budgetDate(period.planEnd)}',
+                      value: snap.planTotal,
+                      currency: cur,
+                    ),
+                  ),
+                  Expanded(
+                    child: _PhoneFigure(
+                      key: const ValueKey('budget-fact-total'),
+                      icon: Param.actual,
+                      label: 'Fact',
+                      range:
+                          '${budgetDate(period.factStart)} – ${budgetDate(period.asOf)}',
+                      value: snap.factTotal,
+                      currency: cur,
+                    ),
+                  ),
+                  Expanded(
+                    child: _PhoneFigure(
+                      key: const ValueKey('budget-position'),
+                      label: 'Position',
+                      range: 'Plan + Fact',
+                      value: snap.position,
+                      currency: cur,
+                      strong: true,
+                    ),
+                  ),
+                ],
+              ),
+              if (snap.noRate)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Tooltip(
+                    message:
+                        'Some categories have no account or rate, so they are '
+                        'left out of these totals.',
+                    child: Chip(
+                      avatar: Icon(Icons.warning_amber_rounded, size: 18),
+                      label: Text('Some amounts have no rate'),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Categories vs plan',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                'Leaves only',
+                style: TextStyle(fontSize: 13, color: g.textSecondary),
+              ),
+              Switch(
+                key: const ValueKey('budget-leaves-only'),
+                value: _leavesOnly,
+                onChanged: (v) => setState(() => _leavesOnly = v),
+              ),
+            ],
+          ),
+        ),
+        ...boards,
+      ],
+    );
+  }
 }
 
 class _BoardEntry {
@@ -543,6 +703,77 @@ class _Figure extends StatelessWidget {
   }
 }
 
+/// One of the three summary columns of the phone Overview: a label, the date
+/// range small under it, then the amount (scaled down rather than wrapped).
+class _PhoneFigure extends StatelessWidget {
+  const _PhoneFigure({
+    super.key,
+    required this.label,
+    required this.range,
+    required this.value,
+    required this.currency,
+    this.icon,
+    this.strong = false,
+  });
+
+  final String label;
+  final String range;
+  final Param? icon;
+  final double value;
+  final String currency;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final g = context.glass;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              ParamIcon(icon!, size: 16, tapToShow: true),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          range,
+          maxLines: 2,
+          style: TextStyle(fontSize: 11, color: g.textSecondary, height: 1.2),
+        ),
+        const SizedBox(height: 6),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(
+            '${budgetMoney(value, sign: true)} $currency',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: value < 0 ? theme.colorScheme.error : null,
+            ),
+          ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _BoardColumn extends ConsumerWidget {
   const _BoardColumn({
     required this.columnKey,
@@ -563,6 +794,7 @@ class _BoardColumn extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (usePhoneLayout(context)) return _phoneSection(context);
     return Padding(
       padding: const EdgeInsets.all(4),
       child: GlassSurface(
@@ -627,6 +859,174 @@ class _BoardColumn extends ConsumerWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Phone: a section header (title + count) and flat rows, each with a 3 px
+  /// edge in the board's colour.
+  Widget _phoneSection(BuildContext context) {
+    final g = context.glass;
+    final edge = switch (columnKey) {
+      'under' => const Color(0xFF2E9E5B),
+      'over' => const Color(0xFFD9534F),
+      _ => g.textSecondary.withValues(alpha: 0.5),
+    };
+    final fill = switch (columnKey) {
+      'under' => _boardGreen(context),
+      'over' => _boardRed(context),
+      _ => null,
+    };
+    return Column(
+      key: ValueKey('budget-board-$columnKey'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  label: semanticTitle,
+                  child: ExcludeSemantics(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        for (final part in title)
+                          part is Param
+                              ? Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 2,
+                                  ),
+                                  child: ParamIcon(
+                                    part,
+                                    size: 18,
+                                    tooltip: false,
+                                    color: DefaultTextStyle.of(
+                                      context,
+                                    ).style.color,
+                                  ),
+                                )
+                              : Text(
+                                  part as String,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Text(
+                '${entries.length}',
+                style: TextStyle(fontSize: 13, color: g.textSecondary),
+              ),
+            ],
+          ),
+        ),
+        if (entries.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Text('—', style: TextStyle(color: g.textSecondary)),
+          ),
+        for (final e in entries)
+          _PhoneBoardRow(entry: e, edge: edge, fill: fill),
+      ],
+    );
+  }
+}
+
+/// One category of a phone board: a flat tinted row with a coloured left edge,
+/// the name and the plan / fact figures sharing the line when they fit.
+class _PhoneBoardRow extends StatelessWidget {
+  const _PhoneBoardRow({
+    required this.entry,
+    required this.edge,
+    required this.fill,
+  });
+
+  final _BoardEntry entry;
+  final Color edge;
+  final Color? fill;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    final g = context.glass;
+    final small = TextStyle(
+      fontSize: 13,
+      fontFeatures: const [FontFeature.tabularFigures()],
+      color: g.textPrimary,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: fill ?? g.fill.withValues(alpha: g.fill.a * 0.6),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              left: 0,
+              top: 8,
+              bottom: 8,
+              width: 3,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: edge,
+                  borderRadius: const BorderRadius.horizontal(
+                    right: Radius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+            Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: ValueKey('budget-board-${e.category.id}'),
+                borderRadius: BorderRadius.circular(12),
+                onTap: () =>
+                    BudgetCategoryDialog.show(context, existing: e.category),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 9, 12, 9),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 10,
+                      runSpacing: 2,
+                      children: [
+                        Text(
+                          e.category.name,
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ParamValue.plan(
+                              budgetMoney(e.figures.planBase),
+                              style: small,
+                              iconAfter: true,
+                            ),
+                            const SizedBox(width: 10),
+                            ParamValue.actual(
+                              budgetMoney(e.figures.factBase),
+                              style: small,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -946,9 +1346,8 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
           if (_showOptions) const BudgetTxOptionsPanel(),
           // The total of everything the search and filters leave in the list.
           if (items.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-              child: _TotalsBlock(
+            () {
+              final block = _TotalsBlock(
                 key: const ValueKey('tx-totals'),
                 title: 'Total (${items.length})',
                 totals: overall,
@@ -956,8 +1355,19 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
                 cols: cols,
                 showTotals: showTotals,
                 figures: showTotals ? figures : null,
-              ),
-            ),
+              );
+              // Phone: a compact card; wide: as before.
+              if (phone) {
+                return _card(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                  child: SizedBox(width: double.infinity, child: block),
+                );
+              }
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                child: block,
+              );
+            }(),
           if (items.isNotEmpty && !phone) _TxColumnsHeader(cols: cols),
           Expanded(
             child: items.isEmpty
@@ -989,11 +1399,21 @@ class _TransactionsViewState extends ConsumerState<_TransactionsView>
                       }
                       if (e is DateTime) {
                         return Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+                          padding: phone
+                              ? const EdgeInsets.fromLTRB(18, 14, 16, 2)
+                              : const EdgeInsets.fromLTRB(16, 12, 16, 2),
                           child: Text(
                             budgetDate(e) +
                                 (e.isAfter(now) ? '  · planned' : ''),
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+                            style: phone
+                                // A plain section header on the phone.
+                                ? TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.4,
+                                    color: context.glass.textSecondary,
+                                  )
+                                : const TextStyle(fontWeight: FontWeight.w600),
                           ),
                         );
                       }
@@ -1163,6 +1583,103 @@ class _TotalsBlock extends StatelessWidget {
       ),
     );
     final f = figures;
+    if (usePhoneLayout(context)) {
+      // Phone: the title, then the same values in a 2-column grid (long
+      // currency lists take a full line).
+      final tabular = small.copyWith(
+        fontFeatures: const [FontFeature.tabularFigures()],
+      );
+      final cells = <(bool, Widget)>[];
+      void add(Widget label, String value, {bool full = false, Key? key}) =>
+          cells.add((
+            full,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 22, child: label),
+                Expanded(child: Text(value, key: key, style: tabular)),
+              ],
+            ),
+          ));
+      if (showTotals) {
+        if (cols.counting) {
+          add(
+            const TxValueIcon(TxValue.counting, size: 16),
+            _sums(totals.counting),
+            full: true,
+          );
+        }
+        if (cols.interact) {
+          add(
+            const TxValueIcon(TxValue.interactional, size: 16),
+            totals.interact.isEmpty ? '—' : _sums(totals.interact),
+            full: true,
+          );
+        }
+        if (cols.main) {
+          add(
+            const TxValueIcon(TxValue.main, size: 16),
+            '${budgetMoney(totals.base, sign: true)} $base'
+            '${totals.noBase > 0 ? ' (${totals.noBase} without a rate)' : ''}',
+            full: true,
+          );
+        }
+        if (f != null) {
+          add(
+            const IncomeExpenseIcon(true),
+            '${budgetMoney(totals.income, sign: true)} $base',
+          );
+          add(
+            const IncomeExpenseIcon(false),
+            '${budgetMoney(totals.expense, sign: true)} $base',
+          );
+          add(
+            const ParamIcon(Param.plan, size: 16, tapToShow: true),
+            '${budgetMoney(f.plan, sign: true)} $base',
+            key: const ValueKey('tx-totals-plan'),
+          );
+          add(
+            const ParamIcon(Param.actual, size: 16, tapToShow: true),
+            '${budgetMoney(f.fact, sign: true)} $base',
+            key: const ValueKey('tx-totals-fact'),
+          );
+        }
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
+          if (subtitle != null)
+            Text(
+              subtitle!,
+              key: const ValueKey('tx-group-date'),
+              style: small,
+            ),
+          if (cells.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: LayoutBuilder(
+                builder: (context, c) => Wrap(
+                  spacing: 12,
+                  runSpacing: 3,
+                  children: [
+                    for (final (full, w) in cells)
+                      SizedBox(
+                        width: full ? c.maxWidth : (c.maxWidth - 12) / 2,
+                        child: w,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1338,7 +1855,11 @@ class _TransactionTile extends ConsumerWidget {
         ? '—'
         : money(amounts.interact, useCurrency!);
     final mainText = money(amounts.base, base);
-    final valueStyle = TextStyle(fontWeight: FontWeight.w600, color: fg);
+    final valueStyle = TextStyle(
+      fontWeight: FontWeight.w600,
+      color: fg,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
     Widget wideCell(String text, {Color? color, Widget? leading}) => SizedBox(
       width: _kTxColW,
@@ -1445,7 +1966,13 @@ class _TransactionTile extends ConsumerWidget {
                               )
                             : Text(
                                 t.name,
-                                style: TextStyle(color: fg),
+                                style: phone
+                                    ? TextStyle(
+                                        color: fg,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                      )
+                                    : TextStyle(color: fg),
                               ),
                         // Line 2: the categories icon and the category name.
                         Row(
@@ -1466,10 +1993,20 @@ class _TransactionTile extends ConsumerWidget {
                                 style: dim,
                               ),
                             ),
+                            // Phone: quantity x price shares this line.
+                            if (phone && detail != null)
+                              Flexible(
+                                child: Text(
+                                  ' · $detail',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: dim,
+                                ),
+                              ),
                           ],
                         ),
                         // Line 3: quantity x price.
-                        if (detail != null) Text(detail, style: dim),
+                        if (!phone && detail != null) Text(detail, style: dim),
                         // Line 4: the action, as before.
                         if (t.actionId != null)
                           InkWell(
@@ -1613,6 +2150,15 @@ class _AccountsView extends ConsumerWidget {
               builder: (context) {
                 final a = byId[item.id]!;
                 final incomplete = view.balances[a.id]?.incomplete ?? false;
+                if (usePhoneLayout(context)) {
+                  return _phoneAccountCard(
+                    context,
+                    a: a,
+                    item: item,
+                    base: base,
+                    incomplete: incomplete,
+                  );
+                }
                 return _card(
                   padding: EdgeInsets.zero,
                   child: Material(
@@ -1771,4 +2317,114 @@ class _AccountsView extends ConsumerWidget {
     }),
     );
   }
+}
+
+/// Phone account card: icon tile, name with "type · currency · rate" under it,
+/// and the balances right-aligned in the same row (main currency over own).
+Widget _phoneAccountCard(
+  BuildContext context, {
+  required BudgetAccount a,
+  required AccountSortInput item,
+  required String base,
+  required bool incomplete,
+}) {
+  final theme = Theme.of(context);
+  final g = context.glass;
+  const figure = TextStyle(
+    fontWeight: FontWeight.w700,
+    fontSize: 15,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+  return _card(
+    padding: EdgeInsets.zero,
+    child: Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        key: ValueKey('budget-account-${a.id}'),
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => BudgetAccountDialog.show(context, existing: a),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              AccountIcon(
+                key: ValueKey('budget-account-icon-${a.id}'),
+                icon: a.icon,
+                size: 36,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      a.name,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        if (a.type != null && a.type!.trim().isNotEmpty)
+                          a.type!,
+                        a.currency,
+                        '${budgetNumber(a.rateToBase)} per 1 $base',
+                      ].join(' · '),
+                      style: TextStyle(fontSize: 12, color: g.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (incomplete)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 4),
+                            child: Tooltip(
+                              message:
+                                  'Some transactions have no rate and are left out.',
+                              child: Icon(Icons.warning_amber_rounded, size: 16),
+                            ),
+                          ),
+                        const TxValueIcon(TxValue.main, size: 14),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            item.mainBalance == null
+                                ? '—'
+                                : '${budgetMoney(item.mainBalance!)} $base',
+                            key: ValueKey('budget-main-balance-${a.id}'),
+                            style: figure,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_balanceText(item.balance, a.rateToBase)} ${a.currency}',
+                      key: ValueKey('budget-balance-${a.id}'),
+                      style: figure.copyWith(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: g.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
