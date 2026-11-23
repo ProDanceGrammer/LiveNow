@@ -105,11 +105,16 @@ class GlassScope extends InheritedWidget {
     required this.blurred,
     required this.scale,
     required this.originKey,
+    this.sharp,
     required super.child,
   });
 
   /// The blurred background, or null until the first snapshot is ready.
   final ui.Image? blurred;
+
+  /// The sharp pre-rendered backdrop (what [GlassBackground] paints), or null
+  /// until the first snapshot is ready. [GlassPage] paints it.
+  final ui.Image? sharp;
 
   /// Image pixels per logical pixel.
   final double scale;
@@ -122,7 +127,34 @@ class GlassScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(GlassScope old) =>
-      blurred != old.blurred || scale != old.scale;
+      blurred != old.blurred || scale != old.scale || sharp != old.sharp;
+}
+
+/// An opaque page background for a pushed route: paints the SAME pre-rendered
+/// backdrop as [GlassBackground] (one image blit) so the page underneath never
+/// shows through during a slide transition. Outside a [GlassBackground]
+/// (tests) it is an opaque theme surface colour.
+class GlassPage extends StatelessWidget {
+  const GlassPage({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = GlassScope.maybeOf(context);
+    if (scope == null) {
+      return ColoredBox(
+        key: const ValueKey('glass-page-fallback'),
+        color: Theme.of(context).colorScheme.surface,
+        child: child,
+      );
+    }
+    return CustomPaint(
+      key: const ValueKey('glass-page'),
+      painter: _BackdropPainter(context.glass, scope.sharp),
+      child: child,
+    );
+  }
 }
 
 /// The window background (gradient + clouds) and its blurred snapshot. Sits
@@ -234,6 +266,7 @@ class _GlassBackgroundState extends State<GlassBackground> {
         if (widget.snapshot) _request(box.biggest, dpr, g);
         return GlassScope(
           blurred: _blurred,
+          sharp: _sharp,
           scale: _scale,
           originKey: _originKey,
           child: Stack(

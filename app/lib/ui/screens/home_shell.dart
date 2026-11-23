@@ -26,6 +26,7 @@ import '../search_targets.dart';
 import '../sync_providers.dart';
 import '../text_tool_access.dart';
 import '../widgets/instant_rail.dart';
+import '../widgets/assistant_button.dart';
 import '../widgets/sync_status_button.dart';
 import 'actions_section.dart';
 import 'budget_screen.dart';
@@ -298,6 +299,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
                     ?.copyWith(fontSize: 22),
               ),
               actions: [
+                const AssistantButton(),
                 const SyncStatusButton(),
                 PopupMenuButton<String>(
                   key: const ValueKey('phone-menu'),
@@ -407,6 +409,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
                   }),
                 ),
               const Spacer(),
+              const AssistantButton(),
               const SyncStatusButton(),
               PopupMenuButton<String>(
                 key: const ValueKey('phone-menu'),
@@ -499,7 +502,11 @@ class _HomeShellState extends ConsumerState<HomeShell>
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[_index] ?? _actionsSub.title),
-        actions: const [SyncStatusButton(), SizedBox(width: 8)],
+        actions: const [
+          AssistantButton(),
+          SyncStatusButton(),
+          SizedBox(width: 8),
+        ],
       ),
       // The New-action FAB is drawn here instead of via Scaffold.
       // floatingActionButton: the Scaffold runs a 200 ms scale transition

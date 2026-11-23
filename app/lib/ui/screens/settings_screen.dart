@@ -19,6 +19,7 @@ import '../layout.dart';
 import '../../domain/work_hours.dart';
 import '../theme_mode.dart';
 import '../theme/glass_theme.dart';
+import '../widgets/glass.dart' show GlassPage;
 import '../widgets/param_icons.dart';
 import '../widgets/section_block.dart';
 import '../widgets/time_zone_settings.dart';
@@ -31,8 +32,11 @@ import '../widgets/sync_settings_dialog.dart' show SyncSettingsBody;
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
-  static Future<void> open(BuildContext context) => Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  static Future<void> open(BuildContext context) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => const GlassPage(child: SettingsScreen()),
+    ),
+  );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

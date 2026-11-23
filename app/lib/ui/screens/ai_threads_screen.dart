@@ -8,6 +8,7 @@ import '../dialog_stack.dart';
 import '../time_format.dart' show formatDateTime, wallFromUtc;
 import '../../core/time_codec.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/glass.dart';
 import 'ai_chat_screen.dart';
 import 'settings_screen.dart';
 
@@ -47,7 +48,9 @@ class AiThreadsScreen extends ConsumerWidget {
   const AiThreadsScreen({super.key});
 
   static Future<void> open(BuildContext context) => Navigator.of(context).push(
-    MaterialPageRoute<void>(builder: (_) => const AiThreadsScreen()),
+    MaterialPageRoute<void>(
+      builder: (_) => const GlassPage(child: AiThreadsScreen()),
+    ),
   );
 
   Future<void> _newThread(BuildContext context, WidgetRef ref) async {
@@ -56,7 +59,9 @@ class AiThreadsScreen extends ConsumerWidget {
     try {
       final id = await ref.read(aiChatServiceProvider).createThread();
       navigator.push(
-        MaterialPageRoute<void>(builder: (_) => AiChatScreen(threadId: id)),
+        MaterialPageRoute<void>(
+          builder: (_) => GlassPage(child: AiChatScreen(threadId: id)),
+        ),
       );
     } catch (e) {
       showInfoToast(overlay, '$e');
@@ -171,7 +176,8 @@ class AiThreadsScreen extends ConsumerWidget {
                               ),
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute<void>(
-                                  builder: (_) => AiChatScreen(threadId: t.id),
+                                  builder: (_) =>
+                                      GlassPage(child: AiChatScreen(threadId: t.id)),
                                 ),
                               ),
                               trailing: PopupMenuButton<String>(
