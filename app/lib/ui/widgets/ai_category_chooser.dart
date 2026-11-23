@@ -9,6 +9,7 @@ import '../../domain/budget_rules.dart';
 import '../../domain/search_match.dart';
 import '../dialog_stack.dart';
 import '../providers.dart';
+import '../theme/glass_theme.dart';
 import 'ai_line_details_sheet.dart' show choiceHint;
 
 /// What the chooser returns: an existing category ([newName] null), or a NEW
@@ -196,10 +197,21 @@ class _ChooserState extends ConsumerState<_Chooser> {
                           DropdownButton<String>(
                             key: const ValueKey('ai-chooser-group'),
                             isExpanded: true,
+                            // The theme's canvas is transparent (glass): a
+                            // menu without its own colour shows the dialog
+                            // through it.
+                            dropdownColor: context.glass.fillDialog,
                             value: group,
                             items: [
                               for (final g in groups)
-                                DropdownMenuItem(value: g.id, child: Text(_path(g))),
+                                DropdownMenuItem(
+                                  value: g.id,
+                                  child: Text(
+                                    _path(g),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                             ],
                             onChanged: (v) => setState(() => _groupId = v),
                           ),

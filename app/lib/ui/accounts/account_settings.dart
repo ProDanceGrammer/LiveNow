@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../data/accounts/account_auth.dart';
+import '../theme/glass_theme.dart';
 import '../widgets/section_block.dart';
 import 'account_picker.dart';
 import 'idle_lock.dart';
@@ -673,6 +674,7 @@ class _IdleLockTile extends StatelessWidget {
     subtitle: const Text('Signs out after no mouse or keyboard activity'),
     trailing: DropdownButton<int>(
       key: const ValueKey('account-idle-lock-menu'),
+      dropdownColor: context.glass.fillDialog,
       value: kIdleLockOptions.contains(session.idleMinutes)
           ? session.idleMinutes
           : kIdleLockDefaultMinutes,
