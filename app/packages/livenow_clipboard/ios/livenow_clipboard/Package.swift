@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "livenow_clipboard",
     platforms: [
-        .iOS("12.0")
+        .iOS("13.0")
     ],
     products: [
         .library(name: "livenow-clipboard", targets: ["livenow_clipboard"])
