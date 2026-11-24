@@ -49,7 +49,9 @@ class AiChatService {
   static const maxPhotoBytes = 6 * 1024 * 1024;
 
   /// Most photos in one message (several receipts and their bank screenshots).
-  static const maxPhotosPerMessage = 20;
+  /// [maxMessagePhotoBytes] still caps their sum: a prepared bank screenshot
+  /// is ~150 KB and a receipt photo ~400 KB, so 50 fit unless most are receipts.
+  static const maxPhotosPerMessage = 50;
 
   /// Largest sum of the photos of one message: a sync push is capped at 32 MB
   /// and the photos travel inside it (a prepared photo is well under 1 MB).
