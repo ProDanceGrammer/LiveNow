@@ -86,10 +86,21 @@ abstract final class AiJobKind {
   /// A free-text request ('moved 12,582.50 from FOP to Monobank').
   static const text = 'text';
 
+  /// A bank statement file (CSV / XLSX / XLS) with an optional caption: ONE
+  /// blob of kind `statement` (its `mime` set), message content
+  /// `{v: 3, blob_ids: [id], kind: 'statement', file_name, size}`. The hub
+  /// answers with one summary draft (`{type: 'statement', ...}`).
+  static const statement = 'statement';
+
   /// Jobs that make a draft / record a batch of transactions. A text job counts
   /// too: a purchase told in words makes a draft (transfers finish at once).
   static bool recordsBatch(String kind) =>
-      kind == receipt || kind == bazaar || kind == photos || kind == text || kind == screenshot;
+      kind == receipt ||
+      kind == bazaar ||
+      kind == photos ||
+      kind == text ||
+      kind == screenshot ||
+      kind == statement;
 }
 
 /// Stage strings the worker writes to `ai_jobs.stage` and the status message.

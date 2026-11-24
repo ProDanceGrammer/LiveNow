@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,14 +7,58 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database.dart';
 import '../../domain/ai/ai_protocol.dart';
 import '../../domain/ai/job_progress.dart' show ProgressSnapshot;
-import '../ai_history_loader.dart' show aiBlobFetcherProvider;
 import '../ai_ui_providers.dart';
-import '../dialog_stack.dart';
 import '../ai_providers.dart';
-import 'app_toast.dart';
+import 'ai_photo_viewer.dart';
 
 /// Widest a chat bubble or card grows (desktop); a phone uses the full width.
 const kAiBubbleMaxWidth = 640.0;
+
+/// A bank statement file sent in a message: a chip with its name and size, and
+/// the caption. No viewer: the hub reads the file.
+class _FileBubble extends StatelessWidget {
+  const _FileBubble({required this.message, required this.content});
+
+  final AiMessage message;
+  final Map<String, dynamic> content;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = '${content['file_name'] ?? 'statement'}';
+    final size = content['size'];
+    final kb = size is num ? '${(size / 1024).ceil()} KB' : '';
+    final sheet = !name.toLowerCase().endsWith('.csv');
+    return AiBubbleFrame(
+      fromUser: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            key: ValueKey('ai-file-${message.id}'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(sheet ? Icons.table_chart_outlined : Icons.description_outlined),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
+              ),
+              if (kb.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(kb, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ],
+          ),
+          if (message.body.isNotEmpty)
+            SelectableText(
+              message.body,
+              key: ValueKey('ai-photo-caption-${message.id}'),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Common frame: aligns a message left (assistant) or right (user).
 class AiBubbleFrame extends StatelessWidget {
@@ -92,6 +135,10 @@ class AiPhotoBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final content = aiContent(message);
+    if (content['kind'] == AiJobKind.statement) {
+      return _FileBubble(message: message, content: content);
+    }
     final blobs =
         ref.watch(aiBlobsOfMessageProvider(message.id)).asData?.value ??
         const <AiBlob>[];
@@ -101,7 +148,7 @@ class AiPhotoBubble extends ConsumerWidget {
     for (var i = 0; i < blobs.length; i++) {
       // The first photo keeps the plain key (one-photo messages).
       final suffix = i == 0 ? '' : '-$i';
-      pics.add(_photo(context, ref, blobs[i], width, suffix));
+      pics.add(_photo(context, blobs, i, width, suffix));
     }
     if (blobs.isEmpty) {
       pics.add(
@@ -135,18 +182,18 @@ class AiPhotoBubble extends ConsumerWidget {
 
   Widget _photo(
     BuildContext context,
-    WidgetRef ref,
-    AiBlob blob,
+    List<AiBlob> blobs,
+    int index,
     double width,
     String suffix,
   ) {
-    final data = blob.data;
+    final data = blobs[index].data;
     if (data != null && data.isNotEmpty) {
       final bytes = base64Decode(data);
       // Still on this device (just sent): opens from here, no hub needed.
       return GestureDetector(
         key: ValueKey('ai-photo-open-${message.id}$suffix'),
-        onTap: () => _showPhoto(context, bytes),
+        onTap: () => _openViewer(context, blobs, index),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Image.memory(
@@ -163,47 +210,26 @@ class AiPhotoBubble extends ConsumerWidget {
     }
     return InkWell(
       key: ValueKey('ai-photo-original-${message.id}$suffix'),
-      onTap: () => _openOriginal(context, ref, blob.id),
+      onTap: () => _openViewer(context, blobs, index),
       child: _PhotoPlaceholder(hub: true, width: width),
     );
   }
 }
 
-/// Fetches the original from the hub and shows it full size; a toast when the
-/// hub has no copy or cannot be reached.
-Future<void> _openOriginal(
+/// Opens the viewer at [index] with all photos of the message; hub originals
+/// are fetched by the viewer when their page is first shown.
+Future<void> _openViewer(
   BuildContext context,
-  WidgetRef ref,
-  String blobId,
-) async {
-  final overlay = rootOverlayOf(context);
-  final fetch = ref.read(aiBlobFetcherProvider);
-  final bytes = await fetch(blobId);
-  if (bytes == null) {
-    showInfoToast(overlay, 'The original is not available from the hub');
-    return;
-  }
-  if (!context.mounted) return;
-  await _showPhoto(context, bytes);
-}
-
-/// A photo full size, zoomable.
-Future<void> _showPhoto(BuildContext context, Uint8List bytes) {
-  return showStackedDialog<void>(
-    context: context,
-    builder: (_) => Dialog(
-      key: const ValueKey('ai-photo-viewer'),
-      child: InteractiveViewer(
-        child: Image.memory(
-          bytes,
-          errorBuilder: (_, _, _) => const Padding(
-            padding: EdgeInsets.all(32),
-            child: Icon(Icons.broken_image_outlined, size: 48),
-          ),
-        ),
-      ),
-    ),
-  );
+  List<AiBlob> blobs,
+  int index,
+) {
+  final photos = <AiPhotoRef>[
+    for (final b in blobs)
+      (b.data != null && b.data!.isNotEmpty)
+          ? AiPhotoRef.local(base64Decode(b.data!))
+          : AiPhotoRef.hub(b.id),
+  ];
+  return showAiPhotoViewer(context, photos, index);
 }
 
 class _PhotoPlaceholder extends StatelessWidget {

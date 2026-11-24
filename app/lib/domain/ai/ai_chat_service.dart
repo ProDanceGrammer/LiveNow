@@ -434,6 +434,136 @@ class AiChatService {
     });
   }
 
+  /// Largest statement file (CSV / XLSX / XLS) accepted by [sendStatement].
+  static const maxStatementBytes = 5 * 1024 * 1024;
+
+  /// Sends a bank statement FILE with an optional [caption]: ONE message (kind
+  /// `photo`, so history and pruning treat it as an attachment; its content
+  /// has `kind: 'statement'`), ONE blob of kind `statement` with its `mime`,
+  /// and ONE `statement` job. Extension AND content must say csv/xlsx/xls.
+  Future<SentText> sendStatement(
+    String threadId, {
+    required String fileName,
+    required Uint8List bytes,
+    String caption = '',
+  }) async {
+    if (bytes.isEmpty) throw const AiChatException('The file is empty.');
+    if (bytes.length > maxStatementBytes) {
+      throw const AiChatException('The file is too large (more than 5 MB).');
+    }
+    final mime = statementMime(fileName, bytes);
+    if (mime == null) {
+      throw const AiChatException(
+        'Only CSV, XLSX or XLS statement files can be sent.',
+      );
+    }
+    final name = cleanName(fileName, what: 'file name');
+    final hash = await Sha256().hash(bytes);
+    final digest = hash.bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return db.transaction(() async {
+      final now = dateTimeToDb(DateTime.now())!;
+      final messageId = newId();
+      final jobId = newId();
+      final blobId = newId();
+      await _insertUserMessage(
+        messageId,
+        threadId,
+        AiMessageKind.photo,
+        _cleanText(caption),
+        jobId,
+        now,
+        contentJson: jsonEncode({
+          'v': 3,
+          'blob_ids': [blobId],
+          'kind': AiJobKind.statement,
+          'file_name': name,
+          'size': bytes.length,
+        }),
+      );
+      await db
+          .into(db.aiBlobsTable)
+          .insert(
+            AiBlobsTableCompanion.insert(
+              id: blobId,
+              messageId: Value(messageId),
+              jobId: Value(jobId),
+              kind: const Value(AiJobKind.statement),
+              mime: Value(mime),
+              data: Value(base64.encode(bytes)),
+              sha256: Value(digest),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      await _insertJob(
+        jobId,
+        threadId,
+        AiJobKind.statement,
+        JobPayload(
+          messageId: messageId,
+          blobIds: [blobId],
+          text: _cleanText(caption).isEmpty ? null : _cleanText(caption),
+        ),
+        now,
+      );
+      await _touchThread(threadId, now);
+      return SentText(messageId: messageId, jobId: jobId);
+    });
+  }
+
+  /// The mime type of a statement file, or null when the extension is not
+  /// csv/xlsx/xls or the content contradicts it (a picture, a PDF, a zip that
+  /// is not a workbook renamed to .csv, ...).
+  static String? statementMime(String fileName, Uint8List b) {
+    final dot = fileName.lastIndexOf('.');
+    if (dot < 0) return null;
+    final ext = fileName.substring(dot + 1).toLowerCase();
+    bool starts(List<int> magic) {
+      if (b.length < magic.length) return false;
+      for (var i = 0; i < magic.length; i++) {
+        if (b[i] != magic[i]) return false;
+      }
+      return true;
+    }
+
+    final isZip = starts(const [0x50, 0x4B, 0x03, 0x04]);
+    final isOle = starts(const [0xD0, 0xCF, 0x11, 0xE0]);
+    const xlsxMime =
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    bool looksText() {
+      if (isZip || isOle) return false;
+      for (final magic in const [
+        [0x89, 0x50, 0x4E, 0x47], // png
+        [0xFF, 0xD8, 0xFF], // jpeg
+        [0x47, 0x49, 0x46, 0x38], // gif
+        [0x25, 0x50, 0x44, 0x46], // pdf
+      ]) {
+        if (starts(magic)) return false;
+      }
+      // UTF-16 with a byte-order mark has NUL bytes by design.
+      if (starts(const [0xFF, 0xFE]) || starts(const [0xFE, 0xFF])) return true;
+      final n = b.length < 4096 ? b.length : 4096;
+      for (var i = 0; i < n; i++) {
+        if (b[i] == 0) return false;
+      }
+      return true;
+    }
+
+    switch (ext) {
+      case 'csv':
+        return looksText() ? 'text/csv' : null;
+      case 'xlsx':
+        return isZip ? xlsxMime : null;
+      case 'xls':
+        if (isZip) return xlsxMime; // an xlsx saved under the old extension
+        if (isOle) return 'application/vnd.ms-excel';
+        return looksText() ? 'application/vnd.ms-excel' : null;
+    }
+    return null;
+  }
+
   /// The user taps Confirm on a draft (optionally with line [edits]): a
   /// `confirm` message linked to the draft's job. The hub commits the batch.
   Future<String> confirmDraft(

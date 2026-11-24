@@ -16,6 +16,7 @@ import '../time_format.dart';
 import 'ai_category_chooser.dart';
 import 'ai_line_editor.dart';
 import 'ai_message_widgets.dart';
+import 'ai_statement_card.dart';
 import 'app_toast.dart';
 
 String _fmt(double? v) {
@@ -211,6 +212,14 @@ class _AiDraftCardState extends ConsumerState<AiDraftCard> {
 
   @override
   Widget build(BuildContext context) {
+    // A bank statement's summary is its own card.
+    if (aiContent(widget.message)['type'] == 'statement') {
+      return AiStatementCard(
+        message: widget.message,
+        decision: widget.decision,
+        latest: widget.latest,
+      );
+    }
     final draft = DraftCard.fromJson(aiContent(widget.message));
     final theme = Theme.of(context);
     final decided =

@@ -20,6 +20,8 @@ abstract final class JobSteps {
   static const apply = 'apply';
   static const payment = 'payment';
   static const message = 'message';
+  static const statementRead = 'statement_read';
+  static const statementRules = 'statement_rules';
 
   static String label(String key) => switch (key) {
     startOcr => "Starting the hub's OCR service",
@@ -33,6 +35,8 @@ abstract final class JobSteps {
     apply => 'Applying your answer',
     payment => 'Matching the payment',
     message => 'Reading your message',
+    statementRead => 'Reading the statement file',
+    statementRules => 'Sorting the statement rows',
     _ => key,
   };
 }
@@ -64,6 +68,8 @@ class StepTimings {
     JobSteps.translate => (20000, 3000),
     JobSteps.categories => (40000, 6000),
     JobSteps.choice => (25000, 0),
+    JobSteps.statementRead => (1500, 5),
+    JobSteps.statementRules => (2000, 25),
     _ => (1000, 0),
   };
 

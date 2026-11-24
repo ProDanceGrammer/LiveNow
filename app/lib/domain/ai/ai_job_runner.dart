@@ -57,6 +57,11 @@ import 'job_progress.dart';
 import 'receipt_extractor.dart';
 import 'receipt_row_builder.dart' show rebuildReceipt;
 import 'receipt_fx_rules.dart';
+import 'statement/statement_job.dart';
+import 'statement/statement_period.dart';
+import 'statement/statement_rows.dart';
+import 'statement/statement_table.dart';
+import 'ai_item_suggester.dart' show ItemSuggester;
 import 'sum_verifier.dart' show tenderFromAnswer;
 import 'transfer_builder.dart';
 import 'typed_expense.dart';
@@ -208,6 +213,15 @@ class AiJobRunner {
             .get();
     for (final j in jobs) {
       if (!AiJobKind.recordsBatch(j.kind)) continue;
+      if (j.kind == AiJobKind.statement) {
+        final s = await _stmtState(j);
+        if (s != null &&
+            ((await _pendingMessagesOf(j, s.handled)).isNotEmpty ||
+                (await _unappliedAnswersOf(j, s.applied)).isNotEmpty)) {
+          return j;
+        }
+        continue;
+      }
       final d = await _draftOf(j);
       if (d == null) continue;
       if ((await _pendingMessages(j, d)).isNotEmpty ||
@@ -374,7 +388,7 @@ class AiJobRunner {
           _reportStep(job, key, done: done, total: total, units: units);
 
   static String _stageOf(String key) => switch (key) {
-    JobSteps.ocr || JobSteps.lines => AiStage.reading,
+    JobSteps.ocr || JobSteps.lines || JobSteps.statementRead => AiStage.reading,
     JobSteps.checks => AiStage.checking,
     JobSteps.startOcr || JobSteps.startModel => AiStage.queued,
     _ => AiStage.matching,
@@ -400,6 +414,11 @@ class AiJobRunner {
       AiJobKind.receipt => const [JobStep(JobSteps.ocr), JobStep(JobSteps.lines), ...model],
       AiJobKind.screenshot => const [JobStep(JobSteps.ocr), JobStep(JobSteps.payment)],
       AiJobKind.bazaar => const [JobStep(JobSteps.lines), ...model],
+      AiJobKind.statement => const [
+        JobStep(JobSteps.statementRead),
+        JobStep(JobSteps.statementRules, units: 100),
+        JobStep(JobSteps.checks),
+      ],
       _ => const [
         JobStep(JobSteps.message),
         JobStep(JobSteps.translate, units: 2),
@@ -491,7 +510,8 @@ class AiJobRunner {
   Future<void> _start(AiJob job) async {
     final stage = job.kind == AiJobKind.receipt ||
             job.kind == AiJobKind.screenshot ||
-            job.kind == AiJobKind.photos
+            job.kind == AiJobKind.photos ||
+            job.kind == AiJobKind.statement
         ? AiStage.reading
         : AiStage.matching;
     await _setJob(job.id, state: AiJobState.running, stage: stage);
@@ -506,6 +526,8 @@ class AiJobRunner {
         await _startScreenshot(job);
       case AiJobKind.text:
         await _startText(job);
+      case AiJobKind.statement:
+        await _startStatement(job);
       default:
         throw AiJobFailure('Невідомий тип завдання: ${job.kind}.');
     }
@@ -724,6 +746,7 @@ class AiJobRunner {
   // ===========================================================================
 
   Future<void> _resume(AiJob job) async {
+    if (job.kind == AiJobKind.statement) return _resumeStatement(job);
     final d = await _draftOf(job);
     if (d == null) throw const AiJobFailure('Чернетку не знайдено.');
     await _setJob(job.id, state: AiJobState.running, stage: AiStage.matching);
@@ -1572,12 +1595,17 @@ class AiJobRunner {
   Future<List<({String key, Question question})>> _unappliedAnswers(
     AiJob job,
     DraftCard d,
+  ) => _unappliedAnswersOf(job, d.applied);
+
+  Future<List<({String key, Question question})>> _unappliedAnswersOf(
+    AiJob job,
+    List<String> applied,
   ) async {
     final out = <({String key, Question question})>[];
     for (final m in await _questionMessages(job)) {
       for (final q in _card(m).questions) {
         final key = '${m.id}:${q.id}';
-        if (q.answer != null && !d.applied.contains(key)) {
+        if (q.answer != null && !applied.contains(key)) {
           out.add((key: key, question: q));
         }
       }
@@ -1587,7 +1615,10 @@ class AiJobRunner {
 
   /// User messages of the job (Confirm / Reject and typed answers) that were
   /// not processed yet, oldest first.
-  Future<List<AiMessage>> _pendingMessages(AiJob job, DraftCard d) async {
+  Future<List<AiMessage>> _pendingMessages(AiJob job, DraftCard d) =>
+      _pendingMessagesOf(job, d.handled);
+
+  Future<List<AiMessage>> _pendingMessagesOf(AiJob job, List<String> handled) async {
     final payload = JobPayload.decode(job.payloadJson);
     final rows =
         await (db.select(db.aiMessagesTable)
@@ -1604,7 +1635,7 @@ class AiJobRunner {
             .get();
     return [
       for (final m in rows)
-        if (m.id != payload.messageId && !d.handled.contains(m.id)) m,
+        if (m.id != payload.messageId && !handled.contains(m.id)) m,
     ];
   }
 
@@ -1665,15 +1696,15 @@ class AiJobRunner {
   /// What a photo says when it is a bank screenshot (the amount charged in ₴
   /// and/or the bank's rate); null for a receipt. Without an OCR service the
   /// photos cannot be told apart, so each one counts as a receipt.
-  Future<({ScreenshotReading? reading, String rows})> _screenshotReading(
+  Future<({ScreenshotReading? reading, String rows, List<double> amounts})> _screenshotReading(
     AiBlob b, {
     required DateTime now,
   }) async {
     try {
       final read = await _readShot(base64Decode(b.data!), b.mime, now: now.toLocal());
-      return (reading: read.reading.hasAnything ? read.reading : null, rows: read.rows);
+      return (reading: read.reading.hasAnything ? read.reading : null, rows: read.rows, amounts: read.amounts);
     } on AiJobFailure {
-      return (reading: null, rows: '');
+      return (reading: null, rows: '', amounts: const <double>[]);
     }
   }
 
@@ -1712,6 +1743,7 @@ class AiJobRunner {
     }
     final receipts = <AiBlob>[];
     final receiptRows = <String>[];
+    final receiptAmounts = <List<double>>[];
     final shotBlobs = <AiBlob>[];
     final shots = <ScreenshotReading>[];
     for (var i = 0; i < blobs.length; i++) {
@@ -1722,6 +1754,7 @@ class AiJobRunner {
       if (reading == null) {
         receipts.add(b);
         receiptRows.add(read.rows);
+        receiptAmounts.add(read.amounts);
       } else {
         shotBlobs.add(b);
         shots.add(reading);
@@ -1733,7 +1766,7 @@ class AiJobRunner {
     final related = <int>[];
     final own = <int>[];
     for (var i = 0; i < shots.length; i++) {
-      (receipts.isNotEmpty && _fitsReceipt(shots[i], receiptRows) ? related : own).add(i);
+      (receipts.isNotEmpty && _fitsReceipt(shots[i], receiptAmounts) ? related : own).add(i);
     }
     final relatedShots = [for (final i in related) shots[i]];
     final relatedBlobs = [for (final i in related) shotBlobs[i]];
@@ -1830,18 +1863,25 @@ class AiJobRunner {
 
   /// A screenshot fits a receipt when its lira amount is one of the amounts OCR
   /// read on that receipt (the tolerance of [pickScreenshot]).
-  bool _fitsReceipt(ScreenshotReading shot, List<String> receiptRows) {
+  /// [receiptAmounts] holds the amounts of ALL rows of each receipt (the total
+  /// is printed far below the first rows).
+  bool _fitsReceipt(ScreenshotReading shot, List<List<double>> receiptAmounts) {
     final c = shot.countAmount;
     if (c == null) return false;
     final tol = c * 0.005 > 1.0 ? c * 0.005 : 1.0;
-    for (final rows in receiptRows) {
-      for (final m in RegExp(r'\d[\d.,]*\d|\d').allMatches(rows)) {
-        final v = parseAmountText(m.group(0)!);
-        if (v != null && (v - c).abs() <= tol) return true;
+    for (final amounts in receiptAmounts) {
+      for (final v in amounts) {
+        if ((v - c).abs() <= tol) return true;
       }
     }
     return false;
   }
+
+  /// Every amount printed anywhere in [text].
+  static List<double> _allAmounts(String text) => [
+    for (final m in RegExp(r'\d[\d.,]*\d|\d').allMatches(text))
+      ?parseAmountText(m.group(0)!),
+  ];
 
   /// What the message says about each of [shots]. The rules (amount, day, one
   /// generic text) first; message parts they could not place go to the model
@@ -2160,7 +2200,7 @@ class AiJobRunner {
   /// screen keeps that reading (one pass); anything else (a paper receipt) is read again
   /// with the default recogniser (Turkish letters) and that reading stands. A service
   /// without Ukrainian, or a failed Ukrainian pass, keeps today's single default read.
-  Future<({ScreenshotReading reading, String rows})> _readShot(
+  Future<({ScreenshotReading reading, String rows, List<double> amounts})> _readShot(
     Uint8List bytes,
     String mime, {
     required DateTime now,
@@ -2171,19 +2211,19 @@ class AiJobRunner {
         final uk = await _ocrRead(bytes, mime, lang: kOcrLangUkrainian);
         final ukReading = parseBankScreenshot(uk.text, now: now);
         if (ukReading.bankScreen || ukReading.hasAnything) {
-          return (reading: ukReading, rows: uk.rows);
+          return (reading: ukReading, rows: uk.rows, amounts: uk.amounts);
         }
       } on AiBadResponseException {
         // The Ukrainian pass failed: the default reading below stands.
       }
     }
     final read = await _ocrRead(bytes, mime);
-    return (reading: parseBankScreenshot(read.text, now: now), rows: read.rows);
+    return (reading: parseBankScreenshot(read.text, now: now), rows: read.rows, amounts: read.amounts);
   }
 
   /// The OCR text of a photo and its printed rows (tilt-corrected when the
   /// service gave word boxes), the latter for the model that reads the message.
-  Future<({String text, String rows})> _ocrRead(
+  Future<({String text, String rows, List<double> amounts})> _ocrRead(
     Uint8List bytes,
     String mime, {
     String? lang,
@@ -2192,12 +2232,13 @@ class AiJobRunner {
     if (client != null) {
       final r = await client.ocr(bytes, mime: mime, lang: lang);
       final rebuilt = r.words.isEmpty ? null : rebuildReceipt(r.words);
-      return (text: r.text, rows: _headRows(rebuilt?.text ?? r.text));
+      final full = rebuilt?.text ?? r.text;
+      return (text: r.text, rows: _headRows(full), amounts: _allAmounts(full));
     }
     final ex = extractor;
     if (ex is OcrLlmExtractor) {
       final text = (await ex.extractWithText(bytes, mime: mime)).ocrText;
-      return (text: text, rows: _headRows(text));
+      return (text: text, rows: _headRows(text), amounts: _allAmounts(text));
     }
     throw const AiJobFailure('Немає служби OCR для скріншота.');
   }
@@ -2549,10 +2590,310 @@ class AiJobRunner {
               ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
             .get();
     for (final j in jobs) {
+      if (j.kind == AiJobKind.statement) continue; // its summary is not a receipt
       final d = await _draftOf(j);
       if (d != null) return (job: j, draft: d);
     }
     return null;
+  }
+
+  // ===========================================================================
+  // Bank statement (a file): read -> rules -> questions -> ONE summary -> Confirm
+  // ===========================================================================
+
+  late final StatementPlanner _stmtPlanner = StatementPlanner(db, aliases: _aliases, rules: _rules);
+
+  /// The job's working state: the `state` key of its draft message.
+  Future<StatementState?> _stmtState(AiJob job) async {
+    final m = await _message(deriveId(job.id, 'draft'));
+    if (m == null) return null;
+    try {
+      final j = jsonDecode(m.contentJson);
+      if (j is Map && j['type'] == 'statement' && j['state'] is Map) {
+        return StatementState.fromJson(Map<String, dynamic>.from(j['state'] as Map));
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<String?> _accountName(String? id) async {
+    if (id == null) return null;
+    return (await (db.select(db.budgetAccountsTable)..where((t) => t.id.equals(id))).getSingleOrNull())?.name;
+  }
+
+  Future<void> _saveStatement(AiJob job, StatementState s, StatementPlan? plan, {String? resultBatch}) async {
+    final name = await _accountName(s.accountId);
+    await _putMessage(
+      deriveId(job.id, 'draft'),
+      job,
+      role: AiRole.assistant,
+      kind: AiMessageKind.draft,
+      body: statementBody(s, plan, accountName: name),
+      contentJson: jsonEncode(statementContent(s, plan, accountName: name, resultBatch: resultBatch)),
+    );
+  }
+
+  Future<void> _startStatement(AiJob job) async {
+    final existing = await _stmtState(job);
+    if (existing != null) {
+      // A previous attempt got this far (or the job was interrupted while writing).
+      await _stmtEvaluate(job, existing);
+      return;
+    }
+    final payload = JobPayload.decode(job.payloadJson);
+    final blobs = await _blobsOf(job, payload);
+    final first = blobs.where((b) => (b.data ?? '').isNotEmpty).firstOrNull;
+    if (first == null) {
+      throw const AiJobFailure('Файл виписки не знайдено: надішліть його ще раз.');
+    }
+    await _step(job, JobSteps.statementRead);
+    final fileName = _fileNameOf(await _message(payload.messageId ?? ''));
+    final List<List<String>> table;
+    try {
+      table = readStatementTable(base64Decode(first.data!), fileName: fileName);
+    } on StatementFormatException catch (e) {
+      await _replyAndFinish(job, 'Не вдалося прочитати виписку «$fileName»: ${e.message}');
+      await _releasePhotos(blobs);
+      return;
+    }
+    final parse = parseStatementRows(table);
+    final cols = parse.columns;
+    if (cols == null || !cols.usable) {
+      final found = cols == null
+          ? [for (final c in (table.firstOrNull ?? const <String>[])) if (c.isNotEmpty) c]
+          : cols.header.where((h) => h.isNotEmpty).toList();
+      final missing = cols == null
+          ? 'рядок із назвами колонок'
+          : [
+              if (!cols.hasWhen) 'дата',
+              if (!cols.hasAmount) 'сума',
+            ].join(', ');
+      await _replyAndFinish(
+        job,
+        'Не вдалося зрозуміти колонки виписки «$fileName». '
+        'Знайдені заголовки: ${found.isEmpty ? 'жодного' : found.take(20).join(' | ')}. '
+        'Не знайдено: $missing. Надішліть виписку з колонками «Дата» і «Сума» (CSV або XLSX).',
+      );
+      await _releasePhotos(blobs);
+      return;
+    }
+    final now = await _messageTime(job, payload);
+    final period = periodFromMessage(payload.text, now.toLocal());
+    final rows = rowsInPeriod(parse.rows, period);
+    if (rows.isEmpty) {
+      await _replyAndFinish(
+        job,
+        parse.rows.isEmpty
+            ? 'У виписці «$fileName» не знайдено жодної операції.'
+            : 'У виписці «$fileName» немає операцій за вказаний період (${parse.rows.length} оп. поза ним).',
+      );
+      await _releasePhotos(blobs);
+      return;
+    }
+    final cardCurrency = cols.cardCurrency ?? rows.first.cardCurrency;
+    final accountId = await statementAccountFor(
+      db,
+      _rules,
+      signature: cols.signature,
+      cardCurrency: cardCurrency,
+      caption: payload.text,
+    );
+    final state = StatementState(
+      rows: rows,
+      fileName: fileName,
+      cardCurrency: cardCurrency,
+      signature: cols.signature,
+      from: period?.from,
+      to: period?.to,
+      skipped: parse.skipped.length,
+      warnings: [
+        ...parse.warnings,
+        if (parse.skipped.isNotEmpty) 'Не прочитано рядків: ${parse.skipped.length}.',
+      ],
+      accountId: accountId,
+    );
+    // Saved BEFORE the bytes are dropped and before any model call: a restart
+    // continues from this state, the file is never read twice.
+    await _saveStatement(job, state, null);
+    await _releasePhotos(blobs);
+    await _stmtEvaluate(job, state);
+  }
+
+  static String _fileNameOf(AiMessage? m) {
+    try {
+      final j = jsonDecode(m?.contentJson ?? '{}');
+      final n = j is Map ? j['file_name']?.toString() : null;
+      if (n != null && n.trim().isNotEmpty) return n.trim();
+    } catch (_) {}
+    return 'виписка';
+  }
+
+  /// Plans the rows, runs the model step once when merchants are still open,
+  /// saves the summary and chooses the next state: ask, wait for Confirm, write.
+  Future<void> _stmtEvaluate(AiJob job, StatementState s) async {
+    await _step(job, JobSteps.statementRules, units: s.rows.length);
+    var plan = await _stmtPlanner.plan(s, job.id);
+    if (plan.modelCandidates.isNotEmpty && !s.llmDone) {
+      s.llmDone = true;
+      final client = llm;
+      if (client != null) {
+        final cats = await db.select(db.budgetCategoriesTable).get();
+        final merchants = plan.modelCandidates.entries.take(40).toList();
+        // Saved first: a refused model server restarts this step, not the file.
+        s.llmDone = false;
+        await _saveStatement(job, s, null);
+        final picks = await ItemSuggester(llm: client, resolver: CategoryResolver(db, aliases: _aliases)).suggest(
+          items: [for (var i = 0; i < merchants.length; i++) (index: i, printed: merchants[i].value)],
+          cats: cats,
+          translate: false,
+          onStep: _reporterFor(job),
+        );
+        s.llmDone = true;
+        for (var i = 0; i < merchants.length; i++) {
+          final p = picks[i];
+          if (p != null && p.categoryId != null && p.confidence >= kStatementModelConfidence) {
+            s.llm[merchants[i].key] = p.categoryId!;
+          }
+        }
+        plan = await _stmtPlanner.plan(s, job.id);
+      }
+    }
+    await _step(job, JobSteps.checks);
+    final open = plan.questions.isNotEmpty;
+    if (!open && plan.entries.isEmpty) {
+      // Everything is already recorded (or cancelled / skipped): nothing to confirm.
+      s.stage = 'done';
+      s.confirmed = false;
+      await _saveStatement(job, s, plan);
+      await _putMessage(
+        deriveId(job.id, 'reply'),
+        job,
+        role: AiRole.assistant,
+        kind: AiMessageKind.text,
+        body: 'У виписці «${s.fileName}» немає нового для запису: '
+            'уже записано ${plan.duplicates.length} оп., '
+            'скасовано або пропущено ${plan.cancelled.length}.',
+      );
+      await _setJob(job.id, state: AiJobState.done, stage: AiStage.done, error: null);
+      await _status(job, AiStage.done);
+      return;
+    }
+    s.stage = open ? 'asking' : 'ready';
+    if (!open && s.confirmed) {
+      await _saveStatement(job, s, plan);
+      await _stmtCommit(job, s, plan);
+      return;
+    }
+    s.confirmed = false;
+    await _saveStatement(job, s, plan);
+    await _syncQuestions(job, plan.questions);
+    await _wait(job, open);
+  }
+
+  Future<void> _resumeStatement(AiJob job) async {
+    final s = await _stmtState(job);
+    if (s == null) throw const AiJobFailure('Зведення виписки не знайдено.');
+    await _setJob(job.id, state: AiJobState.running, stage: AiStage.matching);
+    _progress?.plan(_stepsFor(job, resume: true));
+    await _step(job, JobSteps.apply);
+
+    var confirmedNow = false;
+    for (final m in await _pendingMessagesOf(job, s.handled)) {
+      s.handled.add(m.id);
+      if (m.kind != AiMessageKind.confirm) continue;
+      final decision = _decision(m);
+      if (decision == null) continue;
+      if (!decision.confirm) {
+        await _cancelStatement(job, s, s.batchId != null
+            ? 'Відхилено. Скасуйте записане кнопкою Undo.'
+            : 'Відхилено: нічого не записано.');
+        return;
+      }
+      confirmedNow = true;
+    }
+    for (final entry in await _unappliedAnswersOf(job, s.applied)) {
+      s.applied.add(entry.key);
+      await applyStatementAnswer(db, s, entry.question);
+    }
+    // A Confirm counts only for a summary without open questions.
+    if (confirmedNow && s.stage == 'ready') {
+      s.confirmed = true;
+    } else if (confirmedNow) {
+      await _putMessage(
+        deriveId(job.id, 'note', s.handled.length),
+        job,
+        role: AiRole.assistant,
+        kind: AiMessageKind.text,
+        body: 'Спочатку дайте відповідь на питання, потім підтвердіть зведення.',
+      );
+    }
+    await _stmtEvaluate(job, s);
+  }
+
+  Future<void> _cancelStatement(AiJob job, StatementState s, String text) async {
+    s.stage = 'done';
+    s.confirmed = false;
+    await _saveStatement(job, s, null);
+    await _putMessage(
+      deriveId(job.id, 'note', 9999),
+      job,
+      role: AiRole.assistant,
+      kind: AiMessageKind.text,
+      body: text,
+    );
+    await _setJob(job.id, state: AiJobState.done, stage: AiStage.done, error: null);
+    await _status(job, AiStage.done);
+  }
+
+  /// Writes the whole summary in ONE transaction / ONE undoable batch.
+  Future<void> _stmtCommit(AiJob job, StatementState s, StatementPlan plan) async {
+    await _setJob(job.id, state: AiJobState.committing, stage: AiStage.saving);
+    await _status(job, AiStage.saving);
+    final payload = JobPayload.decode(job.payloadJson);
+    final r = await StatementWriter(db, _budget, _batches, _rules, _aliases).write(
+      job: job,
+      messageId: payload.messageId,
+      state: s,
+      plan: plan,
+    );
+    if (r.failure != null) {
+      s.confirmed = false;
+      await _saveStatement(job, s, plan);
+      await _putMessage(
+        deriveId(job.id, 'error-commit'),
+        job,
+        role: AiRole.assistant,
+        kind: AiMessageKind.error,
+        body: 'Нічого не записано.\n${r.failure}',
+      );
+      await _wait(job, false);
+      return;
+    }
+    s.stage = 'done';
+    s.batchId = r.batchId;
+    await _saveStatement(job, s, plan, resultBatch: r.batchId);
+    await settings.incrementConfirmed();
+    final singles = r.transactions.length - r.transfers * 2;
+    await _putMessage(
+      deriveId(job.id, 'result'),
+      job,
+      role: AiRole.assistant,
+      kind: AiMessageKind.result,
+      body: 'Записано з виписки «${s.fileName}»: $singles оп.'
+          '${r.transfers > 0 ? ', переказів ${r.transfers}' : ''}'
+          '${plan.duplicates.isEmpty ? '' : '; уже було записано ${plan.duplicates.length}'}'
+          '${plan.cancelled.isEmpty ? '' : '; пропущено ${plan.cancelled.length}'}'
+          ' (пакет ${r.batchId!.substring(0, 8)}). Undo скасує все разом.',
+      contentJson: jsonEncode({
+        'v': 1,
+        'batch_id': r.batchId,
+        'transactions': r.transactions,
+        'lines': const [],
+        'open': 0,
+      }),
+    );
+    await _setJob(job.id, state: AiJobState.done, stage: AiStage.done, error: null);
+    await _status(job, AiStage.done);
   }
 
   Future<void> _correct(AiJob me, String text, AiJob target, DraftCard d) async {

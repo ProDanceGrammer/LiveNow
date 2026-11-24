@@ -22,9 +22,13 @@ import 'ai_threads_screen.dart' show AiHubRequired;
 
 /// One conversation with the assistant.
 class AiChatScreen extends ConsumerStatefulWidget {
-  const AiChatScreen({super.key, required this.threadId});
+  const AiChatScreen({super.key, required this.threadId, this.initialFile});
 
   final String threadId;
+
+  /// A statement file that opened this chat (shared from another app): it
+  /// waits in the composer like a picked one.
+  final StatementPick? initialFile;
 
   @override
   ConsumerState<AiChatScreen> createState() => _AiChatScreenState();
@@ -40,6 +44,10 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   /// with the typed text, as ONE message.
   final List<PreparedPhoto> _pending = [];
 
+  /// A statement file picked or pasted but not sent yet (only one). It goes
+  /// out as its own message after the photos.
+  StatementPick? _file;
+
   /// Messages loaded by "load older" (oldest first), kept outside the stream.
   List<AiMessage> _older = const [];
   bool _loadingOlder = false;
@@ -48,6 +56,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   @override
   void initState() {
     super.initState();
+    _file = widget.initialFile;
     _scroll.addListener(() {
       if (_scroll.hasClients &&
           _scroll.position.pixels >= _scroll.position.maxScrollExtent - 80) {
@@ -68,19 +77,42 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   /// no photo is an ordinary text message).
   Future<void> _send() async {
     final text = _input.text;
-    if ((text.trim().isEmpty && _pending.isEmpty) || _sending) return;
+    if ((text.trim().isEmpty && _pending.isEmpty && _file == null) ||
+        _sending) {
+      return;
+    }
     final overlay = rootOverlayOf(context);
     final service = ref.read(aiChatServiceProvider);
     final photos = List<PreparedPhoto>.of(_pending);
+    final file = _file;
     setState(() => _sending = true);
     try {
-      if (photos.isEmpty) {
-        await service.sendText(widget.threadId, text);
-      } else {
+      if (photos.isNotEmpty) {
+        // Photos first (with the text), then the statement on its own.
         await service.sendPhotos(widget.threadId, photos, caption: text);
+        _input.clear();
+        _pending.clear();
+        if (file != null) {
+          await service.sendStatement(
+            widget.threadId,
+            fileName: file.name,
+            bytes: file.bytes,
+          );
+          _file = null;
+        }
+      } else if (file != null) {
+        await service.sendStatement(
+          widget.threadId,
+          fileName: file.name,
+          bytes: file.bytes,
+          caption: text,
+        );
+        _input.clear();
+        _file = null;
+      } else {
+        await service.sendText(widget.threadId, text);
+        _input.clear();
       }
-      _input.clear();
-      _pending.clear();
     } catch (e) {
       showInfoToast(overlay, '$e');
     } finally {
@@ -110,10 +142,65 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
       photos = await clip.read();
     } catch (_) {}
     if (!mounted) return;
-    if (photos.isEmpty) {
+    if (photos.isNotEmpty) {
+      await _addPhotos(() async => photos);
+      return;
+    }
+    // No image: a statement file, else plain text.
+    StatementPick? file;
+    try {
+      file = await ref.read(aiClipboardStatementProvider).read();
+    } catch (_) {}
+    if (!mounted) return;
+    if (file == null) {
       editable?.pasteText(SelectionChangedCause.keyboard);
     } else {
-      await _addPhotos(() async => photos);
+      _setFile(file);
+    }
+  }
+
+  /// Picks one statement file (CSV / XLSX / XLS); it waits until Send.
+  Future<void> _attachStatement() async {
+    if (_sending) return;
+    final overlay = rootOverlayOf(context);
+    final pick = ref.read(aiStatementPickerProvider);
+    try {
+      final file = await pick();
+      if (file != null && mounted) _setFile(file);
+    } on FormatException catch (e) {
+      showInfoToast(overlay, e.message);
+    } catch (e) {
+      showInfoToast(overlay, '$e');
+    }
+  }
+
+  Future<void> _pasteStatement() async {
+    final overlay = rootOverlayOf(context);
+    try {
+      final file = await ref.read(aiClipboardStatementProvider).read();
+      if (file != null && mounted) _setFile(file);
+    } on FormatException catch (e) {
+      showInfoToast(overlay, e.message);
+    } catch (e) {
+      showInfoToast(overlay, '$e');
+    }
+  }
+
+  /// Takes [file] as the pending one (a new file replaces the old one) after
+  /// the same checks Send makes, so a bad file is refused right away.
+  void _setFile(StatementPick file) {
+    final overlay = rootOverlayOf(context);
+    if (file.bytes.isEmpty) {
+      showInfoToast(overlay, 'The file is empty.');
+    } else if (file.bytes.length > AiChatService.maxStatementBytes) {
+      showInfoToast(overlay, 'The file is too large (more than 5 MB).');
+    } else if (AiChatService.statementMime(file.name, file.bytes) == null) {
+      showInfoToast(
+        overlay,
+        'Only CSV, XLSX or XLS statement files can be sent.',
+      );
+    } else {
+      setState(() => _file = file);
     }
   }
 
@@ -357,11 +444,26 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 /// (every copied photo is pasted).
   Widget _contextMenu(BuildContext context, EditableTextState state) {
     final clip = ref.read(aiClipboardPhotosProvider);
-    return FutureBuilder<bool>(
-      future: clip.has().then<bool>((b) => b, onError: (_) => false),
+    final fileClip = ref.read(aiClipboardStatementProvider);
+    return FutureBuilder<List<bool>>(
+      future: Future.wait([
+        clip.has().then<bool>((b) => b, onError: (_) => false),
+        fileClip.has().then<bool>((b) => b, onError: (_) => false),
+      ]),
       builder: (context, snap) {
         final items = [...state.contextMenuButtonItems];
-        if (snap.data == true) {
+        if (snap.data?[1] == true) {
+          items.add(
+            ContextMenuButtonItem(
+              label: 'Paste file',
+              onPressed: () {
+                state.hideToolbar();
+                _pasteStatement();
+              },
+            ),
+          );
+        }
+        if (snap.data?[0] == true) {
           items.add(
             ContextMenuButtonItem(
               label: 'Paste photo',
@@ -392,6 +494,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_file != null) _pendingFile(_file!),
                 if (_pending.isNotEmpty) _pendingStrip(),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -516,31 +619,74 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     );
   }
 
+  /// The statement file waiting for Send, as a chip with a remove button.
+  Widget _pendingFile(StatementPick file) {
+    final sheet = !file.name.toLowerCase().endsWith('.csv');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: InputChip(
+        key: const ValueKey('ai-chat-pending-file-0'),
+        avatar: Icon(
+          sheet ? Icons.table_chart_outlined : Icons.description_outlined,
+          size: 18,
+        ),
+        label: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 280),
+          child: Text(file.name, overflow: TextOverflow.ellipsis),
+        ),
+        deleteIcon: const Icon(
+          Icons.close,
+          size: 16,
+          key: ValueKey('ai-chat-pending-file-remove-0'),
+        ),
+        onDeleted: _sending ? null : () => setState(() => _file = null),
+      ),
+    );
+  }
+
   Widget _attachButton() {
     if (aiHasCamera) {
-      return PopupMenuButton<AiPhotoSource>(
+      return PopupMenuButton<String>(
         key: const ValueKey('ai-chat-attach'),
         icon: const Icon(Icons.add_a_photo_outlined),
-        tooltip: 'Attach a photo',
+        tooltip: 'Attach a photo or a statement file',
         enabled: !_sending,
-        onSelected: _attach,
+        onSelected: (v) {
+          if (v == 'statement') {
+            _attachStatement();
+          } else {
+            _attach(
+              v == 'camera' ? AiPhotoSource.camera : AiPhotoSource.gallery,
+            );
+          }
+        },
         itemBuilder: (_) => const [
+          PopupMenuItem(value: 'camera', child: Text('Take a photo')),
+          PopupMenuItem(value: 'gallery', child: Text('From gallery')),
           PopupMenuItem(
-            value: AiPhotoSource.camera,
-            child: Text('Take a photo'),
-          ),
-          PopupMenuItem(
-            value: AiPhotoSource.gallery,
-            child: Text('From gallery'),
+            key: ValueKey('ai-chat-attach-statement'),
+            value: 'statement',
+            child: Text('Statement file (CSV/XLSX)'),
           ),
         ],
       );
     }
-    return IconButton(
-      key: const ValueKey('ai-chat-attach'),
-      tooltip: 'Attach an image file',
-      onPressed: _sending ? null : () => _attach(AiPhotoSource.file),
-      icon: const Icon(Icons.attach_file),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: const ValueKey('ai-chat-attach'),
+          tooltip: 'Attach an image file',
+          onPressed: _sending ? null : () => _attach(AiPhotoSource.file),
+          icon: const Icon(Icons.attach_file),
+        ),
+        IconButton(
+          key: const ValueKey('ai-chat-attach-statement'),
+          tooltip: 'Statement file (CSV/XLSX)',
+          onPressed: _sending ? null : _attachStatement,
+          icon: const Icon(Icons.table_chart_outlined),
+        ),
+      ],
     );
   }
 }

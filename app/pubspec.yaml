@@ -48,6 +48,9 @@ dependencies:
   livenow_clipboard:
     path: packages/livenow_clipboard
   image: ^4.10.1
+  # Bank statement import (XLSX = zip of XML); same versions the lock already had.
+  archive: 4.3.0
+  xml: 7.0.1
   appflowy_editor:
     git:
       url: https://github.com/AppFlowy-IO/appflowy-editor.git

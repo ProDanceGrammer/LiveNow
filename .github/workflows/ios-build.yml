@@ -62,6 +62,20 @@ jobs:
           # for everything else (links, images): no NSAllowsArbitraryLoads.
           $B -c "Add :NSAppTransportSecurity dict" $PLIST
           $B -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" $PLIST
+          # Bank statements (CSV / XLSX / XLS) can be shared or opened in
+          # LiveNow from Files, Mail, banking apps: the plugin copies the file
+          # (LSSupportsOpeningDocumentsInPlace false = the system hands over a
+          # copy) and the chat picker asks which chat gets it.
+          $B -c "Add :LSSupportsOpeningDocumentsInPlace bool false" $PLIST
+          $B -c "Add :CFBundleDocumentTypes array" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0 dict" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:CFBundleTypeName string 'Bank statement'" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:CFBundleTypeRole string Viewer" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:LSHandlerRank string Alternate" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes array" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:0 string public.comma-separated-values-text" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:1 string org.openxmlformats.spreadsheetml.sheet" $PLIST
+          $B -c "Add :CFBundleDocumentTypes:0:LSItemContentTypes:2 string com.microsoft.excel.xls" $PLIST
 
       # flutter_local_notifications does NOT set itself as the notification
       # centre's delegate on iOS: without this line a tap on a reminder never

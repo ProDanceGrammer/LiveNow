@@ -136,7 +136,10 @@ ParsedGrowthCsv parseGrowthDirectionsCsv(String text) {
 
 /// Minimal RFC 4180 reader: optional BOM, CRLF or LF rows, quoted cells with
 /// embedded commas, newlines and doubled quotes.
-List<List<String>> parseCsv(String input) {
+List<List<String>> parseCsv(String input) => parseDelimited(input);
+
+/// [parseCsv] with another cell separator (`;` or a tab).
+List<List<String>> parseDelimited(String input, {String separator = ','}) {
   final text = input.startsWith('﻿') ? input.substring(1) : input;
   final rows = <List<String>>[];
   var row = <String>[];
@@ -169,7 +172,7 @@ List<List<String>> parseCsv(String input) {
       }
     } else if (c == '"') {
       inQuotes = true;
-    } else if (c == ',') {
+    } else if (c == separator) {
       endField();
     } else if (c == '\n') {
       endRow();

@@ -26,6 +26,8 @@ import '../search_targets.dart';
 import '../sync_providers.dart';
 import '../text_tool_access.dart';
 import '../widgets/instant_rail.dart';
+import '../ai_ui_providers.dart' show StatementPick, incomingStatementProvider;
+import '../widgets/ai_incoming_file.dart';
 import '../widgets/assistant_button.dart';
 import '../widgets/sync_status_button.dart';
 import 'actions_section.dart';
@@ -73,6 +75,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   void initState() {
     super.initState();
     ref.read(searchTargetsProvider).fallbackScope = _searchScope;
+    _listenIncomingFile();
     // Sync starts with the app (the PC opens its server when a phone is
     // paired, a phone syncs). Never under `flutter test`: no sockets there.
     if (!Platform.environment.containsKey('FLUTTER_TEST')) {
@@ -106,6 +109,21 @@ class _HomeShellState extends ConsumerState<HomeShell>
         fireImmediately: true,
       );
     }
+  }
+
+  /// A bank statement opened in LiveNow from another app (iOS): ask which
+  /// chat gets it. Other platforms never emit.
+  void _listenIncomingFile() {
+    ref.listenManual<AsyncValue<StatementPick>>(incomingStatementProvider, (
+      _,
+      next,
+    ) {
+      final file = next.asData?.value;
+      if (file == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) showIncomingFilePicker(context, ref, file);
+      });
+    });
   }
 
   @override

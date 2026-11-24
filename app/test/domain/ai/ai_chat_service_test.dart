@@ -552,4 +552,81 @@ void main() {
       },
     );
   });
+
+  group('sendStatement', () {
+    final csv = Uint8List.fromList(utf8.encode('Date;Amount\n01.01.2026;-10\n'));
+    final xlsx = Uint8List.fromList([0x50, 0x4B, 0x03, 0x04, 1, 2, 3]);
+
+    test('writes one message, one blob with its mime and one statement job',
+        () async {
+      final r = await chat.sendStatement(
+        thread,
+        fileName: 'march.csv',
+        bytes: csv,
+        caption: 'card 6141',
+      );
+      final m = (await messages()).single;
+      expect(m.id, r.messageId);
+      expect(m.kind, AiMessageKind.photo);
+      expect(m.body, 'card 6141');
+      final content = jsonDecode(m.contentJson) as Map<String, dynamic>;
+      expect(content['kind'], AiJobKind.statement);
+      expect(content['file_name'], 'march.csv');
+      expect(content['size'], csv.length);
+      final blob = (await db.select(db.aiBlobsTable).get()).single;
+      expect(blob.kind, AiJobKind.statement);
+      expect(blob.mime, 'text/csv');
+      expect(base64Decode(blob.data!), csv);
+      expect(blob.width, isNull);
+      expect(content['blob_ids'], [blob.id]);
+      final job = (await jobs()).single;
+      expect(job.kind, AiJobKind.statement);
+      expect(job.id, r.jobId);
+      expect(job.payloadJson, contains('card 6141'));
+    });
+
+    test('xlsx needs a zip, xls accepts OLE2, HTML and text', () async {
+      await chat.sendStatement(thread, fileName: 'a.XLSX', bytes: xlsx);
+      await chat.sendStatement(
+        thread,
+        fileName: 'b.xls',
+        bytes: Uint8List.fromList([0xD0, 0xCF, 0x11, 0xE0, 0, 0]),
+      );
+      await chat.sendStatement(
+        thread,
+        fileName: 'c.xls',
+        bytes: Uint8List.fromList(utf8.encode('<html><table></table></html>')),
+      );
+      final mimes = (await db.select(db.aiBlobsTable).get())
+          .map((b) => b.mime)
+          .toSet();
+      expect(mimes, {
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+      });
+    });
+
+    test('refuses empty, too big, wrong extension and wrong content', () async {
+      Future<void> bad(String name, Uint8List bytes) => expectLater(
+        chat.sendStatement(thread, fileName: name, bytes: bytes),
+        throwsA(isA<AiChatException>()),
+      );
+      await bad('a.csv', Uint8List(0));
+      await bad(
+        'a.csv',
+        Uint8List(AiChatService.maxStatementBytes + 1)..fillRange(0, 10, 65),
+      );
+      await bad('a.pdf', csv);
+      await bad('a', csv);
+      await bad('a.xlsx', csv);
+      await bad('a.csv', xlsx);
+      await bad(
+        'a.csv',
+        Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+      );
+      await bad('a.csv', Uint8List.fromList([65, 0, 66, 0]));
+      expect(await messages(), isEmpty);
+      expect(await jobs(), isEmpty);
+    });
+  });
 }

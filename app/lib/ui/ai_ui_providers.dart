@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
 
@@ -12,6 +13,7 @@ import 'package:pasteboard/pasteboard.dart';
 
 import '../core/capped_read.dart';
 import '../data/database.dart';
+import '../domain/ai/ai_chat_service.dart' show AiChatService;
 import '../domain/ai/ai_protocol.dart';
 import '../domain/ai/photo_prep.dart';
 import 'providers.dart';
@@ -160,6 +162,124 @@ Future<List<Uint8List>> _clipboardRead() async {
   final one = await Pasteboard.image;
   return one == null ? const [] : [one];
 }
+
+// ---- statement files (CSV / XLSX / XLS) ------------------------------------
+
+/// A statement file picked, pasted or opened from another app.
+typedef StatementPick = ({String name, Uint8List bytes});
+
+/// Asks for ONE statement file (null = cancelled). A provider so tests replace
+/// the native dialog.
+final aiStatementPickerProvider =
+    Provider<Future<StatementPick?> Function()>((ref) => () async {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'Bank statement',
+            extensions: ['csv', 'xlsx', 'xls'],
+            uniformTypeIdentifiers: [
+              'public.comma-separated-values-text',
+              'org.openxmlformats.spreadsheetml.sheet',
+              'com.microsoft.excel.xls',
+            ],
+          ),
+        ],
+      );
+      if (file == null) return null;
+      return (
+        name: file.name,
+        bytes: await readBytesCapped(
+          file,
+          maxBytes: AiChatService.maxStatementBytes,
+        ),
+      );
+    });
+
+/// A statement file on the clipboard. [has] is the cheap check for the "Paste
+/// file" menu item; [read] returns the file (null = none). Tests replace it.
+class ClipboardStatement {
+  const ClipboardStatement({required this.has, required this.read});
+  final Future<bool> Function() has;
+  final Future<StatementPick?> Function() read;
+}
+
+final aiClipboardStatementProvider = Provider<ClipboardStatement>(
+  (ref) => const ClipboardStatement(
+    has: _clipboardHasStatement,
+    read: _clipboardReadStatement,
+  ),
+);
+
+bool isStatementPath(String path) {
+  final dot = path.lastIndexOf('.');
+  if (dot < 0) return false;
+  return const {'.csv', '.xlsx', '.xls'}.contains(
+    path.substring(dot).toLowerCase(),
+  );
+}
+
+Future<bool> _clipboardHasStatement() async {
+  if (Platform.isIOS) {
+    try {
+      return await LivenowClipboard.hasFiles();
+    } on MissingPluginException {
+      return false;
+    }
+  }
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    return (await Pasteboard.files()).any(isStatementPath);
+  }
+  return false;
+}
+
+Future<StatementPick?> _clipboardReadStatement() async {
+  if (Platform.isIOS) {
+    try {
+      final all = await LivenowClipboard.files();
+      return all.isEmpty ? null : all.first;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    final paths = (await Pasteboard.files()).where(isStatementPath).toList();
+    if (paths.isEmpty) return null;
+    final file = XFile(paths.first);
+    return (
+      name: file.name,
+      bytes: await readBytesCapped(
+        file,
+        maxBytes: AiChatService.maxStatementBytes,
+      ),
+    );
+  }
+  return null;
+}
+
+/// Files another app opens in LiveNow (iOS share sheet / "Open in"): one event
+/// per file. On start the file that launched the app is fetched once. Other
+/// platforms never emit. Tests override this provider with their own stream.
+final incomingStatementProvider = StreamProvider<StatementPick>((ref) {
+  if (!Platform.isIOS) return const Stream<StatementPick>.empty();
+  final out = StreamController<StatementPick>();
+  Future<void> take() async {
+    try {
+      final f = await LivenowClipboard.takeIncomingFile();
+      if (f != null && !out.isClosed) out.add(f);
+    } catch (_) {}
+  }
+
+  StreamSubscription<void>? sub;
+  try {
+    sub = LivenowClipboard.onIncomingFile.listen((_) => take());
+  } catch (_) {}
+  take();
+  ref.onDispose(() {
+    sub?.cancel();
+    out.close();
+  });
+  return out.stream;
+});
 
 /// Resizes a picked photo (CPU heavy, so off the UI isolate by default). Tests
 /// replace it with a synchronous function.

@@ -316,6 +316,61 @@ void main() {
     expect(find.byKey(const ValueKey('ai-photo-viewer')), findsOneWidget);
   });
 
+  uiTest('the photo viewer pages through all photos of a message', (
+    tester,
+  ) async {
+    await mount(
+      tester,
+      AiChatScreenForTest.of(() => thread),
+      overrides: [
+        aiPhotoPickerProvider.overrideWithValue(
+          (s) async => [
+            for (var i = 0; i < 3; i++) Uint8List.fromList([i, 2, 3, 4]),
+          ],
+        ),
+        aiPhotoPrepProvider.overrideWithValue(
+          (b) async => (bytes: b, width: 10, height: 20),
+        ),
+      ],
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-chat-attach')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('ai-chat-send')));
+    await settle(tester);
+    final msgId = (await tester.runAsync(
+      () async => (await db.select(db.aiMessagesTable).getSingle()).id,
+    ))!;
+
+    Finder k(String key) => find.byKey(ValueKey(key));
+    Future<void> tapKey(String key) async {
+      await tester.tap(k(key));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(k('ai-photo-open-$msgId-1'));
+    await tester.pumpAndSettle();
+    expect(k('ai-photo-viewer'), findsOneWidget);
+    expect(find.text('2 / 3'), findsOneWidget);
+    expect(k('ai-photo-prev'), findsOneWidget);
+    expect(k('ai-photo-next'), findsOneWidget);
+
+    await tapKey('ai-photo-next');
+    expect(find.text('3 / 3'), findsOneWidget);
+    expect(k('ai-photo-next'), findsNothing);
+    await tapKey('ai-photo-prev');
+    await tapKey('ai-photo-prev');
+    expect(find.text('1 / 3'), findsOneWidget);
+    expect(k('ai-photo-prev'), findsNothing);
+
+    // A horizontal swipe changes the page too.
+    await tester.fling(find.byType(PageView), const Offset(-600, 0), 2000);
+    await tester.pumpAndSettle();
+    expect(find.text('2 / 3'), findsOneWidget);
+
+    await tapKey('ai-photo-close');
+    expect(k('ai-photo-viewer'), findsNothing);
+  });
+
   uiTest('a pending photo can be removed, and photos alone can be sent', (
     tester,
   ) async {
